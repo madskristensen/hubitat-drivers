@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.5
+ * Version: 0.4.7
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.7 — 2026-05-16 — Drop the non-favorite name list from the debug catalog-load log. Mads has 1457 non-favorite patterns; even at debug level, dumping all names was multi-KB. Log now shows just the count. Non-favorite names are still surfaced (capped at 20) on miss-path warns.
  *   0.4.6 — 2026-05-16 — Log hygiene + favorites-only UI/state: stop dumping the full preset list on every named setEffect call (only on miss, warn level, capped at 20); `lightEffects` UI dropdown now shows favorites only (curated set marked in the Gemstone app); `state.effectCatalog` and `state.effectPatterns` cache favorites only — non-favorites still resolve by name via on-demand catalog lookup, but no longer clog the device State Variables panel. Existing installs prune non-favorite state entries on next driver update.
  *   0.4.5 — 2026-05-16 — Fix color byte order: Gemstone wire format is ABGR (A, B, G, R) not ARGB. v0.4.4 packed bytes as ARGB which caused red to render as blue, green correctly, blue as red. Swap r/b byte positions in hubitatHueSatToArgb and kelvinToArgb; reverse the same in gemstoneArgbToHubitatColor.
  *   0.4.4 — 2026-05-16 — Force ARGB color values to positive Long (Gemstone API requires unsigned 32-bit range [0, 4294967295]; v0.4.2's (0xFF << 24) produced a negative signed-int which failed validation). hubitatHueSatToArgb and kelvinToArgb now use long arithmetic with 0xFFL literals and return Long. gemstoneArgbToHubitatColor accepts Number/Long for symmetry.
@@ -32,7 +33,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.6"
+@Field static final String DRIVER_VERSION = "0.4.7"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -52,7 +53,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.6"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.7"
 
 metadata {
     definition(
@@ -1452,7 +1453,7 @@ private void finalizeEffectCatalogRefresh() {
     Map effectPatterns = [:]
     Map effectIndex = [:]
     Map lightEffects = [:]
-    List otherNames = []
+    Integer otherCount = 0
     Integer nextIndex = 0
 
     favorites.each { displayName, patternId ->
@@ -1467,7 +1468,7 @@ private void finalizeEffectCatalogRefresh() {
     otherEntries.each { entry ->
         String displayName = safeString(entry.displayName)
         if (displayName) {
-            otherNames << displayName
+            otherCount++
         }
     }
 
@@ -1482,7 +1483,7 @@ private void finalizeEffectCatalogRefresh() {
 
     Integer count = effectCatalog.size()
     log.debug "[Gemstone] Loaded ${count} effects. Favorites (${favoriteNames.size()}): ${favoriteNames ? favoriteNames.join(', ') : '(none)'}"
-    log.debug "[Gemstone] Other patterns (${otherNames.size()}): ${otherNames ? otherNames.join(', ') : '(none)'}"
+    log.debug "[Gemstone] Other patterns: ${otherCount} non-favorite patterns available by name."
 
     String currentPatternId = safeString(state.lastPattern?.id ?: state.lastPattern?.patternId)
     if (currentPatternId) {
