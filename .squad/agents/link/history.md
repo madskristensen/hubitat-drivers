@@ -5,6 +5,44 @@
 - **Stack:** Markdown, JSON (HPM manifests), community documentation patterns
 - **Created:** 2026-05-16
 
+## 2026-05-17T13:21:30-07:00 — Touchstone v0.1.5 added to root README (First Public Release)
+
+**Collaborators:** Mads (prep for v0.1.5 first public release), Link (root README update)
+
+### Scope
+
+Touchstone / Tuya Fireplace is now ready for first public release (v0.1.5). Root README needed a new driver entry: updated status line, drivers table, manual install section, HPM URLs, and compatibility details.
+
+### Changes Made
+
+1. **Status line:** Updated from "Two beta drivers" to "Three beta drivers" with current versions: Gemstone Lights v0.4.8, SunStat Connect Plus v0.1.4, Touchstone / Tuya Fireplace v0.1.5.
+
+2. **Drivers table:** Added row for Touchstone with factual description (LAN integration, Sideline Elite + other Tuya WiFi fireplaces, DP discovery for unmapped models).
+
+3. **Manual install section:** Generalized from Gemstone-only example to framework applicable to all drivers. Changed step 3 to reference "driver source code (e.g., `drivers/gemstone-lights/...`, `drivers/touchstone-fireplace/...`, etc.)" and step 4 to reference driver types by example rather than hardcoded Gemstone.
+
+4. **Compatibility details:** Added Touchstone entry explaining LAN reachability requirement and local key bootstrap via `tinytuya wizard`.
+
+5. **HPM URLs:** Expanded from single Gemstone example to bulleted list of all three drivers' packageManifest URLs for user clarity.
+
+### Pattern: Adding a New Driver to Root README
+
+When a new driver reaches release readiness, update root README in five points:
+
+1. **Status line** — Increment driver count and add new driver name + version with brief what's-new framing (what integration type, what's notable)
+2. **Drivers table** — Add row with Status (Beta/Stable), Description (what devices, key features, distinguishing tech), and link to per-driver README
+3. **Manual install section** — Generalize example code paths and device type names with "(e.g., ...)" patterns so section is reusable for all drivers
+4. **Driver Compatibility Details** — Add network/integration requirement for the new driver (cloud API, LAN, etc.)
+5. **HPM URLs** — Decide between keeping single example or expanding to list. For multi-driver projects, list is cleaner and more user-friendly.
+
+### Key Learnings
+
+- Root README is community-facing; clarity > brevity when supporting multiple installation paths (HPM, manual)
+- Gemstone was v0.4.1 in old README but is now v0.4.8 per current manifest — always verify versions from packageManifest.json, not assumption or prior README text
+- Manual install section becomes boilerplate when generalized; good refactor opportunity when adding driver N+1
+
+---
+
 ## 2026-05-17T19:29:40Z — Touchstone v0.1.5 docs bump (Tank's paragraph() fix)
 
 **Collaborators:** Tank (v0.1.5 code), Link (docs)

@@ -2,12 +2,15 @@
 
 Community Hubitat Elevation drivers by Mads Kristensen.
 
-> **Current status:** Two beta drivers available — **Gemstone Lights** v0.4.1 (working in production, author-tested) and **SunStat Connect Plus** v0.1.4 (cloud scaffold, energy monitoring, schedule control, and hold detection now available; token bootstrap via `setRefreshToken` command; v0.1.4 fixes discoverDevices auto-resolution and locationId URL encoding).
+> **Current status:** Three beta drivers available — **Gemstone Lights** v0.4.8 (cloud REST, working in production), **SunStat Connect Plus** v0.1.4 (cloud REST, energy monitoring and schedule control), and **Touchstone / Tuya Fireplace** v0.1.5 (LAN integration, now ready for first public release).
 
 ## Install via HPM (recommended)
 
 1. In Hubitat: **Apps → Hubitat Package Manager → Install → "From a URL"**
-2. Paste: `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/packageManifest.json`
+2. Paste one of the following packageManifest URLs:
+   - **Gemstone Lights:** `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/packageManifest.json`
+   - **SunStat Connect Plus:** `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/packageManifest.json`
+   - **Touchstone / Tuya Fireplace:** `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/packageManifest.json`
 3. Follow the prompts
 
 ## Listed in the community HPM master list
@@ -20,14 +23,15 @@ Status: **Submitted** — PR filed as HubitatCommunity/hubitat-packagerepositori
 |--------|--------|-------------|------|
 | **Gemstone Lights** | Beta | Cloud REST integration for Gemstone permanent outdoor lighting, including favorites-first LightEffects, named effects, and color-temperature fallback | [Driver README](drivers/gemstone-lights/README.md) |
 | **SunStat Connect Plus** | Beta | Cloud REST integration for SunStat Connect Plus electric floor heating thermostats via the Watts® Home API. Parent/child architecture; auto-discovers thermostats from your Watts account. | [Driver README](drivers/sunstat-thermostat/README.md) |
+| **Touchstone / Tuya Fireplace** | Beta | LAN integration for Touchstone Sideline Elite and other Tuya WiFi fireplaces. Flame color, log color, brightness, heater control. Includes in-driver DP discovery for unmapped models. | [Driver README](drivers/touchstone-fireplace/README.md) |
 
 ## Manual install
 
 1. Open your **Hubitat hub web UI**.
 2. Go to **Drivers Code**.
-3. Create a new driver and paste in `drivers/gemstone-lights/gemstone-lights.groovy`.
-4. Save the driver, then create a virtual device using type **Gemstone Lights**.
-5. Open the device and enter your Gemstone account email and password in **Preferences**.
+3. Create a new driver and paste in the driver source code (e.g., `drivers/gemstone-lights/gemstone-lights.groovy`, `drivers/touchstone-fireplace/touchstone-fireplace.groovy`, etc.).
+4. Save the driver, then create a virtual device using the corresponding driver type (e.g., **Gemstone Lights**, **Touchstone / Tuya Fireplace**).
+5. Open the device and configure **Preferences** according to the per-driver README.
 6. See the per-driver README for capabilities, setup details, and Rule Machine examples.
 
 ## Compatibility
@@ -39,6 +43,7 @@ Status: **Submitted** — PR filed as HubitatCommunity/hubitat-packagerepositori
 **Driver Compatibility Details:**
 - **Gemstone Lights** — Requires outbound HTTPS to Gemstone cloud API
 - **SunStat Connect Plus** — Requires outbound HTTPS to Watts Home cloud API
+- **Touchstone / Tuya Fireplace** — Requires LAN reachability to the Tuya WiFi module; needs the device's Tuya local key (obtained once via `tinytuya wizard`)
 
 ## Contributing
 
