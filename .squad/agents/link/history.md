@@ -77,3 +77,47 @@ Scoping discussion completed. Implementation will follow.
 - Single appliance (fridge) or multi-appliance support
 
 See .squad/decisions/decisions.md section 9 (Auth Flow — Device Flow, Step by Step) for complete OAuth flow reference.
+
+---
+
+## 2026-05-17T16:53:47Z — Touchstone LED Fireplace Tuya Feasibility (Cypher + Trinity)
+
+**Topic:** touchstone-fireplace-feasibility
+
+Feasibility pass completed. Documentation phase incoming.
+
+**Device:** Touchstone Sideline LED fireplace (Tuya-based; WiFi)  
+**Control:** Tuya Local (LAN) over rawSocket + AES-128-ECB  
+**Driver Shape:** Single file (`drivers/touchstone-fireplace/touchstone-fireplace.groovy`)
+
+**ACTION FOR LINK:**
+
+Prepare README documentation for once architecture is locked. Key sections:
+
+1. **Install / Setup Flow**
+   - Device setup prerequisites (WiFi, Smart Life app pairing)
+   - Local IP assignment (recommend DHCP reservation)
+   - **One-time local key extraction step** (critical; two methods provided):
+     - Method A (preferred): Via Home Assistant + `make-all/tuya-local` cloud-auth (SmartLife credentials only; ~5 min)
+     - Method B (fallback): Via `tinytuya wizard` (free Tuya IoT dev account; ~20 min one-time)
+   - Preference configuration: deviceIP, localKey, deviceId
+   - Discover/pair flow
+
+2. **Capabilities & Commands**
+   - Standard: `Switch` (on/off), `SwitchLevel` (flame brightness), `Refresh`, `Initialize`
+   - Custom commands: `setFlameColor(name)`, `setLogColor(name)`, `setLogBrightness(level)`, `setFlameSpeed(speed)`
+   - Palette values: 6 flame effects, 12 log colors (list all with descriptions)
+   - **Important:** NOT `ColorControl` — this is palette-based, not RGB
+
+3. **Troubleshooting**
+   - Local key extraction errors (cloud-auth vs dev-account paths)
+   - Connection drops (rawSocket idle disconnect; keepalive pattern)
+   - Device accepts only one TCP connection; close mobile app before driver connects
+
+4. **Compatibility**
+   - Hubitat hub gen (confirm which gens support rawSocket; likely all modern gens)
+   - Tuya protocol versions supported (v3.3 confirmed; v3.4/v3.5 added in Session 3 if needed)
+
+See `.squad/orchestration-log/2026-05-17T165347Z-trinity.md` for architecture details and `.squad/orchestration-log/2026-05-17T165347Z-cypher.md` for Tuya protocol + local-key extraction deep dive (sources included).
+
+**Key learning:** Local key extraction UX is one-time only and has a no-account path (SmartLife credentials via HA). Document both methods clearly so users understand the trade-offs. README should separate "prefer Method A" vs. "fallback to Method B" flow.

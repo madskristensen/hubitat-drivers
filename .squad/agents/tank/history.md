@@ -59,6 +59,37 @@ Key learnings:
 
 ---
 
+## 2026-05-17T16:53:47Z — Touchstone LED Fireplace Tuya Feasibility (Cypher + Trinity)
+
+**Topic:** touchstone-fireplace-feasibility
+
+Feasibility pass completed. Implementation ready to proceed.
+
+**KEY CORRECTION — ColorControl is incorrect; use named custom commands:**
+
+Trinity's initial architecture proposed `ColorControl` for flame color. Cypher's DP analysis reveals that flame and ember colors are **named palette indices** (6 flame effects, 12 log colors), not free-form RGB/HSV. `ColorControl` with HSV input will produce confusing rounding behavior when mapping to palette entries.
+
+**Corrected capability mapping for Tank:**
+- `Switch` (DP 1)
+- `SwitchLevel` (DP 102, map 0–100 → `"1"`–`"5"`)
+- **Custom command `setFlameColor(name)`** (DP 101, palette: orange, blue, yellow, orange+blue, orange+yellow, blue+yellow)
+- **Custom command `setLogColor(name)`** (DP 104, palette: 12 named colors)
+- **Custom command `setLogBrightness(level)`** (DP 105, 12-step)
+- **Custom command `setFlameSpeed(speed)`** (DP 103, Slow/Medium/Fast)
+- `Refresh`, `Initialize` (standard)
+
+**Architecture:** Single Groovy driver, Tuya Local (LAN) over rawSocket + AES-128-ECB. Effort: Medium (2–3 sessions).
+
+**ACTION FOR TANK:** 
+1. Read `.squad/decisions.md` for full DP map and capability context
+2. Scaffold driver with corrected named-command approach (NOT ColorControl)
+3. Borrow Tuya Local protocol layer from kkossev/Hubitat (rawSocket + AES framing)
+4. Await Mads' tinytuya scan output to confirm protocol version and exact DP IDs
+
+See `.squad/orchestration-log/2026-05-17T165347Z-trinity.md` for architecture details (with ColorControl correction flagged).
+
+---
+
 ## Core Patterns (Reusable)
 
 1. **Parent/Child OAuth:**
