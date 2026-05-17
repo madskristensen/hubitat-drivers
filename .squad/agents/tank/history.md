@@ -209,4 +209,29 @@ Tank's driver will work with any local key source. Link should document **both**
 
 See `.squad/decisions.md` section "2026-05-17: 2026 Tuya Portal-Free Key Extraction Assessment" for full audit and SUPERSEDES note correcting prior session cypher-6 claims.
 
+## Learnings
+
+### 2026-05-17T11:07:22.475-07:00 — Touchstone Tuya v3.3 scaffold
+
+- Hubitat `interfaces.rawSocket.connect(..., byteInterface: true)` still feeds Tuya payloads into `parse(String message)` as hex text in practice; buffer the hex stream, split on `000055AA`, and validate CRC32 before decrypting.
+- Tuya v3.3 control traffic is AES-128-ECB / PKCS5Padding over the JSON body. Most commands prepend ASCII `3.3` + 12 zero bytes **after** encryption; `DP_QUERY` (`0x0a`) and heartbeat (`0x09`) skip that protocol header.
+- 22-character Tuya IDs are the `device22` edge case: status queries may need command `0x0d` plus a null-valued `dps` map instead of command `0x0a`. If the device answers with `data unvalid`, switch query mode and retry once.
+- kkossev patterns adopted here are lifecycle + hygiene patterns, not the protocol layer itself: `installed()` sets defaults then `initialize()`, `updated()` unschedules + re-inits, debug logging auto-disables after 30 minutes, and `parse()` must log-and-bail on bad frames rather than crash.
+- Touchstone's single-client Tuya socket is worth treating as scarce: queue requests, close the socket quickly after idle, and back off at 5s / 15s / 30s when another client (for example Smart Life) appears to be holding the TCP slot.
+- DP 14 (°F setpoint) can lie immediately after a power transition. Keep optimistic setpoint state locally and schedule a delayed refresh instead of trusting the first post-power status frame.
+
+---
+
+### 2026-05-17T18:24:33Z — Cross-Agent Decision Sync (Scribe)
+
+**Topic:** touchstone-driver-shipped  
+
+**Naming Decision (Option C):** Driver display name is `"Touchstone / Tuya Fireplace"` (not just "Touchstone Sideline Elite"), and file path remains `drivers/touchstone-fireplace/touchstone-fireplace.groovy`. This threads the needle: community discoverability + honest scope + room for other Tuya WiFi fireplaces. (Decision merged from coordinator directive; Scribe appended for Tank + Switch awareness.)
+
+**Generalization Scope:** Tank v1.1 (in flight) will add Device Profile dropdown + discovery commands for multi-Touchstone-model support. Scope deferred from v0.1.0 because driver is sealed and shipping. (Decision merged from Mads directive; Scribe appended for Tank awareness.)
+
+**Test Plan Status:** Switch completed 19-test real-device plan (merged to decisions.md). Test coverage: pre-flight, happy path (9 tests), state sync (2 tests), recovery (3 tests), edge cases (3 tests), stability (1 test), cleanup. All with clear pass/fail criteria and known limitations documented. Ready for Mads smoke test after Tank v0.1.0 ships.
+
+**v1.1 In Flight:** Tank parallel session is drafting Device Profile preference + discovery workflow (`discoverDPs()`, `captureBaseline()`, `captureDiff()`, `setRawDP()`). Scope: make driver work for other Touchstone models without manual DP discovery. Awaiting real-device validation from Mads before landing v1.1.
+
 

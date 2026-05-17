@@ -1,5 +1,89 @@
 # Decisions
 
+## 2026-05-17T11:24:33-07:00: User-directed naming decision — "Option C"
+
+**By:** Mads (via Copilot — coordinator decided per autopilot after surfacing trade-offs)
+
+**What:** Touchstone driver positioning decision.
+
+- **File path:** stays `drivers/touchstone-fireplace/touchstone-fireplace.groovy` (community SEO: Hubitat users will search for "Touchstone")
+- **Driver display name** in `metadata { definition { name: ... } }`: change from `"Touchstone Sideline Elite"` to **`"Touchstone / Tuya Fireplace"`** — accurate framing in Hubitat's driver picker
+- **README header:** "Touchstone Sideline Elite — and other Tuya WiFi fireplaces"
+- **Device Profile preference** default: `Sideline Elite (tested)` with `Generic Tuya Fireplace` and `Custom` as secondary options
+
+**Why:** Mads asked "is this more of a Tuya fireplace driver than a touchstone then?" — recognized that the driver is fundamentally Tuya v3.3 + a DP-map config, not a brand-locked driver. Option C threads the needle: community discoverability + honest scope + room for other Tuya WiFi fireplaces. Captured for Tank's v1.1 follow-up.
+
+---
+
+## 2026-05-17T11:10:56-07:00: User directive — Touchstone driver must be generalizable
+
+**By:** Mads (via Copilot)
+
+**What:** The Touchstone driver should work for other Touchstone fireplace models (Sideline Steel, Sideline Linear, Forte, Onyx, etc.), not just the Sideline Elite we just mapped. Users with other models cannot reasonably do manual DP discovery via tinytuya + Python — the driver itself must provide the discovery workflow.
+
+**Why:** Mads asked "how can you make it work for other touchstone lines too if we can't verify the api the way we just did manually?" — captured as a scope/design directive for Tank's next pass.
+
+**Required driver features (v1.1 or fold into v1 if Tank hasn't sealed the file):**
+
+1. **Discovery commands on the device page:**
+   - `discoverDPs()` — call `status()` and log the full DP dump (mimics `python -m tinytuya OutletDevice.status()`)
+   - `captureBaseline()` — snapshot state
+   - `captureDiff()` — compare to baseline, log which DPs changed; users press a remote button between the two
+   - `setRawDP(dpId, value)` — write any DP directly so users can experiment with unmapped fields
+
+2. **Preference-driven DP mapping:**
+   - "Device Profile" dropdown: `Sideline Elite` (default, mapped), `Generic Tuya Fireplace` (DP 1/2/5 only), `Custom`
+   - `Custom` mode reveals individual DP-number text inputs (`flameColorDp`, `logColorDp`, `flameBrightnessDp`, `heatLevelDp`, etc.)
+
+3. **Universal safe defaults** (verified across Tuya ecosystem, not just this device):
+   - DP 1 = power (bool)
+   - DP 5 = mode/level (enum string "0"/"1"/"2")
+
+4. **README guidance** (Link's task):
+   - "Got a different Touchstone? Here's how to map it" section
+   - Step-by-step using the driver's own discovery commands — no Python/tinytuya needed
+   - Invite users to share their DP maps via GitHub Issues so presets accumulate over time
+
+**Action items:**
+- Tank: fold discovery commands + Device Profile preference into the scaffold if still in-flight, otherwise queue as immediate v1.1 follow-up
+- Link: incorporate the "other models" walkthrough into the README
+
+---
+
+## 2026-05-17T11:07:22-07:00: Touchstone Sideline Elite — Real-Device Test Plan
+
+**Date:** 2026-05-17T11:07:22-07:00  
+**Author:** Switch (Tester / QA Engineer)  
+**Status:** Ready for driver handoff (tank)  
+**Target Device:** Touchstone Sideline Elite (Tuya v3.3, LAN port 6668)  
+**Test Harness:** Mads (human runner; ~30 min smoke pass)  
+
+[Test plan includes 19 tests covering: pre-flight, initialization, power control, heat levels, flame colors, log colors, brightness controls, temperature setpoint, refresh, state sync (app), state sync (remote), network recovery, device power recovery, app collision recovery, invalid enum values, out-of-range temperature, rapid command bursts, 1-hour stability, and cleanup. Full plan in Tank's test file.]
+
+---
+
+## 2026-05-17T11:07:22-07:00: Tank — Touchstone driver scaffold shipped
+
+**By:** Tank
+
+**What shipped:**
+- Added `drivers/touchstone-fireplace/touchstone-fireplace.groovy` as a single-file Hubitat driver for the Touchstone Sideline Elite fireplace.
+- Implemented Tuya Local v3.3 framing in Groovy: rawSocket TCP/6668, AES-128-ECB encryption/decryption, `55AA` packet framing, CRC32 validation, queued request handling, and defensive `parse()` buffering for concatenated / partial LAN frames.
+- Wired the requested preferences: device IP, device ID, local key (`password` input), preferred temperature unit (default `F`), polling interval (default 60s), and `logEnable` / `txtEnable` toggles.
+- Wired the requested capabilities + commands: `Switch`, `Refresh`, `Initialize`, `Polling`, `TemperatureMeasurement`, plus `setFlameColor`, `setFlameBrightness`, `setLogColor`, `setHeatLevel`, `setHeatingSetpoint`, and `setDpRaw`.
+- Surfaced the requested attributes: `power`, `flameColor`, `flameBrightness`, `logColor`, `heatLevel`, `heatingSetpoint`, `temperature`, `online`, `tempUnit`, and raw discovery attributes `dp103`, `dp105`, `dp107`, `dp108`.
+- Added the single-connection mitigation requested by Mads: request queue + retry backoff at 5s / 15s / 30s, with log messaging that points at the likely Smart Life / Tuya single-socket contention case.
+- Added the power-transition safeguard requested by this session's discovery: writes schedule delayed refresh, and immediate DP14-derived setpoint updates are suppressed during the post-power settle window.
+
+**Known gaps / follow-ups:**
+- DP `103`, `105`, `107`, and `108` are intentionally surfaced raw only. This scaffold does **not** claim semantics for them beyond exposing their current values in Hubitat.
+- The enum dictionaries for DP `101`, `102`, and `104` are still raw placeholder strings. The command inputs expose likely Tuya ranges, but Switch still needs to confirm the human-friendly labels on real hardware before Link documents them as authoritative.
+- There is no live hardware validation in this scaffold commit. The Tuya framing matches tinytuya / qwerk community implementations, but Mads still needs a real Hubitat import + fireplace smoke test.
+- The broader "generalize for other Touchstone models" directive is **not** fully folded into this file yet. Discovery commands like `discoverDPs()` / `captureBaseline()` / `captureDiff()` and profile-driven DP remapping remain good v1.1 follow-up work.
+- `setDpRaw` is the only advanced discovery command in v0.1.0. It covers raw experimentation, but it is not yet the full self-discovery workflow Mads asked for in the generic Touchstone directive.
+
+---
+
 ## 2026-05-17: 2026 Tuya Portal-Free Key Extraction Assessment (Cypher — CORRECTION)
 
 **Date:** 2026-05-17T10:10:26-07:00  
