@@ -11,6 +11,12 @@
 
 - **Optimistic updates + polling reconciliation is the standard pattern for LAN HTTP drivers:** Update Hubitat state immediately upon command send (without waiting for the device to respond), then verify and correct on the next poll cycle. This keeps the UI responsive even on slow networks. Reconciliation prevents stale state.
 
+- **Location-level attributes (e.g., awayMode) are parent-only and must be polled independently:** Unlike thermostat-specific state (setpoint, mode), location-level state (away / home) is shared across all thermostats at that location. The parent device should expose these attributes and poll them on each cycle. Child devices must mirror the parent's location attributes (with acceptable lag ≤ pollInterval) to avoid state inconsistency across the dashboard.
+
+- **Parent-to-child attribute mirroring has acceptable lag:** When a parent device updates an attribute that children should mirror (e.g., awayMode), it is acceptable and expected for children to lag by up to one full poll cycle. Testing must account for this lag; instant mirroring should not be expected. Verify that lag occurs (confirming the driver polls children independently) rather than expecting instant propagation.
+
+- **Invalid command arguments should log warnings, not crash:** When a user calls a command with an invalid string argument (e.g., `setAwayMode("vacation")` when only "home" and "away" are valid), the driver should log a clear warning message and make no API call. Silent failures or stack traces are failures.
+
 - **Hub reboot handling:** `initialize()` is called automatically by Hubitat on hub startup. Use this method to re-register polling schedules and restore any runtime state. Drivers must not assume their schedules survive a reboot.
 
 - **Debug logging auto-off is essential:** Always implement a 30-minute auto-disable for debug logging via `runIn(1800, logsOff)` in the `updated()` method. This prevents accidental log spam if debug mode is left enabled.
@@ -50,3 +56,38 @@ Driver scaffold v0.1.0 is ready with all capabilities declared (Actuator, Switch
 **Next action:** Once Tank wires v0.2.0 endpoints (after pcap analysis), Switch's TESTING.md becomes the validation harness. No changes needed to test plan — all manual tests (device interaction, state reconciliation, logging) remain applicable.
 
 **Blocked until:** Tank's HTTP wiring completes post-capture.
+
+---
+
+## SunStat Connect Plus Thermostat — Anticipatory Test Plan (2026-05-16T20:01:41-07:00)
+
+### Thermostat-Specific Learnings
+
+- **Two-sensor pattern is standard:** Electric floor thermostats expose both a floor sensor (under-tile) and ambient/room sensor. Test plans must verify both independently and confirm the physical device responds correctly to setpoint changes on the floor element (not the room air sensor).
+
+- **Cloud latency is the main state-sync challenge:** Unlike LAN-local devices, cloud thermostats have 2–10 second round-trip latency. Drivers must implement optimistic Hubitat state updates (immediate feedback) plus polling reconciliation. Test plans must account for this lag when verifying that Watts app and Hubitat agree.
+
+- **Boost and Hold modes are common feature branches:** Many WiFi thermostats expose Boost (temporary high-heat), Hold (suspend schedule indefinitely), and Schedule (7-day programmable). Test plan structured these as Tier 4 (deferred) pending Trinity's capability profile, so the driver author can later fill in exact command signatures and test steps without re-writing the plan.
+
+- **Multi-device accounts are standard:** Cloud thermostat platforms typically allow one account to control multiple zone thermostats (e.g., upstairs and downstairs). Test plans must include a multi-device scenario to catch state cross-contamination and verify independent operation.
+
+- **Operating state transitions are mechanical and critical:** The system must accurately reflect whether heating is active (floor temp below setpoint and mode is Heat) or idle. Rapid state flipping is a red flag for a polling/reconciliation bug. Test plans include a 10–20 minute state-transition observation to catch jitter.
+
+- **API error handling is cloud-specific:** Cloud drivers must expect transient failures (cloud API down, temporary auth token expiry requiring refresh, network timeouts). Test plans must include offline graceful degradation, timeout errors with helpful messages, and recovery without credential re-entry.
+
+- **Thermostat tile compatibility is non-negotiable:** Hubitat has a native "Thermostat" tile template. The driver must expose standard attributes (thermostatMode, heatingSetpoint, currentTemperature, thermostatOperatingState) so the tile auto-populates. Dashboard integration and Rule Machine integration rely on these standardized names. Test plans must verify the tile displays without errors.
+
+### Reusable Pattern for Future Thermostat Drivers
+
+This SunStat test plan template is now the canonical pattern for Hubitat cloud thermostat drivers. Reuse for future projects (e.g., Ecobee, Nest, Tado, etc.) by:
+
+1. Copy the structure (Lifecycle, Read State, Setpoint, Mode, Schedule, Boost/Hold, Edge Cases, Conformance)
+2. Replace SunStat API specifics with the target platform's API
+3. Mark dependencies with `[needs Cypher spec]` and `[needs Trinity profile]` so the team can parallelize design
+4. Verify Tier 1 and Tier 2 tests before beta; defer optional Tier 4 features until their architecture is confirmed
+
+**Key insight:** Thermostat drivers are harder than light drivers because they manage continuous heating state, dual sensors, scheduling, and cloud latency. Anticipatory test planning (design before code) is essential so the feature team can parallelize API research and architecture without blocking the test strategy.
+
+## Team Updates (2026-05-17T03:01:41Z)
+
+**SunStat Connect Plus v0.1.0 shipped.** Manual test plan (switch-sunstat-test-plan.md) merged into decisions.md and copied to drivers/sunstat-thermostat/TESTING.md. Tank implemented driver scaffold. Trinity's architecture and Cypher's API research finalized. Awaiting Mads' real-device verification to run test suite.

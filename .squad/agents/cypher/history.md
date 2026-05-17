@@ -30,6 +30,43 @@
 
 **Full spec written to:** `.squad/decisions/inbox/cypher-gemstone-protocol-spec.md`
 
+---
+
+### 2026-05-16T20:01:41-07:00 — SunStat Connect Plus / Watts Home API research
+
+**Mission:** Find the API for SunStat Connect Plus (SunTouch brand, Watts Water Technologies NA), controlled via "Watts® Home" iOS app (`com.watts.home`, App Store id 1500497974).
+
+**Key discovery:** Found `seanami/homebridge-tekmar-wifi` — a complete TypeScript Homebridge plugin for Tekmar WiFi thermostats (561/562/563/564 series) that uses the **identical API**. Tekmar WiFi and SunStat Connect Plus are different product lines but both are Watts Water Technologies devices controlled through the same Watts® Home app and cloud.
+
+**API facts:**
+- Base URL: `https://home.watts.com/api`
+- Auth: Azure AD B2C (NOT AWS Cognito), tenant `wattsb2cap02.onmicrosoft.com`, policy `B2C_1A_Residential_UnifiedSignUpOrSignIn`, client ID `c832c38c-ce70-4ebc-83b6-b4548083ac90`, login base `https://login.watts.io`
+- Token lifetime: 15 minutes (access), 90 days (refresh), refresh tokens rotate
+- Required headers: `Authorization: Bearer {token}`, `Api-Version: 2.0`, `Content-Type: application/json`
+- Polling only — no WebSocket/MQTT push
+- Endpoints: GET /User, GET /Location, GET /Location/{id}/Devices, GET /Device/{id}, PATCH /Device/{id}, PATCH /Location/{id}/State
+
+**Auth complexity:**
+- Initial login requires OAuth2 PKCE with multi-step HTML form scraping — not feasible in Hubitat
+- Token refresh is a simple form POST — fully feasible in Hubitat
+- Recommended: user obtains initial tokens via the homebridge-tekmar-wifi CLI (`node dist/cli/index.js login`), pastes into driver prefs; driver handles refresh internally
+- Alternative (unconfirmed): ROPC policy may exist at `B2C_1A_ResourceOwnerPasswordCredentials` — worth Switch probing
+
+**Device data model (from Tekmar 562 — SunStat will differ in mode enum):**
+- `data.Sensors.Room.Val` = room/air temp, `data.Sensors.Floor.Val` = floor temp
+- `data.Mode.Val` = current mode (`"Off"`, `"Heat"`, possibly `"Cool"`, `"Auto"` for Tekmar)
+- `data.State.Op` = operating state (`"Off"`, `"Heating"`, `"Cooling"`)
+- `data.Target.Heat` = heat setpoint, `data.Target.Cool` = cool setpoint
+- `data.Schedule.Floor.W` = floor minimum temperature (read-modify-write needed)
+- `isConnected` = device online flag
+- Temperatures in °F (user's `measurementScale = "I"`) or °C
+
+**Key distinction from Gemstone:** Watts Home uses Azure AD B2C (MSAL) rather than AWS Cognito. The token refresh pattern is simpler — a single POST, no SRP math. Main complexity is the initial login, which is pushed to the user (external CLI tool).
+
+**Key distinction from EU Watts Vision:** `smarthome.wattselectronics.com` (Watts Electronics EU) and `home.watts.com` (Watts Water Technologies NA) are **different products, different APIs, different companies**. Do not conflate them.
+
+**Full spec written to:** `.squad/decisions/inbox/cypher-sunstat-connectplus-api.md`
+
 ## Team Notes Summary
 
 **Cloud API research complete (pygemstone fully documented — AWS Amplify cloud-only).**
@@ -128,3 +165,7 @@
 - Session log: `2026-05-16T23-04-57Z-c4-elan-driver-extraction.md` (comprehensive summary)
 
 **Blocked indefinitely until:** Mads' UniFi packet capture is available.
+
+## Team Updates (2026-05-17T03:01:41Z)
+
+**SunStat Connect Plus v0.1.0 released.** Trinity's architecture, Tank's driver implementation, and Switch's test plan shipped together. API specification (cypher-sunstat-connectplus-api.md) merged into decisions.md. Awaiting Mads' real-device verification (Mode.Enum, modelId, ROPC probe, httpPatch sandbox compatibility).

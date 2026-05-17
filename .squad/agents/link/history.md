@@ -109,3 +109,93 @@ Executed one-time push authorization for Gemstone Lights v0.4.0 release and HPM 
 ### 2026-05-16T19:36:00Z: Reskill — community-json-pr-hygiene
 
 Created `.squad/skills/community-json-pr-hygiene/SKILL.md` to document the surgical text-replacement pattern for editing upstream community JSON files. The skill captures the learnings from PR #106: ConvertFrom-Json | ConvertTo-Json round-trips mangle formatting (tabs to spaces, key order, blank lines), breaking diff hygiene. Future agents submitting to external registries (HPM, npm, GitHub Awesome lists, etc.) will reference this skill to avoid the same trap.
+
+---
+
+## 2026-05-16T21:43:00Z: SunStat Connect Plus Documentation Complete
+
+**Learnings from parent/child driver documentation:**
+
+1. **Auth bootstrap callout is critical:** Parent/child cloud drivers need a prominent, step-by-step auth section that explains:
+   - Why external tooling is needed (Hubitat sandbox limitations — no PKCE/OAuth flows)
+   - Exact shell commands to capture tokens (copy from existing reference implementations)
+   - Clear flow: capture token once → paste into parent → discover devices → child devices appear
+   
+2. **Preferences documentation follows parent/child split:**
+   - Parent device holds all secrets (refresh token, auth config, polling interval)
+   - Child devices carry utility prefs only (debug logging, description text)
+   - Table each layer separately; it clarifies roles
+
+3. **Capabilities reuse combo capability name, not individual sub-capabilities:**
+   - `Thermostat` combo includes `ThermostatHeatingSetpoint`, `ThermostatMode`, `ThermostatOperatingState`
+   - Do NOT list redundant sub-capabilities in the docs (it confuses users)
+   - List only the unique, user-facing attributes (custom ones like `floorTemperature`, `boostActive`, `boostUntil`)
+
+4. **Custom attributes deserve a second table:**
+   - Standard capability attributes go in "Capabilities" table
+   - Custom attributes (e.g., `floorTemperature`, `boostActive`, `deviceOnline`) get their own "Custom Attributes" table with **Type** and **What it means** columns
+   - Helps users understand what's sensor data vs. mode/status
+
+5. **Architecture section must justify parent/child to the uninitiated:**
+   - State upfront: "Most homes with SunStat have multiple thermostats"
+   - Explain the benefit: "One parent device, one token, automatic discovery"
+   - Address the edge case: "If you have one thermostat, parent/child still works fine"
+
+6. **Known Limitations section differentiates scaffold from design:**
+   - Call out stubs explicitly (e.g., "Boost is stubbed in v0.1.0, logs a warning, does nothing")
+   - Explain why (e.g., "API shape pending real-device verification")
+   - Flag things that are NOT limitations but design choices (e.g., "Schedule editing not exposed — use the Watts app")
+
+7. **Mirroring Gemstone's structure scales well:**
+   - Gemstone's one-device architecture is simpler than SunStat's parent/child
+   - But the section order (Title → Status → Hardware → Capabilities → Install → Setup → Preferences → Examples → Troubleshooting → Known Limits) is universal
+   - Adapt the content for each driver's needs, not the structure
+
+**Pattern captured for future parent/child cloud drivers.**
+
+---
+
+## 2026-05-16T20:01:00Z: SunStat v0.1.1 Home/Away Feature Documentation
+
+**Learnings on documenting location-level vs device-level features in parent/child drivers:**
+
+1. **Location-level features belong on the parent device, not children:**
+   - Away mode affects ALL thermostats at a location simultaneously—it's a Watts account-level setting
+   - Document this upfront in a dedicated feature section (not just in Commands)
+   - Clarify: "This is NOT a per-thermostat setting; it's location-scoped"
+
+2. **Create a feature section (not just a table) for complex settings:**
+   - Use cases (why users care)
+   - How to control it (which commands to call)
+   - How to read it (which attributes to check)
+   - Edge cases (e.g., "If your location doesn't support away mode, the driver detects this on discovery")
+   - This gives users context that a bare command/attribute table cannot provide
+
+3. **Mirror location-level state on child devices for dashboard convenience:**
+   - Parent exposes `awayMode` + `locationSupportsAway` 
+   - Children also expose `awayMode` as **read-only** (mirrors parent value)
+   - Document this explicitly: "Read-only on child devices (mirrors the parent value)"
+   - Rationale: dashboards may want to display location status on all child devices
+
+4. **Provide multiple command styles for different workflows:**
+   - Simple commands: `setHome()` / `setAway()` for quick automation
+   - Explicit commands: `setAwayMode("home"|"away")` for Rule Machine with variables
+   - Document both; explain when each is useful
+
+5. **Version bump documentation when features ship:**
+   - Update status banner (v0.1.0 → v0.1.1)
+   - Update known limitations (if boost was stubbed in v0.1.0, update references to v0.1.1)
+   - Add Rule Machine examples that showcase the new feature (not just old ones)
+   - This helps users understand what changed between versions
+
+6. **Parent device commands and attributes need their own tables:**
+   - Don't mix parent and child in one "Commands" section
+   - Separate "Child Device Commands" from "Parent Device Commands" 
+   - Add "Parent Device Attributes" table (analogous to "Custom Attributes (Child)")
+   - Users need to know which device to call from Rule Machine
+
+**Pattern: Location-level vs device-level features in parent/child drivers are now documentable.**
+
+## Team Updates (2026-05-17T03:01:41Z)
+
+**SunStat Connect Plus v0.1.0 shipped.** Documentation delivered: drivers/sunstat-thermostat/README.md, packageManifest.json, TESTING.md (copied from Switch), and root README update. Tank's driver implementation, Trinity's architecture, and Cypher's API research finalized. Awaiting Mads' real-device verification.

@@ -1,11 +1,24 @@
 ---
-updated_at: 2026-05-16T21:45:13Z
-focus_area: Gemstone Lights v0.1.0 — scaffold complete, awaiting local-API capture
+updated_at: 2026-05-17T03:01:41Z
+focus_area: SunStat Connect Plus v0.1.0 — shipped to repo, awaiting Mads' real-device verification
 active_issues: []
 ---
 
 # What We're Focused On
 
-Gemstone Lights driver scaffold (v0.1.0) is in place at `drivers/gemstone-lights/`. Cloud protocol is fully documented in `.squad/decisions.md` (Cypher's spec). The driver's `sendCommand()` / `parse()` are deliberately stubbed pending **Mads' LAN capture** of the Gemstone app talking to the controller at 192.168.1.238 — that capture is the next milestone. Once the local API is known, Tank wires real `HubAction` calls and Switch runs the manual test plan in `drivers/gemstone-lights/TESTING.md`.
+**Current Release:** SunStat Connect Plus v0.1.0 is complete and merged. Parent/child driver pair (`drivers/sunstat-thermostat/`) ships with:
+- Full Azure AD B2C token refresh middleware
+- Device discovery and child device lifecycle management
+- Thermostat capability profile (heat-only modes: off, heat)
+- Custom attributes: floorTemperature, boostActive, boostUntil
+- Stubs for boost/hold (API shape pending real-device verification)
 
-Repo conventions, READMEs (top + per-driver), `LICENSE` (MIT), `.gitignore`, and `.gitattributes` are in place. Repo is **not yet `git init`'d** — that's also pending the user.
+**Blocking for v0.2.0:** Mads' real-device testing to confirm:
+- `Mode.Enum` values (are modes exactly ["Off", "Heat"]?)
+- `modelId` / `modelNumber` reported by Watts API
+- ROPC policy probe result (can we skip external CLI bootstrap?)
+- `httpPatch` call success in Hubitat sandbox
+
+**Production Driver:** Gemstone Lights v0.4.0 is live on GitHub (https://github.com/madskristensen/hubitat-drivers/releases/tag/gemstone-lights-v0.4.0) with full HPM integration. Community PR #106 pending maintainer merge for full discoverability.
+
+**No-Push Handoff Model:** All agents prepare changes locally. Mads owns remote mutations (`git push`, `gh pr create`, etc.) after reviewing handoff.
