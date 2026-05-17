@@ -116,3 +116,6 @@ The `power` attribute (`attribute "power", "enum", ["on", "off"]`) was a duplica
 
 - 2026-05-17: Participated in top-3 driver improvements batch — sunstat v0.1.6, touchstone v0.1.6, gemstone v0.4.9.
 
+## Learnings (continued)
+
+- 2026-05-17T16:15:00-07:00 — When inserting a new function near an existing one, ALWAYS verify the surrounding `def` lines are intact in a post-edit view — a single misaligned old_str can swallow a signature line and produce orphan-body parse errors that only surface at hub load time.
