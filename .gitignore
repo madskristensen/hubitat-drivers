@@ -1,0 +1,42 @@
+# AI team coordination — internal only, never publish
+.squad/
+.copilot/
+.github/agents/
+.github/workflows/squad-*.yml
+.github/workflows/sync-squad-labels.yml
+.gitattributes
+
+# Squad local helpers
+.squad-workstream
+
+# Captured network traffic (research artifacts)
+*.pcap
+
+# OS junk
+Thumbs.db
+.DS_Store
+desktop.ini
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Editor junk
+.vscode/
+.vs/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+
+# Build/dependency caches (not used today, but defensive)
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Hubitat-specific local backups/history
+.dth-history/
+*.backup
+*.bak

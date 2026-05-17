@@ -1,0 +1,19 @@
+{
+  "packageName": "Gemstone Lights",
+  "author": "Mads Kristensen",
+  "minimumHEVersion": "2.3.0",
+  "dateReleased": "2026-05-16",
+  "version": "0.4.0",
+  "communityLink": "",
+  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/README.md",
+  "drivers": [
+    {
+      "id": "257ada29-4d65-4f90-9183-da6cc75ef908",
+      "name": "Gemstone Lights",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/gemstone-lights.groovy",
+      "required": true,
+      "version": "0.4.0"
+    }
+  ]
+}
