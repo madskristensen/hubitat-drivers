@@ -123,3 +123,23 @@ The `power` attribute (`attribute "power", "enum", ["on", "off"]`) was a duplica
 - 2026-05-17T16:19:32-07:00 — defaultLogBrightness is the symmetric gap — v0.1.6 added setLogBrightness without a corresponding default preference. Mads asked only for flame speed in v0.1.8; flag this as a likely follow-up if he reports it.
 
 - 2026-05-17T23:22:29-07:00 — Touchstone v0.1.6 power-on defaults now have full v0.1.6-command symmetry — every named command has a `default*` preference counterpart that auto-applies during the defaults window. The pattern is firmly established: input declaration + application block + DP-write.
+
+## Learnings (continued v0.1.10)
+
+- 2026-05-17 — Hubitat enum attribute display: when the OPTIONS list labels are themselves numeric strings ("1","2","3"...), the inbound parse path must NOT use the DP value as an array index — that produces an off-by-one (and blanks the UI on the max value). Use direct passthrough or a labeled lookup table. Additionally, the defensive bounds-check must be present before any `emitAttribute` call on enum DPs: emit only if the incoming DP value is in the known options list, else log.warn and bail. Without this guard, out-of-range device values (or driver bugs) silently set the attribute to a value that is not in the enum list, causing the Hubitat dropdown to blank.
+
+## 2026-05-17 (session tank-4) — Touchstone v0.1.10 enum bounds-check hardening
+
+**Requested by:** Mads (real-hardware bug: display blanking on out-of-range device echoes)
+
+### What shipped
+
+Added in OPTIONS bounds-checks + log.warn + early bail in pplyDps() for enum DPs (101, 102, 103, 104, 105) before writing to UI attributes.
+
+**Why:** Device sometimes pushes out-of-range DP values during echo (DP write response). Without bounds-check, driver applies invalid value to enum attribute, causing Hubitat UI to blank (value not in declared OPTIONS list).
+
+**Verification:** Mads reported "one higher" display anomaly (showed flame effect 4 when device had 3). Investigation: NOT driver off-by-one, likely device firmware noise. Fix prevents invalid values from reaching UI.
+
+**Commit:** 3fe727c — bounds-checks for all enum DPs.
+
+**v0.1.10 status:** Awaiting Cypher's empirical test result (DP 105/109 read-only confirmation) before final changelog.

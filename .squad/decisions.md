@@ -1,5 +1,59 @@
 # Decisions
 
+## 2026-05-17T16:34:52-07:00 — Cypher — DP 105 / DP 109 real-hardware investigation
+
+**By:** Cypher
+
+**Status:** Root cause identified; pending Mads empirical test; Tank to ship v0.1.10 fixes
+
+### What
+
+Compound investigation into why DP 105 (log brightness) and DP 109 (ember brightness) don't respond to `setRawDP` writes on Mads's Touchstone Sideline Elite real hardware.
+
+### Root cause (Confirmed — Hypothesis B)
+
+**`setRawDP` type coercion corrupts string-typed DPs with numeric-looking values.**
+
+The driver's `coerceRawValue()` function converts numeric-looking strings to integers:
+```groovy
+coerceRawValue("5")  // → Integer 5, not String "5"
+```
+
+- **DP 105 (log brightness):** YAML declares `type: string` with wire values `"1"` through `"12"` (quoted strings). `setRawDP 105 "5"` sends integer `5` but device expects string `"5"`.
+- **DP 109 (ember brightness):** YAML declares `type: string`, `optional: true` with wire values `"L0"` through `"L5"` (capital-L prefix). `setRawDP 109 "1"` sends integer `1` and wrong value format; correct format is `"L1"`, `"L2"`, etc.
+
+**The setRawDP command documentation explicitly warns:** *"whole numbers become integers"*. Using `setRawDP` to test string-typed DPs is therefore invalid.
+
+### Resolution path
+
+**DP 105 — Still unresolved whether truly read-only:**
+- `setLogBrightness("12")` (dedicated command) sends correct string type per YAML and is **untested on real hardware** — may actually work
+- Mads must test `setLogBrightness("12")` directly from device page (NOT via setRawDP)
+
+**DP 109 — No dedicated driver command exists:**
+- No driver code tracks inbound DP 109 status (no `dp109` attribute)
+- `setRawDP 109 "L1"` sends correct type + value (L-prefix strings not coerced to integers) — untested
+- May be optional on some firmware variants (`optional: true` in YAML)
+
+**Tank v0.1.10 fixes (regardless of empirical test outcome):**
+1. Add `setRawDPString` command to skip `coerceRawValue` for string-typed DPs (or quoted-string syntax for setRawDP)
+2. Add `setEmberBrightness` command with "L0"–"L5" enum constraints for DP 109
+3. Add `dp109` inbound attribute for status tracking
+4. If `setLogBrightness` also fails empirically: remove/deprecate DP 105 write command and document as read-only
+
+### Verification test (Mads to run before Tank commits v0.1.10)
+
+1. Turn fireplace on (fire must be active)
+2. Call `setLogBrightness("12")` from device page — watch for visible log brightness change
+3. Call `setRawDP 109 "L3"` from device page — watch for visible ember brightness change
+4. Report results to team
+
+### Recommendation
+
+Confirmed Type-Coercion Bug (Hypothesis B) must ship as v0.1.10 regardless of Hypothesis C outcome. Pending Mads's empirical test to determine if DP 105/DP 109 are truly read-only or just untested write paths.
+
+---
+
 ## 2026-05-17T13:24:30-07:00 — Directive — Scribe must push after every commit
 
 **By:** Mads (via Copilot)

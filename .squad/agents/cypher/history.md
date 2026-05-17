@@ -175,7 +175,59 @@ Participated in 4-way driver improvement scan with Trinity, Tank, Switch. Findin
 - Rate limit for the API is **undocumented**; 2 PATCHes per boost start/cancel is well within any reasonable budget.
 
 
+### 2026-05-17T16:34:52-07:00 — DP-map vs real hardware: tuya-local YAML cannot be trusted for write semantics
+
+**Lesson learned during Touchstone DP 105/109 investigation:**
+
+- A YAML entry claiming `type: string` with numeric-looking `dps_val` values is **not a guarantee the device will accept writes** of that type. The YAML reflects how the HA tuya-local integration *mapped* the DP, not necessarily what the hardware firmware actually does.
+- Real-hardware evidence always supersedes YAML documentation. If Mads says writes have no effect, the YAML is suspect — it may reflect a different firmware version, a different sub-model, or an incorrect community contribution.
+- **`setRawDP` is an invalid test for string-typed DPs with numeric values.** The driver's `coerceRawValue` converts `"5"` → `Integer 5`. Sending integer `5` when the device expects string `"5"` results in a silent reject. Always test string-DP writes via the dedicated typed command, not via setRawDP.
+- The `optional: true` flag in a tuya-local YAML DP entry is a real signal: the DP may not exist on all firmware variants or sub-models of the listed device.
+- **Never trust prior DP research over real-hardware evidence.** Re-verify by reading the actual YAML line-by-line and cross-checking the exact write path in the driver before declaring a DP "confirmed writable."
+
+**Full investigation:** `.squad/decisions/inbox/cypher-touchstone-dp105-dp109-investigation.md`
+
+---
+
 ## Team updates
 
 - 2026-05-17: Participated in top-3 driver improvements batch — sunstat v0.1.6, touchstone v0.1.6, gemstone v0.4.9.
 
+
+## 2026-05-17 (session cypher-2) — Touchstone DP 105 / DP 109 real-hardware investigation
+
+**Requested by:** Mads (community-beta self-testing; setRawDP doesn't work for DPs 105, 109)
+
+### Root cause (Confirmed — Hypothesis B)
+
+coerceRawValue() corrupts string-typed DPs. When called with numeric-looking strings (e.g., "5"), the function returns integers instead of strings. DP 105 (log brightness) and DP 109 (ember brightness) both declared as 	ype: string in Tuya YAML; device rejects integer-typed values.
+
+**Evidence:**
+- DP 105: YAML 	ype: string, values "1"–"12" (quoted strings). setRawDP 105 "5" sends Integer 5, device expects String "5".
+- DP 109: YAML 	ype: string, optional: true, values "L0"–"L5" (capital-L prefix). setRawDP 109 "1" sends Integer 1 + wrong value format; correct is "L1"–"L5".
+- setRawDP command documentation warns: "whole numbers become integers" — using it to test string DPs is invalid.
+
+### Resolution status
+
+**DP 105 — Hypothesis C (read-only) unconfirmed:**
+- Dedicated setLogBrightness("12") command sends correct string type per YAML
+- Never tested on real hardware; may actually work
+- Mads must test setLogBrightness in isolation from device page
+
+**DP 109 — No inbound code, marked optional:**
+- No dp109 attribute in driver; whether device pushes DP 109 status is unverified
+- May not exist on all Sideline Elite firmware (optional: true in YAML)
+- Likely test used wrong value format ("1" instead of "L1")
+
+### v0.1.10 actions (assigned to Tank)
+
+1. Add setRawDPString command or quoted-string input syntax to skip coercion
+2. Add setEmberBrightness command with "L0"–"L5" enum for DP 109
+3. Add dp109 inbound attribute for status tracking
+4. If setLogBrightness also fails empirically: remove/deprecate DP 105 write
+
+### Deliverables
+
+- Merged investigation into .squad/decisions.md with full YAML excerpts, hypothesis verdict, sources
+- Assigned v0.1.10 fixes to Tank
+- Pending Mads's empirical test to confirm/refute Hypothesis C
