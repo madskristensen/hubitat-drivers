@@ -1,3 +1,152 @@
+# Decisions
+
+## 2026-05-17T11:58:55-07:00 — Touchstone v0.1.4 — safety + sandbox fixes
+
+**By:** Tank  
+**Requested by:** Mads
+
+**Exactly removed / changed in drivers/touchstone-fireplace/touchstone-fireplace.groovy:**
+1. Removed the defaultHeatLevel preference input from the power-on defaults block.
+2. Removed the defaultHeatLevel auto-apply branch from pplyOnPowerOnDefaults(), so heater DP 5 is never written from implicit power-on/default logic.
+3. Added an inline SAFETY comment in pplyOnPowerOnDefaults() stating that heater state changes only happen through explicit setHeatLevel() user commands.
+4. Kept defaultFlameColor, defaultFlameBrightness, defaultLogColor, and defaultHeatingSetpoint as the only auto-applied defaults.
+5. Removed the sandbox-blocked reflection log from parse() (original v0.1.3 line 449: .getClass().getName()).
+6. Removed the second executable .getClass() usage in dpValueType() and replaced the fallback with a generic "object" type label.
+
+**Reflection audit scope + result:**
+- Scanned for 14 reflection-related patterns in the driver:
+  - .getClass()
+  - instance .class
+  - .metaClass
+  - .getMethods()
+  - .getMethod()
+  - .getDeclaredMethods()
+  - .getFields()
+  - .getField()
+  - .getDeclaredFields()
+  - .invoke()
+  - .respondsTo()
+  - .hasProperty()
+  - Class.forName()
+  - method-pointer syntax (someObj.&methodName)
+- Found 2 executable hits:
+  1. parse() diagnostic logging (.getClass().getName()) at original v0.1.3 line 449
+  2. dpValueType() fallback type-name logging (alue.getClass().getSimpleName().toLowerCase())
+- Confirmed no instance .class reads, no .metaClass, no method/field introspection calls, no Class.forName(), no espondsTo()/hasProperty(), and no method-pointer syntax in the driver.
+- Remaining getClass text is comments/changelog only; no executable reflection calls remain.
+
+---
+
+## 2026-05-17T11:58:55-07:00 — Touchstone v0.1.3 — optional defaults applied on power-on
+
+**By:** Tank (requested by Mads)
+
+**What:**
+- Added optional defaultFlameColor, defaultFlameBrightness, defaultLogColor, defaultHeatLevel, and defaultHeatingSetpoint preferences to drivers/touchstone-fireplace/touchstone-fireplace.groovy.
+- on() still emits the switch/power events immediately and writes DP 1 right away, but now schedules pplyOnPowerOnDefaults() to queue any configured follow-up defaults asynchronously.
+- Each default is independent: blank/unset preferences do nothing, so the fireplace keeps whatever value its firmware remembered.
+
+**Delay choice:**
+- Used unInMillis(1500, "applyOnPowerOnDefaults").
+- Rationale: Touchstone's off→on transition has a short settle window, and DP 14 / Fahrenheit setpoint was previously observed to revert briefly during that window. A 1500 ms delay is a conservative first pass that keeps the UI snappy while giving the firmware a beat before follow-up writes.
+- Follow-up writes still use the existing queued retry/backoff path, so Smart Life / Tuya single-client socket contention behavior is unchanged.
+
+**Implementation notes / tradeoffs:**
+- Flame/log/brightness default inputs are gated out when Device Profile = Generic Tuya Fireplace, since those roles are not mapped in Generic mode.
+- off() and subsequent on() calls cancel any queued-but-unsent power-on default writes before adding new power requests, so the latest power toggle generally wins.
+- Already in-flight writes cannot be recalled; in a very rapid off/on/off sequence, one last default write may still land before the later power command finishes draining through the Tuya queue.
+- After defaults are queued, the driver forces a later refresh on the power-transition cadence rather than the shorter normal write cadence, favoring safer readback after the settle window.
+
+**Note:** This version (v0.1.3) contained the unsafe defaultHeatLevel parameter. Immediately superseded by v0.1.4 safety hardening.
+
+---
+
+## 2026-05-17T11:58:55-07:00 — Documentation bump — Touchstone v0.1.4
+
+**By:** Link (requested by Mads; decision pair to Tank's v0.1.4 code + safety fix)
+
+**What:** Updated all Touchstone driver docs from v0.1.2 to v0.1.4.
+
+**Files updated:**
+
+1. drivers/touchstone-fireplace/packageManifest.json
+   - ersion: 0.1.2 → 0.1.4
+   - drivers[0].version: 0.1.2 → 0.1.4
+
+2. drivers/touchstone-fireplace/README.md
+   - Status header: updated to v0.1.4
+   - Supported Capabilities: added "Optional power-on defaults" with safety callout
+   - New "Power-on Defaults" section explaining defaultFlameColor, defaultFlameBrightness, defaultLogColor, defaultHeatingSetpoint; ~1.5s apply delay; Device Profile gating
+   - New "Safety" subsection: explains why heater is intentionally NOT auto-startable (radiant heat fire/burn risk); states "no defaultHeatLevel preference and there never will be"
+   - Troubleshooting: updated CRC32 entry version refs; added new entry for reflection error .getClass() (v0.1.3 bug, fixed v0.1.4)
+   - Changelog: added v0.1.4 entry; clarified v0.1.2 as released; v0.1.3 omitted (never publicly released; buggy intermediate state)
+
+**Key decision: v0.1.3 not listed in public changelog**
+
+- v0.1.3 had critical issues: (1) heater could auto-start (safety), (2) sandbox reflection error in parse() exception handler
+- v0.1.3 was never published to users; only v0.1.2 and v0.1.4 are "real" releases
+- Changelog reflects only shipped versions; internal buggy states are omitted to avoid user confusion
+- Troubleshooting entries point to version ranges where bugs existed, so users can self-identify and find fixes
+
+**Pattern for hardware safety:**
+
+When documenting drivers controlling hazardous hardware (heaters, locks, etc.), be explicit about safety-driven feature omissions:
+- State the decision directly: "by design", "intentionally"
+- Name the risk clearly: "radiant heat element — fire/burn risk"
+- Explain trade-offs: hardware safety > convenience
+- Direct users to auditable alternatives (explicit Hubitat Rules, not implicit/auto paths)
+
+This pattern is applicable to future drivers controlling power-consuming or hazardous hardware.
+
+---
+
+## 2026-05-17T11:58:55-07:00 — User directive — Heater must never auto-start (safety)
+
+**By:** Mads (via Copilot)
+
+**What:** The Touchstone driver MUST NOT allow the heater (DP 5, heat_level) to come on automatically — neither via "default on power-on" settings, nor any other implicit/auto path. The heater is a physical safety device (radiant heat element); enabling it without explicit user action is a fire/burn risk.
+
+**Why:** Mads said: *"don't make it so that the heater can come on automatically. that's probably a safety risk."* — captured as a hard scope rule for the team.
+
+**Required immediate changes (v0.1.4 follow-up to v0.1.3 currently in flight):**
+1. REMOVE the defaultHeatLevel preference input added in v0.1.3
+2. REMOVE any code that writes DP 5 (heat_level) from pplyOnPowerOnDefaults() or any other auto-applied path
+3. Keep defaultHeatingSetpoint (the temperature setpoint) — it's NOT the heater enable, just the target temp; the heater itself stays off until the user explicitly cycles it via setHeatLevel/the heater button
+4. Add a defensive guard in any future code: heater state changes only via the explicit setHeatLevel(level) command (or an equivalent explicit user action). No implicit power-on or scene-triggered heater activation.
+5. README: add a "Safety" section noting the design choice — driver intentionally does NOT auto-start the heater.
+
+**Future-proofing rule:** If we ever add scenes, presets, schedules, or rules-engine integrations to this driver, those must NEVER toggle DP 5 implicitly. Only direct user command writes the heater DP.
+
+---
+
+## 2026-05-17T11:58:55-07:00 — Bug report — Hubitat sandbox rejects .getClass() at line 449
+
+**By:** Mads (via Copilot)
+
+**What:** Hubitat sandbox error on driver compile/run: Expression [MethodCallExpression] is not allowed: e.getClass() at line number 449
+
+**Confirmed location** (coordinator viewed file at line 449):
+\\\groovy
+447:     } catch (Exception e) {
+448:         log.warn "[Touchstone] parse() failed — \"
+449:         debugLog "parse() exception class=\"
+450:     }
+\\\
+
+**Why this fails:** Hubitat's Groovy sandbox blocks reflection-style calls (.getClass(), .getMethods(), .getFields(), anything that inspects type metadata at runtime). It's part of the platform's strict security model — same family as the import allowlist.
+
+**Fix (Tank v0.1.4):**
+1. At line 449, drop the .getClass().getName() reflection. Replacements that work in Hubitat:
+   - **Simplest:** delete the line entirely — .message on line 448 already conveys what happened
+   - **Or** use the exception's class name via Throwable.class.simpleName pattern? NO — .class access on instances is also reflection. Don't.
+   - **Or** catch typed exceptions separately if you really need to differentiate: catch (java.net.SocketTimeoutException e) { ... } catch (java.net.ConnectException e) { ... } catch (Exception e) { ... }. But parse() likely doesn't need this level of granularity.
+2. **Audit the entire driver file** for other reflection patterns — .getClass(), .class on instance variables, .getMethods(), .invoke(), .metaClass, .respondsTo(), .hasProperty(). Hubitat blocks all of them. Replace with explicit code paths.
+3. Bump skill SKILL.md 	uya-local-groovy to note: Hubitat blocks not just imports but also reflection-style method calls. Add to the "gotchas" list.
+
+**Combined with:** the no-auto-heater directive (also captured this session). Both should land in Tank v0.1.4 once v0.1.3 finishes in flight.
+
+---
+
 # Decisions
 
 ## 2026-05-17T11:31:31-07:00 — Touchstone v0.1.2 CRC32 allowlist fix
@@ -492,3 +641,4 @@ All are free trials with no card on file required. This was the key blocker befo
 - **Topic:** touchstone-local-control-achieved
 - **Mode:** Direct (Coordinator — no agent spawns)
 - **Requested by:** Mads Kristensen
+

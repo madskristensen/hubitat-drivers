@@ -3,7 +3,7 @@ name: "tuya-local-groovy"
 description: "Implement Tuya Local v3.3 Groovy drivers on Hubitat using rawSocket, AES-128-ECB, queued retries, and defensive frame parsing."
 domain: "hubitat-drivers"
 confidence: "high"
-source: "earned — Tank Touchstone fireplace scaffold, 2026-05-17; protocol cross-checked against tinytuya XenonDevice/message_helper/header and qwerk's Hubitat Tuya RGBW driver."
+source: "earned — Touchstone v0.1.2 verified the Hubitat import-allowlist CRC32 fix pattern on 2026-05-17; protocol cross-checked against tinytuya XenonDevice/message_helper/header and qwerk's Hubitat Tuya RGBW driver."
 ---
 
 ## When to Use
@@ -141,6 +141,58 @@ Safer pattern:
 - suppress immediate DP14-driven setpoint updates for a short settle window
 - schedule a delayed `refresh()` after writes (especially power on/off)
 
+## Hubitat Import Allowlist — Tuya v3.3 CRC32 in Pure Groovy
+
+Hubitat rejects `import java.util.zip.CRC32` in drivers, so Tuya v3.3 LAN drivers must keep CRC32 in pure Groovy.
+
+Verified pattern:
+- build a 256-entry lookup table once with `@Field static final long[] CRC32_TABLE`
+- use canonical CRC-32/ISO-HDLC settings: init `0xFFFFFFFFL`, reversed polynomial `0xEDB88320L`, reflected byte updates, xor-out `0xFFFFFFFFL`
+- return the unsigned 32-bit CRC as a `long`/`Long`, then write it big-endian into the Tuya frame
+
+Practical Hubitat guidance:
+- avoid `java.util.zip.*` imports in drivers
+- be cautious with extra `java.io.*` helpers too; simple byte-array helpers are safer when frame assembly is small
+- keep the table at file scope, not inside the checksum method, so parse/send paths do not rebuild it on every frame
+
+Reference shape:
+
+```groovy
+@Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
+    long c = n as long
+    8.times {
+        c = ((c & 1L) != 0L) ? (0xEDB88320L ^ (c >>> 1)) : (c >>> 1)
+    }
+    c & 0xFFFFFFFFL
+} as long[]
+
+private long crc32(byte[] data) {
+    long crc = 0xFFFFFFFFL
+    for (byte b : data) {
+        crc = CRC32_TABLE[((int) (crc ^ (b & 0xFF))) & 0xFF] ^ (crc >>> 8)
+    }
+    return (crc ^ 0xFFFFFFFFL) & 0xFFFFFFFFL
+}
+```
+
+## Hubitat Sandbox — Reflection Blocked Too
+
+Hubitat's sandbox restrictions are not limited to imports. Reflection-style runtime inspection is blocked in drivers too.
+
+Avoid patterns like:
+- `.getClass()` on exceptions or arbitrary values
+- instance `.class` reads
+- `.metaClass`, `.respondsTo()`, and `.hasProperty()`
+- method/field introspection (`getMethods()`, `getFields()`, `getDeclaredMethods()`, etc.)
+- `Class.forName()` and similar runtime type discovery
+
+Safer replacements:
+- log `e.message` instead of trying to print the exception class name
+- use explicit `instanceof` checks or typed `catch (...)` blocks when behavior truly differs by type
+- if the reflection was only diagnostic, log a generic fallback such as `"object"` instead of probing runtime metadata
+
+Treat reflection restrictions as part of the same Hubitat sandbox model as the import allowlist.
+
 ## kkossev vs tinytuya Guidance
 
 - **Use kkossev patterns for Hubitat style**: lifecycle, logging, defensive parsing, state hygiene
@@ -148,11 +200,32 @@ Safer pattern:
 
 Do **not** assume kkossev's Zigbee Tuya drivers contain the WiFi/rawSocket protocol layer.
 
+## Device Profile + DP Discovery Pattern
+
+When only one Tuya model has been fully verified, prefer a three-tier profile strategy:
+
+- **Tested profile** — hardcode the confirmed DP map and make it the default.
+- **Generic profile** — only wire commands whose DPs are broadly stable for the category (for example power, heat level, or temperature setpoint).
+- **Custom profile** — reveal per-role DP number inputs with `if (settings?.deviceProfile == "Custom")` and let users override only the roles that vary.
+
+Hubitat-specific gotchas:
+- Driver preference gating is reevaluated only after the user saves/reopens the device page, so Custom-only inputs need code-side defaults.
+- Resolve DPs through a helper like `dpFor(role)` at command/parse time, not once during `updated()`, so new preference values apply immediately.
+
+Recommended discovery commands:
+- `discoverDPs()` — run a status query and log the typed DP dump at info level.
+- `captureBaseline()` + `captureDiff()` — snapshot current DPs, then diff after a remote/app action.
+- `setRawDP(dpId, value)` — allow auditable direct writes with bool/int/string coercion.
+
+This keeps the driver honest about what is tested while still giving adjacent Tuya models a workable self-service mapping path inside Hubitat.
+
 ## Reusable Checklist
 
 - [ ] Preferences: `deviceIP`, `deviceId`, `localKey(password)`, polling, `logEnable`
+- [ ] Add `Device Profile` when only one model is fully mapped (`Tested` / `Generic` / `Custom`)
 - [ ] `Switch`, `Refresh`, `Initialize`
 - [ ] If the device exposes temperature, add `TemperatureMeasurement`
+- [ ] Discovery commands: `discoverDPs()`, `captureBaseline()`, `captureDiff()`, `setRawDP()`
 - [ ] Hex-buffered `parse(String message)`
 - [ ] CRC32 validation
 - [ ] AES-ECB encrypt/decrypt helpers

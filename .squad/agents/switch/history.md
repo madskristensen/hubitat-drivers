@@ -200,3 +200,27 @@ After Tank delivers driver:
 
 **Enum Label Confirmation:** Switch noted that flame/log color enums (DP 101, 102, 104) are still placeholder strings in v0.1.0 driver. Real-device smoke test will confirm which human-friendly labels map to which Tuya enum values. Scope: after Mads runs tests, report actual observed enum values so Link can document them in README. (Cross-pollination: Tank notes placeholder, Switch test plan validates, Link documents authoritative mapping.)
 
+
+---
+
+## 2026-05-17T18:58:55Z — Touchstone v0.1.4 shipped (Cross-Agent Batch Awareness)
+
+**Batch:** Tank v0.1.3, Tank v0.1.4, Link, Switch (test surface)
+
+### Test Surface for v0.1.4
+
+Switch should be aware of the following v0.1.4 behaviors for the smoke test plan validation:
+
+1. **Power-on defaults:** Optional defaults (flame color, log color, flame brightness, heating setpoint) apply ~1.5s after on() command
+2. **Heater never auto-toggles:** The heater (DP 5) is intentionally NOT in the power-on defaults. It only toggles via explicit setHeatLevel() commands.
+3. **No sandbox reflection errors:** v0.1.4 should install without "Expression [MethodCallExpression] is not allowed: e.getClass()" errors. v0.1.3's buggy reflection calls have been removed.
+
+### v0.1.3 vs v0.1.4 for Smoke Testing
+
+- v0.1.3 was an intermediate state with unsafe heater auto-start + sandbox reflection bugs. Never released.
+- v0.1.4 is the hardened release users will see. Install should succeed without reflection sandbox errors.
+- Test plan expectations remain unchanged; defaults should apply cleanly ~1.5s post-power-on.
+
+### Version Notes for Test Report
+
+When reporting test results, note that this smoke test validates v0.1.4 (released version) against the real device. v0.1.3 exists only in git history as an intermediate state; it was never tested on real hardware.

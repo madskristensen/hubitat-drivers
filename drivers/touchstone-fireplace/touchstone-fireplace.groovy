@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.2
+ * Version: 0.1.4
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -14,11 +14,17 @@
  *   4. Set the DP numbers in Preferences
  *   See README for the full walkthrough.
  *
+ * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
+ *
  * Changelog:
+ *   0.1.4 — 2026-05-17T11:58:55-07:00 — SAFETY: removed defaultHeatLevel auto-apply; BUGFIX: removed sandbox-blocked reflection logging
+ *   0.1.3 — 2026-05-17T11:58:55-07:00 — Optional default-on-power-on settings for flame color, log color, brightness, heat level, and temp setpoint
  *   0.1.2 — 2026-05-17 — Replaced blocked CRC32 import with pure-Groovy implementation (Hubitat import allowlist)
  *   0.1.1 — 2026-05-17T11:24:33-07:00 — Generalized device profiles, in-driver DP discovery, and auditable raw DP writes
  *   0.1.0 — 2026-05-17 — Initial Tuya Local scaffold for power, heat level, flame/log lighting, temperature polling, raw DP surfacing, and socket retry/backoff
  */
+// v0.1.4 — SAFETY: removed defaultHeatLevel auto-apply (heater never auto-starts).
+//          BUGFIX: replaced reflection (e.getClass()) with sandbox-safe exception logging.
 
 import groovy.transform.Field
 import groovy.json.JsonOutput
@@ -26,8 +32,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.2"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.2"
+@Field static final String DRIVER_VERSION = "0.1.4"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.4"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -50,10 +56,16 @@ import javax.crypto.spec.SecretKeySpec
 @Field static final Integer WRITE_REFRESH_DELAY_SECONDS = 3
 @Field static final Integer POWER_REFRESH_DELAY_SECONDS = 8
 @Field static final Long POWER_TRANSITION_SETTLE_MILLIS = 10000L
+@Field static final Integer POWER_ON_DEFAULTS_DELAY_MILLIS = 1500
+@Field static final String POWER_ON_DEFAULT_REASON_PREFIX = "power-on default "
 @Field static final List<Integer> RETRY_DELAYS_SECONDS = [5, 15, 30]
 @Field static final String PROFILE_SIDELINE = "Sideline Elite (tested)"
 @Field static final String PROFILE_GENERIC = "Generic Tuya Fireplace"
 @Field static final String PROFILE_CUSTOM = "Custom"
+@Field static final List<String> FLAME_COLOR_OPTIONS = ["1", "2", "3", "4", "5", "6"]
+@Field static final List<String> FLAME_BRIGHTNESS_OPTIONS = ["1", "2", "3", "4", "5"]
+@Field static final List<String> LOG_COLOR_OPTIONS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
+@Field static final List<String> HEAT_LEVEL_OPTIONS = ["off", "low", "high"]
 @Field static final List<String> BASE_STATUS_DPS = ["1", "2", "3", "5", "13", "14", "15"]
 @Field static final List<String> SIDELINE_DISCOVERY_DPS = ["101", "102", "103", "104", "105", "107", "108"]
 @Field static final Map<String, Integer> SIDELINE_PROFILE_DPS = [power: 1, tempSetC: 2, heatLevel: 5, tempSetF: 14, flameColor: 101, flameBrightness: 102, logColor: 104]
@@ -79,13 +91,13 @@ metadata {
 
         // TODO (Switch): verify these community-derived raw Tuya enum ranges on real Touchstone hardware.
         // Keep the command inputs as raw strings for now so the driver does not pretend to know labels it has not verified.
-        command "setFlameColor", [[name: "color*", type: "ENUM", constraints: ["1", "2", "3", "4", "5", "6"],
+        command "setFlameColor", [[name: "color*", type: "ENUM", constraints: FLAME_COLOR_OPTIONS,
             description: "Raw Tuya enum string for the mapped flame-color DP (Sideline default 101; use setRawDP() for experiments)."]]
-        command "setFlameBrightness", [[name: "level*", type: "ENUM", constraints: ["1", "2", "3", "4", "5"],
+        command "setFlameBrightness", [[name: "level*", type: "ENUM", constraints: FLAME_BRIGHTNESS_OPTIONS,
             description: "Raw Tuya enum string for the mapped flame-brightness DP (Sideline default 102)."]]
-        command "setLogColor", [[name: "color*", type: "ENUM", constraints: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
+        command "setLogColor", [[name: "color*", type: "ENUM", constraints: LOG_COLOR_OPTIONS,
             description: "Raw Tuya enum string for the mapped log-color DP (Sideline default 104)."]]
-        command "setHeatLevel", [[name: "level*", type: "ENUM", constraints: ["off", "low", "high"]]]
+        command "setHeatLevel", [[name: "level*", type: "ENUM", constraints: HEAT_LEVEL_OPTIONS]]
         command "setHeatingSetpoint", [[name: "temperature*", type: "NUMBER", description: "Writes the mapped Fahrenheit or Celsius setpoint DP based on the preferred unit preference."]]
         command "setRawDP", [[name: "dpId*", type: "NUMBER"], [name: "value*", type: "STRING",
             description: "Advanced: raw DP write. true/false become booleans; whole numbers become integers; everything else is sent as a string."]]
@@ -146,6 +158,34 @@ metadata {
               options: ["F": "Fahrenheit (recommended for US Touchstone units)", "C": "Celsius"],
               defaultValue: "F",
               required: true
+
+        paragraph title: "Default settings on power-on (optional)",
+                  description: "Only safe non-heater defaults are applied after the fireplace is turned on from Hubitat. Leave any field blank to keep the fireplace firmware's remembered value."
+
+        if (settings?.deviceProfile != PROFILE_GENERIC) {
+            input name: "defaultFlameColor", type: "enum",
+                  title: "Default flame color",
+                  options: FLAME_COLOR_OPTIONS,
+                  description: "Optional. When set, this flame-color DP value is written after the fireplace is turned on from Hubitat. Leave blank to keep the remembered flame color.",
+                  required: false
+
+            input name: "defaultFlameBrightness", type: "enum",
+                  title: "Default flame brightness",
+                  options: FLAME_BRIGHTNESS_OPTIONS,
+                  description: "Optional. When set, this flame-brightness DP value is written after the fireplace is turned on from Hubitat. Leave blank to keep the remembered flame brightness.",
+                  required: false
+
+            input name: "defaultLogColor", type: "enum",
+                  title: "Default log color",
+                  options: LOG_COLOR_OPTIONS,
+                  description: "Optional. When set, this log-color DP value is written after the fireplace is turned on from Hubitat. Leave blank to keep the remembered log color.",
+                  required: false
+        }
+
+        input name: "defaultHeatingSetpoint", type: "number",
+              title: "Default heating setpoint",
+              description: "Optional. When set, this whole-number target temperature is written after the fireplace is turned on from Hubitat, using the preferred unit above. Leave blank to keep the remembered target temperature.",
+              required: false
 
         input name: "pollInterval", type: "enum",
               title: "Polling interval",
@@ -241,7 +281,11 @@ def on() {
     infoLog "${device.displayName} switch → on"
     markPowerTransitionIfChanged(true)
     applySwitchState(true, "digital")
+    unschedule("applyOnPowerOnDefaults")
+    cancelQueuedPowerOnDefaultWrites()
     sendDpWrite(powerDp.toString(), true, "power on", POWER_REFRESH_DELAY_SECONDS)
+    // DP 14 can revert during off → on; give the firmware a beat before pushing optional defaults.
+    runInMillis(POWER_ON_DEFAULTS_DELAY_MILLIS, "applyOnPowerOnDefaults")
 }
 
 def off() {
@@ -254,6 +298,8 @@ def off() {
     infoLog "${device.displayName} switch → off"
     markPowerTransitionIfChanged(false)
     applySwitchState(false, "digital")
+    unschedule("applyOnPowerOnDefaults")
+    cancelQueuedPowerOnDefaultWrites()
     sendDpWrite(powerDp.toString(), false, "power off", POWER_REFRESH_DELAY_SECONDS)
 }
 
@@ -336,7 +382,7 @@ def setLogColor(String color) {
 
 def setHeatLevel(String level) {
     String normalized = safeStr(level)?.trim()?.toLowerCase()
-    if (!(normalized in ["off", "low", "high"])) {
+    if (!(normalized in HEAT_LEVEL_OPTIONS)) {
         log.warn "[Touchstone] setHeatLevel: invalid level '${level}' — use off, low, or high"
         return
     }
@@ -446,7 +492,6 @@ def parse(String message) {
         }
     } catch (Exception e) {
         log.warn "[Touchstone] parse() failed — ${e.message}"
-        debugLog "parse() exception class=${e.getClass().getName()}"
     }
 }
 
@@ -655,6 +700,95 @@ private void queueDelayedRefresh(Integer delaySeconds) {
 
 def delayedRefresh() {
     refresh()
+}
+
+def applyOnPowerOnDefaults() {
+    if (!preferencesReady()) {
+        debugLog "Skipping power-on defaults because configuration is incomplete"
+        return
+    }
+    if (safeStr(device.currentValue("switch")) != "on") {
+        debugLog "Skipping power-on defaults because the fireplace is no longer on"
+        return
+    }
+
+    // SAFETY: The heater (DP 5) is intentionally excluded from defaults.
+    // Auto-starting a radiant heat element is a fire/burn risk.
+    // Heater state changes ONLY via explicit setHeatLevel() user commands.
+    Boolean appliedAny = false
+
+    String flameColor = safeStr(settings.defaultFlameColor)?.trim()
+    if (flameColor) {
+        Integer flameColorDp = dpFor("flameColor")
+        if (flameColorDp != null) {
+            emitAttribute("flameColor", flameColor, "${device.displayName} default flame color set to ${flameColor}", "digital")
+            infoLog "Applied default: flameColor=${flameColor}"
+            sendDpWrite(flameColorDp.toString(), flameColor, "${POWER_ON_DEFAULT_REASON_PREFIX}flame color", WRITE_REFRESH_DELAY_SECONDS)
+            appliedAny = true
+        } else {
+            log.warn "[Touchstone] defaultFlameColor is set but flame color is not mapped for profile '${activeDeviceProfile()}'"
+        }
+    }
+
+    String flameBrightness = safeStr(settings.defaultFlameBrightness)?.trim()
+    if (flameBrightness) {
+        Integer flameBrightnessDp = dpFor("flameBrightness")
+        if (flameBrightnessDp != null) {
+            emitAttribute("flameBrightness", flameBrightness, "${device.displayName} default flame brightness set to ${flameBrightness}", "digital")
+            infoLog "Applied default: flameBrightness=${flameBrightness}"
+            sendDpWrite(flameBrightnessDp.toString(), flameBrightness, "${POWER_ON_DEFAULT_REASON_PREFIX}flame brightness", WRITE_REFRESH_DELAY_SECONDS)
+            appliedAny = true
+        } else {
+            log.warn "[Touchstone] defaultFlameBrightness is set but flame brightness is not mapped for profile '${activeDeviceProfile()}'"
+        }
+    }
+
+    String logColor = safeStr(settings.defaultLogColor)?.trim()
+    if (logColor) {
+        Integer logColorDp = dpFor("logColor")
+        if (logColorDp != null) {
+            emitAttribute("logColor", logColor, "${device.displayName} default log color set to ${logColor}", "digital")
+            infoLog "Applied default: logColor=${logColor}"
+            sendDpWrite(logColorDp.toString(), logColor, "${POWER_ON_DEFAULT_REASON_PREFIX}log color", WRITE_REFRESH_DELAY_SECONDS)
+            appliedAny = true
+        } else {
+            log.warn "[Touchstone] defaultLogColor is set but log color is not mapped for profile '${activeDeviceProfile()}'"
+        }
+    }
+
+    Integer requestedSetpoint = safeInt(settings.defaultHeatingSetpoint, null)
+    if (requestedSetpoint != null) {
+        String unit = preferredTempUnit()
+        Integer setpointDp = dpFor(unit == "F" ? "tempSetF" : "tempSetC")
+        Integer clampedSetpoint = clampSetpoint(requestedSetpoint, unit)
+        if (setpointDp != null) {
+            emitAttribute("heatingSetpoint", clampedSetpoint, "${device.displayName} default heating setpoint set to ${clampedSetpoint}°${unit}", "digital", unit)
+            infoLog "Applied default: heatingSetpoint=${clampedSetpoint}°${unit}"
+            sendDpWrite(setpointDp.toString(), clampedSetpoint, "${POWER_ON_DEFAULT_REASON_PREFIX}heating setpoint", WRITE_REFRESH_DELAY_SECONDS)
+            appliedAny = true
+        } else {
+            log.warn "[Touchstone] defaultHeatingSetpoint is set but the preferred-unit setpoint DP is not mapped for profile '${activeDeviceProfile()}'"
+        }
+    }
+
+    if (appliedAny) {
+        queueDelayedRefresh(POWER_REFRESH_DELAY_SECONDS)
+    }
+}
+
+private void cancelQueuedPowerOnDefaultWrites() {
+    List<Map> queue = pendingRequestQueue()
+    if (!queue) {
+        return
+    }
+
+    List<Map> filtered = queue.findAll { Map request ->
+        !(safeStr(request.reason)?.startsWith(POWER_ON_DEFAULT_REASON_PREFIX))
+    }
+    if (filtered.size() != queue.size()) {
+        state.pendingRequests = filtered
+        debugLog "Dropped ${queue.size() - filtered.size()} queued power-on default write(s)"
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1448,7 +1582,8 @@ private String dpValueType(Object value) {
     if (value instanceof Map) {
         return "map"
     }
-    return value.getClass().getSimpleName().toLowerCase()
+    // Hubitat blocks reflection helpers like getClass(), so unknown DP values log generically.
+    return "object"
 }
 
 private Boolean asBoolean(Object value) {
