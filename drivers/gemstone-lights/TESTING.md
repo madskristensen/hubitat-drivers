@@ -4,7 +4,7 @@
 **Test Target:** Gemstone cloud REST API  
 **Platform:** Hubitat C-7 / C-8  
 **Created:** 2026-05-16  
-**Last Updated:** 2026-05-16  
+**Last Updated:** 2026-05-16T21:44:01-07:00  
 
 ---
 
@@ -291,3 +291,206 @@ During all tests, watch for these regressions:
 ---
 
 **Once all items are checked, v0.4.0 is ready for beta testing.**
+
+---
+
+## Tests 11–18: `playEffectByName` command (v0.4.1)
+
+These tests cover the new `playEffectByName(String name)` command added in v0.4.1.
+Purpose: WebCoRE's action picker does not expose overloaded capability methods with a string
+input, so `playEffectByName` is added as a discrete command that delegates to `setEffect(String)`.
+
+---
+
+## Test 11: WebCoRE action picker visibility
+
+**What:** Verify that `playEffectByName` appears in WebCoRE's action picker with a single STRING input, and that both commands remain visible.
+
+**Steps:**
+
+1. In WebCoRE (accessible from Apps on the Hubitat hub), create a new piston.
+2. Click **+ New Piston → Create a blank piston**.
+3. Add an action block. When prompted to select a device, choose the Gemstone Lights device.
+4. In the action list, note all commands shown for the device.
+5. Locate `playEffectByName` in the list and select it. Observe the input field type presented.
+6. Also locate `setEffect` in the list and observe its input field type.
+
+**Expected:**
+
+- `playEffectByName` appears as a distinct action with a single **string** (text) input field.
+- `setEffect` (the standard capability command) still appears separately; its numeric overload presents a **number** input.
+- Both commands are visible in the same picker — user chooses based on whether they prefer name-based or index-based invocation.
+- Neither command is missing or duplicated.
+
+**Pass/Fail:** PASS if both commands are listed and `playEffectByName` shows a string input. FAIL if `playEffectByName` is absent or shows a numeric input.
+
+---
+
+## Test 12: Happy path — play effect by name
+
+**What:** Verify that `playEffectByName("Pulse")` produces identical results to `setEffect("Pulse")`.
+
+**Setup:** Driver is authenticated. Effect catalog has been loaded (run `refreshEffectCatalog()` if needed). "Pulse" (or substitute another known effect name) exists in `lightEffects`. Lights are ON.
+
+**Steps:**
+
+1. On the Hubitat device page **Commands** tab, find `playEffectByName`.
+2. Enter `Pulse` in the string input field (without quotes).
+3. Click the **playEffectByName** button.
+4. Watch the device attributes, the physical lights, and the Logs tab.
+
+**Expected:**
+
+- Physical lights begin playing the Pulse effect within a few seconds.
+- `effectName` attribute updates to `Pulse` (or `⭐ Pulse` if it is a favorite).
+- `colorMode` becomes **EFFECTS**.
+- A log line confirms the effect was activated (same message pattern as `setEffect`).
+- No stack traces or error messages appear.
+
+**Pass/Fail:** PASS if lights respond and attributes update as above. FAIL if nothing happens or an error is logged.
+
+---
+
+## Test 13: Happy path — starred favorite name
+
+**What:** Verify that `playEffectByName("⭐ Pulse")` (the starred prefix form) resolves to the same effect as `playEffectByName("Pulse")`.
+
+**Setup:** Same as Test 12. `⭐ Pulse` must exist in `favoriteEffects`; if not, substitute with any starred favorite shown in `lightEffects`.
+
+**Steps:**
+
+1. On the device page **Commands** tab, enter `⭐ Pulse` in the `playEffectByName` input.
+2. Click **playEffectByName**.
+3. Observe the physical lights, `effectName`, and logs.
+
+**Expected:**
+
+- Driver strips the `⭐ ` prefix and resolves to the same pattern ID as plain `Pulse`.
+- Physical lights, `effectName`, and `colorMode` behave identically to Test 12.
+- Log confirms the same effect was activated — no "not found" warning.
+
+**Pass/Fail:** PASS if behavior matches Test 12. FAIL if the driver logs a "not found" error for the starred form.
+
+---
+
+## Test 14: Empty / null / whitespace input
+
+**What:** Verify that invalid inputs to `playEffectByName` are rejected with the same validation behavior as `setEffect(String)`.
+
+**Steps:**
+
+1. On the device page **Commands** tab, enter an **empty string** (leave the field blank) and click **playEffectByName**.
+2. Check logs.
+3. Enter a string of spaces only (e.g., three spaces) and click **playEffectByName**.
+4. Check logs.
+5. If the Hubitat UI allows it, attempt to invoke `playEffectByName(null)` via Rule Machine custom action or direct device command call.
+
+**Expected:**
+
+- For each invalid input, the driver logs a message indicating the name must be non-empty (same message wording as `setEffect(String)` validation).
+- No state change occurs: `effectName`, `colorMode`, and the physical lights remain unchanged from before each call.
+- No stack traces (`NullPointerException`, `MissingMethodException`, etc.).
+
+**Pass/Fail:** PASS if the driver rejects all three inputs cleanly. FAIL if any input causes a state change or unhandled exception.
+
+---
+
+## Test 15: Unknown effect name
+
+**What:** Verify that an unrecognized name produces the same "not found" behavior as `setEffect("not a real effect")`.
+
+**Steps:**
+
+1. On the device page **Commands** tab, enter `not a real effect` in the `playEffectByName` input.
+2. Click **playEffectByName**.
+3. Inspect the Logs tab immediately after.
+
+**Expected:**
+
+- The driver logs a "not found" (or equivalent) message for the given name.
+- The log line includes the full favorites-first effect list (identical to the diagnostic output from `setEffect("not a real effect")`) so the user can see what names are available.
+- No state change: `effectName` and `colorMode` are unchanged, physical lights are unaffected.
+
+**Pass/Fail:** PASS if the not-found log appears with the effect list. FAIL if the driver crashes, silently does nothing, or changes state.
+
+---
+
+## Test 16: Catalog refresh trigger
+
+**What:** Verify that `playEffectByName` triggers a catalog refresh and replays when the catalog is stale or missing — same as `setEffect(String)`.
+
+**Setup:** Either (a) wait more than 1 hour after the last `refreshEffectCatalog()` call so the catalog is considered stale, or (b) force staleness by clearing state (hub reboot then skip the initial catalog load).
+
+**Steps:**
+
+1. Confirm the effect catalog is stale or absent (check logs for the last catalog load timestamp, or confirm `lightEffects` is empty).
+2. On the device page, run `playEffectByName("Pulse")` (or any known effect name).
+3. Watch the Logs tab.
+
+**Expected:**
+
+- The driver recognizes the stale/missing catalog and queues the effect name for replay.
+- A catalog refresh request is issued immediately.
+- After the catalog loads, the queued `playEffectByName("Pulse")` executes automatically.
+- `effectName`, `colorMode`, and physical lights update as in Test 12.
+- Log sequence mirrors the behavior of `setEffect(String)` under the same stale-catalog condition.
+
+**Pass/Fail:** PASS if the effect plays after the automatic refresh with no manual retry needed. FAIL if the driver throws an error or never activates the effect.
+
+---
+
+## Test 17: Both commands work in the same WebCoRE piston (regression)
+
+**What:** Verify that `setEffect(0)` and `playEffectByName("Pulse")` can coexist in the same piston without interfering with each other.
+
+**Setup:** WebCoRE is installed and working. Both effects are available in the catalog.
+
+**Steps:**
+
+1. In WebCoRE, create a new piston with two sequential actions on the Gemstone device:
+   - **Action 1:** `setEffect(0)` — plays the first favorite by index.
+   - **Action 2:** Wait 5 seconds.
+   - **Action 3:** `playEffectByName("Pulse")` — plays Pulse by name.
+2. Run the piston manually (or trigger it).
+3. Watch the physical lights, `effectName`, and logs.
+
+**Expected:**
+
+- Action 1 activates the first favorite effect; `effectName` and `colorMode` update.
+- After the wait, Action 3 activates Pulse; `effectName` and `colorMode` update again.
+- Each invocation produces its own clean log line with no errors.
+- No interference or state corruption between the two commands.
+
+**Pass/Fail:** PASS if both execute correctly in sequence. FAIL if either command errors out or state is corrupted.
+
+---
+
+## Test 18: From Rule Machine (regression, non-WebCoRE)
+
+**What:** Verify that `playEffectByName` is accessible and functional from Hubitat Rule Machine.
+
+**Steps:**
+
+1. In Hubitat, open **Apps → Rule Machine → Create New Rule**.
+2. Give the rule a name (e.g., "Test playEffectByName").
+3. Add a **Trigger** of your choice (e.g., a virtual switch turning on).
+4. Under **Actions**, choose **Custom action**.
+5. Select the Gemstone Lights device.
+6. In the command list, select `playEffectByName`.
+7. Enter `Pulse` as the parameter value.
+8. Save the rule and trigger it.
+9. Observe the physical lights, `effectName`, and logs.
+
+**Expected:**
+
+- `playEffectByName` appears in Rule Machine's custom-action command list.
+- After the trigger fires, lights play the Pulse effect.
+- `effectName` updates to `Pulse` (or `⭐ Pulse`) and `colorMode` becomes **EFFECTS**.
+- Log confirms execution — identical to direct invocation from the device page.
+- No errors or uncaught exceptions in the Hubitat log.
+
+**Pass/Fail:** PASS if the command is visible in RM and executes correctly. FAIL if the command is absent from RM or produces an error.
+
+---
+
+**Once all items are checked, v0.4.1 is ready for beta testing.**

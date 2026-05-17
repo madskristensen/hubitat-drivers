@@ -30,6 +30,19 @@ Link is the DevRel and Documentation specialist. See `history-archive.md` for de
 
 Pattern learned: troubleshooting entries for pre-release bugs should follow symptom → cause (pre-vX.Y.Z) → fix structure; this makes it clear to users on old versions why they're seeing it, and on new versions what to do. Bootstrap script documentation is best kept to a short code block + one-line explanation (tokens.json → access token → locationId); full details about `homebridge-tekmar-wifi` already exist in Step 1.
 
+## Team Updates (2026-05-16T21:44:01-07:00)
+
+**Gemstone Lights v0.4.1 documentation complete.** Tank added `playEffectByName(String)` command to sidestep WebCoRE's capability-metadata shadowing: the `LightEffects` capability declares `setEffect` as taking a NUMBER, so WebCoRE's action picker only exposes that numeric signature and silently hides the `setEffect(String)` overload. The new `playEffectByName()` command (a separate method name with no overload) is fully visible to WebCoRE and delegates to `setEffect(String)` internally. Link documented v0.4.1:
+- Bumped status badge in both drivers/gemstone-lights/README.md (line 9) and root README.md (line 5) to v0.4.1
+- Added `playEffectByName(String name)` to Custom Commands section with full explanation of why it exists (capability metadata shadowing)
+- Added new "Using from WebCoRE" section explaining the visibility issue, how to use the command from WebCoRE pistons, and confirming Rule Machine / Hubitat rules can use either method
+- Added v0.4.1 changelog entry with date (2026-05-16) and short rationale
+- Updated "What v0.4.1 Does" section to mention playEffectByName() as a new feature
+
+Pattern learned: **WebCoRE-command-visibility for overloaded methods.** When a Hubitat capability declares a method with a specific signature (e.g., `setEffect(NUMBER)`), WebCoRE only exposes that signature to its action picker. Custom overloads of that method are invisible. The solution: create a separate command name (no overload conflict) that wraps the string-based implementation. This is clearer than documenting "use Rule Machine instead" because it gives WebCoRE users a direct path. Document the visibility issue, not just the workaround — users need to understand why the separate command exists.
+
+- 2026-05-17T04:44:00Z: v0.4.1 Gemstone Lights shipped (playEffectByName command + docs + tests) — tank/link/switch cross-team ship
+
 ## Learnings
 
 - **README install-flow pattern for command-based token bootstrap:** When a value exceeds platform preference limits (Hubitat ~1024 chars), document the command-based path separately from preferences config. Use a blockquote to explain *why* the unusual flow is necessary, so users don't assume it's a workaround. Keep the "why" terse (one sentence max).

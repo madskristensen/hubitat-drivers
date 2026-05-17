@@ -165,3 +165,5 @@ List-body endpoints (`GET /Location`, `GET /Location/{id}/Devices`) can't be han
 ### WebCoRE Capability-Overload Shadowing (v0.4.1)
 
 When a Hubitat driver declares `capability "LightEffects"`, Hubitat registers `setEffect(NUMBER)` as the canonical capability method in its metadata. WebCoRE's action picker reads that metadata. If you also declare `command "setEffect", [[type:"STRING"]]` in the same `definition{}`, it is a *Groovy overload* of the same method name — but WebCoRE only sees the one signature from the capability descriptor, so the String overload is **invisible** to the WebCoRE UI. The fix: give the WebCoRE-facing command a **distinct name** (`playEffectByName`) so there is no overload collision. WebCoRE then sees it as a separate command and renders a STRING input field. The implementation is a one-liner delegate to the existing `setEffect(String)` — no duplicated logic. Confidence: confirmed by Mads' production WebCoRE install.
+
+- 2026-05-17T04:44:00Z: v0.4.1 Gemstone Lights shipped (playEffectByName command + docs + tests) — tank/link/switch cross-team ship

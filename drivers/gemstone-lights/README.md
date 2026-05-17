@@ -6,11 +6,11 @@ Integrates Gemstone permanent outdoor LED strings with Hubitat Elevation via the
 
 > **Status: beta — working, author-tested in production on a real Gemstone controller.**
 >
-> **Latest: v0.4.0** — LightEffects with favorites, ColorTemperature RGB fallback, refresh optimizations. See [releases](https://github.com/madskristensen/hubitat-drivers/releases) for what's new.
+> **Latest: v0.4.1** — Adds `playEffectByName(String)` for WebCoRE users — same behavior as `setEffect("name")`, but visible to WebCoRE's action picker. See [releases](https://github.com/madskristensen/hubitat-drivers/releases) for what's new.
 >
 > **Killer feature:** favorites-first `LightEffects` plus named-effect support. Dashboards get the standard `lightEffects` dropdown, while Rule Machine and custom actions can call `setEffect("Pulse")` or `setEffect("⭐ Pulse")`.
 >
-> **Architecture:** v0.4.0 authenticates with your Gemstone account email/password via AWS Cognito `USER_PASSWORD_AUTH`, caches tokens in driver `state`, binds to the first Gemstone controller discovered in the first home group that contains a device, and maps Hubitat `setColorTemperature()` to an RGB white-spectrum fallback because the public reverse-engineered Gemstone cloud API does not expose a native CCT endpoint.
+> **Architecture:** v0.4.1 authenticates with your Gemstone account email/password via AWS Cognito `USER_PASSWORD_AUTH`, caches tokens in driver `state`, binds to the first Gemstone controller discovered in the first home group that contains a device, and maps Hubitat `setColorTemperature()` to an RGB white-spectrum fallback because the public reverse-engineered Gemstone cloud API does not expose a native CCT endpoint.
 
 ## Supported Capabilities
 
@@ -49,6 +49,7 @@ Integrates Gemstone permanent outdoor LED strings with Hubitat Elevation via the
 
 - **`refreshEffectCatalog()`** — Loads Gemstone effect names into the driver's cache from the cloud and rebuilds `lightEffects`, `favoriteEffects`, `state.favorites`, and `state.effectCatalog`.
 - **`setEffect(String name)`** — Matches `name` case-insensitively after trimming and accepts either the raw name (`Pulse`) or the dashboard label (`⭐ Pulse`).
+- **`playEffectByName(String name)`** — Same as `setEffect("name")` but exposed as a distinct command for WebCoRE. WebCoRE inspects capability metadata and only sees the numeric `setEffect(NUMBER)` signature, so the String overload of `setEffect` is invisible from WebCoRE's action picker. Use this command instead from WebCoRE pistons. Accepts the raw name (`Pulse`) or the dashboard label (`⭐ Pulse`).
 
 ## Installation
 
@@ -138,7 +139,15 @@ Because this is an RGB fallback, the exact warm/cool rendering still depends on 
 - **When sunset →** `setColorTemperature(2700, 80)`
 - **When effect changes →** notify if `colorMode == 'EFFECTS'`
 
-## What v0.4.0 Does
+## Using from WebCoRE
+
+WebCoRE's action picker exposes commands based on capability metadata. The `LightEffects` capability declares `setEffect` as taking a number, so WebCoRE only offers the numeric form. To invoke effects by name from WebCoRE, use `playEffectByName` instead — it's a separate command that takes a STRING parameter and is fully visible to WebCoRE.
+
+In your piston: pick the Gemstone device → action → `playEffectByName` → enter the effect name (e.g., `Pulse` or `⭐ Pulse`).
+
+Rule Machine and Hubitat rules can use either `setEffect("Pulse")` or `playEffectByName("Pulse")` — both work.
+
+## What v0.4.1 Does
 
 - Logs into Gemstone's AWS Cognito user pool with your email/password
 - Stores `accessToken`, `refreshToken`, and `idToken` in driver `state`
@@ -146,15 +155,16 @@ Because this is an RGB fallback, the exact warm/cool rendering still depends on 
 - Uses `Authorization: Bearer <accessToken>` for Gemstone's API Gateway requests, matching the documented cloud spec
 - Pre-serializes Cognito and Gemstone JSON bodies before handing them to Hubitat's HTTP client; Cognito still receives `Content-Type: application/x-amz-json-1.1` on the wire
 - Retries once on HTTP `401` by refreshing the token, then replaying the request
-- Drives `on()`, `off()`, `setLevel()`, `setColor()`, `setColorTemperature()`, `refresh()`, `refreshEffectCatalog()`, `setEffect(name)`, `setEffect(index)`, `setNextEffect()`, and `setPreviousEffect()` against the cloud REST API
+- Drives `on()`, `off()`, `setLevel()`, `setColor()`, `setColorTemperature()`, `refresh()`, `refreshEffectCatalog()`, `setEffect(name)`, `setEffect(index)`, `setNextEffect()`, `setPreviousEffect()`, and `playEffectByName()` against the cloud REST API
 - Caches effect names for 1 hour and automatically reloads them when the catalog is empty or stale
 - Merges built-in Gemstone-managed effects with your saved presets, preferring the saved preset when names collide
 - Surfaces favorites first everywhere user-facing: `lightEffects`, `favoriteEffects`, info logs, and the ordered in-memory catalog
 - Uses optimistic Hubitat events so the UI feels instant while the cloud catches up
+- Exposes `playEffectByName()` as a separate command for WebCoRE compatibility
 
 ## Current Limitations
 
-- **Cloud-only:** v0.4.0 does not use Gemstone's local HTTP path
+- **Cloud-only:** v0.4.1 does not use Gemstone's local HTTP path
 - **One controller per Hubitat device:** the driver auto-selects the first Gemstone controller found in the first home group with devices
 - **ColorTemperature is an RGB fallback:** the Gemstone cloud spec still exposes no native Kelvin/CCT endpoint
 - **Favorites require a catalog refresh:** the driver auto-refreshes on demand, but manual `refreshEffectCatalog()` is still the fastest way to pick up newly starred/unstarred patterns
@@ -216,6 +226,11 @@ See `TESTING.md` for the manual plan covering:
 This driver was informed by the Gemstone cloud API reverse engineering in:
 - [`sslivins/hass-gemstone`](https://github.com/sslivins/hass-gemstone)
 - [`sslivins/pygemstone`](https://github.com/sslivins/pygemstone)
+
+## Changelog
+
+- **v0.4.1 (2026-05-16):** Added `playEffectByName(String)` — separate command for WebCoRE users (WebCoRE doesn't see custom String overloads of capability methods).
+- **v0.4.0** — LightEffects with favorites, ColorTemperature RGB fallback, refresh optimizations.
 
 ## License
 
