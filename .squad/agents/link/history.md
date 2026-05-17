@@ -60,3 +60,20 @@ Pattern learned: **WebCoRE-command-visibility for overloaded methods.** When a H
 
 Link also tightened the intro paragraph to clarify that the refresh token is handed to the driver via the `setRefreshToken` command, not pasted into preferences. Documentation now accurately reflects the production flow.
 
+
+---
+
+## 2026-05-17T16:31:55Z — Bosch Home Connect Scoping (Cypher + Trinity)
+
+**Topic:** bosch-home-connect-feasibility
+
+Scoping discussion completed. Implementation will follow.
+
+**ACTION FOR LINK:** When spawned to write README:
+- Device Flow OAuth2 is the auth pattern (no external redirect URI needed)
+- User must register app at developer.home-connect.com (free, self-service)
+- Walkthrough: user enters client_id + client_secret in app preferences, taps Authorize, opens verification URL on phone, enters user code, grants access
+- Polling cadence: 90-120s (rate limit constraint)
+- Single appliance (fridge) or multi-appliance support
+
+See .squad/decisions/decisions.md section 9 (Auth Flow — Device Flow, Step by Step) for complete OAuth flow reference.
