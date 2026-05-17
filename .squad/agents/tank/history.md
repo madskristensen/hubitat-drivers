@@ -121,3 +121,33 @@ ow > expiresAt - 300
 ---
 
 **For detailed learning notes, see archived history.**
+
+---
+
+## 2026-05-17T17:14:00Z — Touchstone Tuya Portal-Free Key Extraction Audit (Cypher — Conclusion)
+
+**Topic:** tuya-portal-free-2026
+
+Cypher completed definitive audit of all 2026 Tuya local-key extraction methods. **Conclusion affects Touchstone driver UX.**
+
+### KEY FINDING
+
+**Portal-free path exists but is not applicable to Mads** (no Home Assistant). The iot.tuya.com portal signup (which Mads is already pursuing via Coordinator walkthrough) is the **durable and correct choice** for the Touchstone driver.
+
+### Technical Summary
+
+- **Portal-free path:** `make-all/tuya-local` cloud-auth (HA integration) via `apigw.iotbing.com`. Requires Home Assistant + SmartLife app scan. **Relies on hardcoded Tuya `client_id` that can be revoked unilaterally.**
+- **All other portal-free methods:** Broken (MITM deprecated 2022), impractical (ADB backup blocked), or not applicable (BLE is setup-only, not for key material).
+- **For Mads (no HA):** `tinytuya wizard` or direct iot.tuya.com setup is the only option. Mads is mid-flow on the latter.
+
+### Impact on Touchstone README
+
+Tank's driver will work with any local key source. Link should document **both** key-extraction methods in README:
+1. **Preferred (if user has HA):** `make-all/tuya-local` cloud-auth (5 min, no dev account) — note the Tuya client_id dependency
+2. **Fallback (no HA):** `tinytuya wizard` via iot.tuya.com (20 min, free dev account) — or direct signup like Mads
+
+**No changes to Touchstone driver architecture.** Both key-extraction paths yield the same permanent `localKey` value for Tuya Local (LAN) protocol.
+
+See `.squad/decisions.md` section "2026-05-17: 2026 Tuya Portal-Free Key Extraction Assessment" for full audit and SUPERSEDES note correcting prior session cypher-6 claims.
+
+

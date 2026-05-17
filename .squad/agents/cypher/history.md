@@ -43,20 +43,82 @@ Neither `has-gemstone` (HA integration) nor pygemstone (sslivins) is available l
 
 Full report at: `.squad/decisions/inbox/cypher-gemstone-color-ct-both-broken.md`
 
-## Learnings
+## 2026-05-17 (session cypher-4) — Bosch Home Connect Fridge Driver Feasibility
 
-### 2026-05-16T22:27:55-07:00 — Gemstone setColor vs setColorTemperature payload diff (HTTP 400 investigation)
+**Full report:** `.squad/decisions/inbox/cypher-bosch-home-connect-feasibility.md`
 
-**Finding:** `buildColorRequest` and `buildColorTemperatureRequest` produce **structurally identical JSON payloads** for `/deviceControl/play/pattern`. Both paths use `currentOrDefaultPattern()` as seed and explicitly set the same 6 fields (`id`, `name`, `animation`, `colors`, `brightness`, `referencePatternId`). The remaining 3 fields (`speed`, `direction`, `backgroundColor`) come from `currentOrDefaultPattern()` defaults. No code-level defect found that would cause one to 400 while the other succeeds.
+**Verdict:** Feasible with caveats. SSE not usable in Hubitat; polling at ≥90s cadence is the path. 1,000 req/day hard limit is the binding constraint.
 
-**Key numbers for `setColor(hue:68, sat:69, level:43)`:**
-- `hubitatHueSatToArgb(68, 69)` = **6,115,327** (0x005D4FFF, valid positive Integer, hue=244.8°)
-- `levelToWireBrightness(43)` = **110** (valid 0–255 range)
+---
 
-**Root cause — UNCONFIRMED:** The 400 response body is not captured by Hubitat's async callback (`response.getData()` returns null/empty for 4xx). All structural hypotheses remain speculative without the actual error message.
+## 2026-05-17 (session cypher-5) — Bosch Home Connect Consumer Auth Landscape
 
-**Most likely diagnostic path:** Tank to add `debugLog "setColor pattern body: ${groovy.json.JsonOutput.toJson(pattern)}"` before the PUT + improve 400 body capture in `apiResponseCallback`. See `.squad/decisions/inbox/cypher-gemstone-setcolor-400-fix.md` for full spec.
+**Full report:** `.squad/decisions/inbox/cypher-bosch-consumer-auth-options.md`
 
-**pygemstone wire format confirmed:** The 9 canonical fields for PUT /deviceControl/play/pattern are: `id`, `name`, `colors` (list of ARGB ints), `animation`, `brightness`, `speed`, `direction`, `backgroundColor`, `referencePatternId`. Source: `sslivins/pygemstone/src/pygemstone/models.py` `Pattern.to_api()`.
+**Verdict:** No viable consumer-auth-only path exists for Hubitat. Developer portal remains the only feasible route.
 
-**Potential stale-field risk:** `currentOrDefaultPattern()` does NOT strip unknown fields when `state.lastPattern` was set by `activateEffectByPattern` (cloud effect). Extra fields like `ownerId`/`folderId`/`createdAt` may survive into the PUT body. Fix: whitelist to the 9 canonical fields before overriding in both `buildColorRequest` and `buildColorTemperatureRequest`.
+---
+
+## 2026-05-17 (session cypher-6) — Touchstone LED Fireplace / Tuya Feasibility
+
+**Full report:** `.squad/decisions/inbox/cypher-touchstone-tuya-feasibility.md`
+
+**Verdict:** Yes-with-caveats. Tuya Local (LAN) is the right path. DP map confirmed from reference implementation.
+
+**Key finding:** `make-all/tuya-local` HA integration has a config file for the **Touchstone Sideline** specifically (product ID `qhwld7e4eqvu5fbp`). All DPs captured.
+
+**Color zone correction:** Flame color (DP 101) and ember color (DP 104) are both **named palette indices** (6 and 12 options respectively), not free-form RGB or HSV. `ColorControl` is the wrong capability; named custom commands are the right design.
+
+**Local key extraction:** Two paths — (a) `tinytuya wizard` via free Tuya IoT dev portal, or (b) `make-all/tuya-local` cloud-auth using SmartLife app credentials with NO developer portal required. Path (b) is the recommended UX, passes Mads' "no developer app" boundary if he has HA.
+
+---
+
+## 2026-05-17 (session cypher-7) — 2026 Tuya Portal-Free Key Extraction Audit
+
+**Full report:** `.squad/decisions/inbox/cypher-tuya-portal-free-2026.md`
+
+**Verdict: Yes-but-fragile.** One genuinely portal-free path exists in 2026. All others are broken or require iot.tuya.com.
+
+**Correction to session cypher-6:** The prior entry said `make-all/tuya-local` cloud-auth "passes Mads' no developer app boundary if he has HA." That was under-flagged. The three constraints that were glossed over:
+1. Requires Home Assistant to be installed — not a standalone tool
+2. Relies on hardcoded Tuya-issued `client_id = "HA_3y9q4ak7g4ephrvke"` (`schema = "haauthorize"`) — revocable by Tuya at any time
+3. Auth endpoint is `apigw.iotbing.com` (consumer Smart Life API) — not `iot.tuya.com`, which is why it's "portal-free," but this distinction was not explained
+
+**Method map (2026 final state):**
+- `make-all/tuya-local` cloud-auth: **Portal-free, but requires HA.** QR scan of SmartLife app against `apigw.iotbing.com`. Stable until Tuya revokes the HA client_id.
+- `localtuya` (HA): **Requires iot.tuya.com** (Client ID + Secret + User ID). The "not mandatory" note means you skip it and enter keys manually — still need to get the key somehow.
+- `tinytuya wizard`: **Requires iot.tuya.com.** Confirmed.
+- `tuya-cli` MITM: **Broken.** Officially deprecated in tuyapi SETUP.md; Tuya encrypts app traffic since ~2022.
+- Smart Life ADB backup: **Broken for most users.** `allowBackup=false` blocks ADB backup. Rooted-phone direct filesystem access is the only path and requires SQLCipher key derivation — impractical.
+- BLE provisioning: **Not applicable.** Local key is generated server-side; BLE transmits WiFi credentials only, never the local_key.
+- `tuyapi` consumer API (`a1.tuyaus.com`): **No working tool in 2026.** No maintained reverse-engineered path returns local_keys. MITM broken.
+
+---
+
+## Learnings Summary
+
+### 2026-05-17 — Tuya Key-Extraction Landscape (Portal-Free Audit)
+
+**Definitive status:**
+- **Only viable portal-free method:** `make-all/tuya-local` cloud-auth (HA required; uses hardcoded Tuya `client_id` that can be revoked)
+- **All alternatives:** MITM broken (2022), ADB blocked, BLE not applicable, no maintained reverse-engineered tools
+- **For Mads (no HA):** iot.tuya.com portal signup is the correct, durable choice
+- **Key insight:** "Portal-free" requires HA + SmartLife auth, not truly standalone. Fragility: client_id revocation breaks all HA users simultaneously.
+- **Tuya 2025-2026 changes:** Portal trial limited to 1 month (renewable), but local_key persists indefinitely after extraction
+
+### 2026-05-17 — Touchstone Tuya Local (LAN) Integration
+
+**Protocol & Feasibility:**
+- Product confirmed: Sideline v3.3 (AES-128-ECB, rawSocket stable with 20s keepalive)
+- DP map complete: Power(1), Flame color palette(101, 6 effects), Brightness(102, 5 steps), Speed(103), Ember palette(104, 12 colors), Log brightness(105, 12 steps)
+- **Palette correction:** NOT RGB/HSV — use named custom commands, not ColorControl
+- Platform: Hubitat rawSocket + javax.crypto confirmed available; v3.4/v3.5 requires session-key negotiation (1 session cost if needed)
+
+### 2026-05-17 — Bosch Home Connect API + Auth
+
+**Developer API only path:** Device Flow OAuth2 (no redirect URI). 1,000 req/day hard limit (90-120s polling). Consumer WebSocket path blocked by missing Hubitat support (no persistent WebSocket, TLS-PSK unsupported, CAPTCHA breaks automation).
+
+### Gemstone Lights — setColor 400 Investigation
+
+**Status:** Root cause unconfirmed (response.getData() returns null for 4xx). Three candidates: synthetic pattern ID, missing alpha byte (0xFF), or stale fields in payload. Diagnostic path: capture error message + whitelist fields to 9 canonical ones.
+

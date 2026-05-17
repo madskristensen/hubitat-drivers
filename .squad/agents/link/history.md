@@ -121,3 +121,43 @@ Prepare README documentation for once architecture is locked. Key sections:
 See `.squad/orchestration-log/2026-05-17T165347Z-trinity.md` for architecture details and `.squad/orchestration-log/2026-05-17T165347Z-cypher.md` for Tuya protocol + local-key extraction deep dive (sources included).
 
 **Key learning:** Local key extraction UX is one-time only and has a no-account path (SmartLife credentials via HA). Document both methods clearly so users understand the trade-offs. README should separate "prefer Method A" vs. "fallback to Method B" flow.
+
+---
+
+## 2026-05-17T17:14:00Z — Touchstone Tuya Portal-Free Key Extraction Audit (Cypher — Conclusion)
+
+**Topic:** tuya-portal-free-2026
+
+Cypher completed definitive audit of all 2026 Tuya local-key extraction methods. **Conclusion affects Touchstone README documentation.**
+
+### KEY FINDING
+
+**Portal-free path exists but is not applicable to Mads** (no Home Assistant). The iot.tuya.com portal signup (which Mads is already pursuing) is the **durable and correct choice** for the Touchstone driver.
+
+### Summary for Link
+
+Two documented local-key extraction methods exist:
+
+1. **Preferred path (requires Home Assistant):** `make-all/tuya-local` cloud-auth
+   - Uses SmartLife app credentials directly (QR scan)
+   - ~5 minutes, no developer account needed
+   - **Fragility note:** Relies on Tuya-issued hardcoded `client_id` in HA integration; Tuya can revoke unilaterally
+   - Recommended for users with HA already installed
+
+2. **Fallback path (no HA required):** `tinytuya wizard` via iot.tuya.com
+   - Requires free Tuya IoT developer account (one-time signup)
+   - Full `tinytuya` Python tool setup and wizard flow
+   - ~20 minutes on first try
+   - **Durable:** Once key is extracted, it persists until device re-pairs (dev account status doesn't matter afterward)
+   - Recommended for users without HA
+
+### Action for Link
+
+When documenting Touchstone README (Section: "Extracting Your Local Key"):
+- Present **Method A (HA path) as the quick option, Method B (tinytuya path) as the standard alternative**
+- Include short callout explaining the Tuya client_id fragility in Method A
+- Link both to `.squad/decisions.md` section "2026 Tuya Portal-Free Key Extraction Assessment" for full technical details
+- Note that Mads is using Method B (iot.tuya.com platform signup) and can provide firsthand walkthrough notes
+
+See `.squad/decisions.md` for full audit details and SUPERSEDES note correcting prior session cypher-6 claims about portal-free being "clean and recommended."
+
