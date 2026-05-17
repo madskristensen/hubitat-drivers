@@ -206,3 +206,11 @@ state.effectCatalog and state.effectPatterns now favorites-only. Non-favorite re
 ## Policy: State Size — Favorites-Only Caching (v0.4.6)
 
 **Future Gemstone work must not reintroduce non-favorite caching to persistent state.** Hubitat's State Variables inspector is user-visible; transient working state should live in local variables, not persisted to `state.*`. Rule: catalog and pattern caches are favorites-only for Gemstone. Non-favorite names resolve on-demand, execute, and evaporate — nothing persists. Backward compatibility is maintained via name-based `playEffectByName(String)` which calls the same refresh-resolve-play path.
+
+## v0.4.7 — 2026-05-16 Log Rule Reinforcement
+
+v0.4.7 — debug-level lists also need bounds. Mads has 1457 patterns, dumping them at debug was still KBs of noise. Rule: never join() a collection of unknown size into a single log line, even at debug level. Use count + warn-on-miss for discoverability.
+
+## v0.4.8 — 2026-05-16 Events Tab Description Hygiene
+
+v0.4.8 — Audited every sendEvent in gemstone-lights.groovy. Status-refresh paths (currentlyPlaying response, auth state changes, lightEffects catalog updates) were missing descriptionText; only command paths had them. Rule for future Hubitat work: every sendEvent gets a descriptionText using device.displayName for portability.
