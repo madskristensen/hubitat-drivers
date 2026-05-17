@@ -109,11 +109,11 @@ If you prefer not to use HPM:
 
 ## Setup — Auth Bootstrap (one-time)
 
-The Watts® Home API uses **Azure AD B2C PKCE** for authentication, which is too complex to implement inside Hubitat's sandboxed Groovy runtime. Instead, you use an **external CLI tool once** to obtain a refresh token, then paste it into the driver preferences. The driver handles all subsequent token lifecycle automatically.
+The Watts® Home API uses **Azure AD B2C PKCE** for authentication, which is too complex to implement inside Hubitat's sandboxed Groovy runtime. Instead, you use an **external CLI tool once** to obtain a refresh token (Step 1), then hand that token to the driver via the `setRefreshToken` command (Step 4). The driver handles all subsequent token lifecycle — refresh, rotation, persistence — automatically.
 
 ### Step 1: Obtain your refresh token
 
-Use the `homebridge-tekmar-wifi` CLI tool to log in once and extract your tokens:
+Use the `homebridge-tekmar-wifi` CLI tool to log in once. It writes your tokens to a local `tokens.json` file that you'll then read.
 
 ```bash
 # Clone the homebridge-tekmar-wifi repository
@@ -126,19 +126,26 @@ npm install
 # Build the CLI
 npm run build
 
-# Run the login tool
+# Run the login tool — prompts for email + password
 node dist/cli/index.js login
 ```
 
-You'll be prompted for your **Watts Home email** and **password**. After you enter them, the tool prints:
+Enter your **Watts Home email** and **password** when prompted. The CLI authenticates against the Watts B2C tenant and writes a `tokens.json` file in the current directory. **The tokens are NOT printed to stdout** — you'll find them in the file.
 
-```
-accessToken: eyJhbGci...
-refreshToken: eyJraWQ...
-expiresAt: 1768718583
+Open `tokens.json`. It looks like this:
+
+```json
+{
+  "access_token": "eyJhbGci...",
+  "refresh_token": "eyJraWQ...",
+  "expires_at": 1768718583,
+  "refresh_token_expires_at": 1776492183
+}
 ```
 
-**Copy the refreshToken value** (the long string starting with `eyJraWQ...`).
+**Copy the `refresh_token` value** (the long string starting with `eyJraWQ...`) — the JSON value, without the surrounding quotes. You'll need it in Step 4. The `refresh_token` is ~1660 characters; the full string is required.
+
+Keep `tokens.json` on disk — the bundled `get-location-id.ps1` helper (Step 4b below) reads from it.
 
 ### Step 2: Create the parent device in Hubitat
 
@@ -172,21 +179,48 @@ The driver will log `Refresh token stored (NNNN chars)` and immediately begin in
 
 > **Why a command, not a preference?** Watts Home refresh tokens are ~1660 characters. Hubitat's Preferences page has a ~1024-character limit on saved values, which causes a silent "failed to save preferences" error. Running the command bypasses this limit entirely.
 
-### About the location ID
+### Step 4b: Fetch your locationId (if auto-discovery doesn't find it)
 
-v0.1.4 auto-discovers your `locationId` after `setRefreshToken`. If auto-discovery fails (rare; happens when GET /Location returns no usable locations), fill in the `Watts Home location ID` preference manually. To find your locationId without guessing, run the bundled helper script:
+v0.1.4 auto-discovers your `locationId` from the Watts API after `setRefreshToken` runs. **For most users this just works** — skip to Step 5.
+
+If discovery fails with `Could not resolve a Watts location ID`, you need to provide the locationId manually. The repo ships a helper script that fetches it for you:
+
+**From a PowerShell terminal on the same machine as your `tokens.json`:**
 
 ```powershell
-pwsh "drivers/sunstat-thermostat/scripts/get-location-id.ps1"
+pwsh "C:\path\to\hubitat-drivers\drivers\sunstat-thermostat\scripts\get-location-id.ps1"
 ```
 
-The script reads your refresh token from `tokens.json` (written by the `homebridge-tekmar-wifi` CLI), exchanges it for a fresh access token, and prints your `locationId`. Paste the printed value into the preference.
+The script:
+1. Reads `refresh_token` from `tokens.json` (default path: `C:\Users\YOUR-NAME\source\repos\homebridge-tekmar-wifi\tokens.json` — edit the `$TokensFile` variable at the top of the script if yours is elsewhere)
+2. Refreshes the access token at the Watts B2C endpoint
+3. Calls `GET https://home.watts.com/api/Location` and prints every location attached to your account
+
+Output looks like:
+
+```
+✓ Read refresh_token from tokens.json (1660 chars)
+→ Refreshing access token at Watts B2C endpoint…
+✓ Got fresh access_token (1941 chars)
+→ Calling GET https://home.watts.com/api/Location …
+
+===== LOCATIONS FOUND =====
+  [1] locationId : 6294b787-ae9d-4174-b3d5-2bed8e4812dd
+       name       : Misty Gray
+       isDefault  : True
+       devices    : 2
+============================
+```
+
+**Copy the `locationId` value** (typically a UUID) and paste it into the parent device's **Preferences → Watts Home location ID** field, then **Save Preferences**.
+
+> **Why a separate helper?** The Watts API's location list is only accessible with a fresh access token, which the driver can't easily query from outside Hubitat. The script handles the token dance and the API call in one shot so you don't have to.
 
 ### Step 5: Discover your thermostats
 
-1. On the parent device page, scroll to **Commands**
-2. Click **Discover Devices**
-3. Watch the **Logs** for discovery output — e.g., `Discovered 2 devices: "Master Bath Floor", "Kitchen Floor"`
+1. On the parent device page, scroll to the **Commands** section
+2. Click the **discoverDevices** button
+3. Watch the **Logs** for output — e.g., `Auto-selected locationId: ...` and `Discovered 2 thermostat(s) — 2 created, 0 updated`
 4. Go back to **Devices** — you should now see child devices for each thermostat
 
 ### Refresh token rotation

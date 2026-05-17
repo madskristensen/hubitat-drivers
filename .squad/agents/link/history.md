@@ -51,3 +51,12 @@ Pattern learned: **WebCoRE-command-visibility for overloaded methods.** When a H
 - 2026-05-17T04-20-29Z: v0.1.3 SunStat Connect Plus shipped (setRefreshToken command + docs + tests) — tank/link/switch cross-team ship
 - 2026-05-16: SunStat v0.1.4 shipped — envelope unwrap fix, URL encoding, bootstrap script
 
+## Team Updates (2026-05-16T22:15:20-07:00)
+
+**SunStat Connect Plus v0.1.4 documentation corrected.** Mads tested the install flow on his hub and found two bugs in the README auth bootstrap section:
+1. **Step 1 now clarifies:** The `homebridge-tekmar-wifi` CLI does **NOT** print tokens to stdout. Tokens are written to `tokens.json`. The old fake stdout block (showing `accessToken:`, `refreshToken:`, etc.) is removed. New Step 1 walks through opening `tokens.json` and copying the `refresh_token` value from the JSON object.
+2. **Step 4b promoted to first-class step:** The "About the location ID" callout (formerly wedged between Steps 4 and 5) is now **Step 4b: Fetch your locationId (if auto-discovery doesn't find it)**. It's now a self-contained, numbered step with full details on where to find `tokens.json`, how to run the PowerShell helper, expected output format, and where to paste the locationId in Preferences.
+3. **Step 5 command name clarified:** Now says `discoverDevices` (the actual command name) instead of the button label "Discover Devices".
+
+Link also tightened the intro paragraph to clarify that the refresh token is handed to the driver via the `setRefreshToken` command, not pasted into preferences. Documentation now accurately reflects the production flow.
+
