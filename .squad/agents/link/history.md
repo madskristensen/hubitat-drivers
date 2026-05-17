@@ -21,9 +21,20 @@ Link is the DevRel and Documentation specialist. See `history-archive.md` for de
 
 **SunStat Connect Plus v0.1.3 documentation updated.** Trinity finalized the long-refresh-token workaround (Decision approved). Link rewrote SunStat README install flow: removed `refreshToken` preference row, split Step 3 into two steps (preferences config → `setRefreshToken` command), added `setRefreshToken` command to Parent Device Commands table, updated troubleshooting section with command-based recovery, and bumped root README status badge to v0.1.3. Tank owns implementation of the command + code simplifications per Decision spec 4a–4g. Pattern learned: command-based bootstrap is clearer for long values; preference length limits are a hidden gotcha in Hubitat UX. README now clearly separates "what goes in preferences" vs. "what runs as a command" with an explanatory blockquote.
 
+## Team Updates (2026-05-16T21:24:48-07:00)
+
+**SunStat Connect Plus v0.1.4 documentation complete.** Tank and Cypher shipped two bugfixes in parallel: (1) API envelope unwrap — every Watts response is wrapped in `{errorNumber, errorMessage, body: T}`; the driver now unwraps it, fixing discoverDevices failures. (2) URL-encode locationId in all API paths — Watts uses location display names (with spaces like "Misty Gray") as locationIds; now properly encoded. Cypher also shipped a new bootstrap helper script at `drivers/sunstat-thermostat/scripts/get-location-id.ps1` for manual locationId lookup. Link documented v0.1.4 changes:
+- Bumped status badge in both drivers/sunstat-thermostat/README.md (line 7) and root README.md (line 5) to v0.1.4 with short "bugfix release" notes
+- Added "About the location ID" callout section between Steps 4 and 5 in the setup flow — explains v0.1.4 auto-discovery + references the bootstrap script with a one-liner code example
+- Added two new troubleshooting entries: `### "Could not resolve a Watts location ID"` (symptom → pre-v0.1.4 cause → fix with script reference) and `### "Illegal character in path"` (symptom → pre-v0.1.4 cause about spaces in names → fix with URL-encoding note)
+
+Pattern learned: troubleshooting entries for pre-release bugs should follow symptom → cause (pre-vX.Y.Z) → fix structure; this makes it clear to users on old versions why they're seeing it, and on new versions what to do. Bootstrap script documentation is best kept to a short code block + one-line explanation (tokens.json → access token → locationId); full details about `homebridge-tekmar-wifi` already exist in Step 1.
+
 ## Learnings
 
 - **README install-flow pattern for command-based token bootstrap:** When a value exceeds platform preference limits (Hubitat ~1024 chars), document the command-based path separately from preferences config. Use a blockquote to explain *why* the unusual flow is necessary, so users don't assume it's a workaround. Keep the "why" terse (one sentence max).
 - **Section numbering rules:** When rewording setup steps that involve a new command insertion, renumber all subsequent steps and update cross-references (e.g., "see Step 4"). Link discovered this by carefully re-reading the task requirements — the original Step 4 (Discover Devices) became Step 5 after the new command step was inserted, and all troubleshooting references had to be updated to match.
 
 - 2026-05-17T04-20-29Z: v0.1.3 SunStat Connect Plus shipped (setRefreshToken command + docs + tests) — tank/link/switch cross-team ship
+- 2026-05-16: SunStat v0.1.4 shipped — envelope unwrap fix, URL encoding, bootstrap script
+

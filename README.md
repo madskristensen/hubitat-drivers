@@ -2,7 +2,7 @@
 
 Community Hubitat Elevation drivers by Mads Kristensen.
 
-> **Current status:** Two beta drivers available — **Gemstone Lights** v0.4.0 (working in production, author-tested) and **SunStat Connect Plus** v0.1.3 (cloud scaffold, energy monitoring, schedule control, and hold detection now available; token bootstrap via `setRefreshToken` command).
+> **Current status:** Two beta drivers available — **Gemstone Lights** v0.4.0 (working in production, author-tested) and **SunStat Connect Plus** v0.1.4 (cloud scaffold, energy monitoring, schedule control, and hold detection now available; token bootstrap via `setRefreshToken` command; v0.1.4 fixes discoverDevices auto-resolution and locationId URL encoding).
 
 ## Install via HPM (recommended)
 

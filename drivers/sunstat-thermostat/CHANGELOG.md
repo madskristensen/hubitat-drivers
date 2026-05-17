@@ -2,7 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.2] — 2026-05-16
+## [0.1.4] — 2026-05-16
+
+- **Fix API envelope unwrapping.** All Watts API responses wrap the payload in `{errorNumber, errorMessage, body: <payload>}`. `parseResponseBody()` was returning the whole envelope instead of `.body`, causing `defaultLocationId` to always be null and discoverDevices to always fail with "Could not resolve a Watts location ID". Fixed `parseResponseBody()` to unwrap the envelope; added `parseResponseList()` helper for List-body endpoints (GET /Location, GET /Location/{id}/Devices).
+- **Fix URL-encoding of locationId in URL paths.** Watts accounts can use a location display name (e.g. "Misty Gray") as the locationId. Spaces in the locationId caused Java's URI parser to reject the URL with "Illegal character in path". All URL path segments that include the locationId now pass through `encodePathSegment()` (URLEncoder + `+` → `%20`). Affected: `discoverDevicesAtLocation()` and `setAwayModeInternal()`.
+- **Add diagnostic info logging in discovery path.** `runDiscovery()` now logs `userId`, `defaultLocationId`, and `measurementScale` from GET /User at info level (not debug-gated). On locationId resolution failure, logs all three resolution attempts before the error. `fetchFirstLocationId()` logs the count of locations returned and the selected locationId.
+
+## [0.1.3] — 2026-05-16
+
+- **Replace refreshToken password preference with `setRefreshToken(String)` command** to bypass Hubitat's ~1024-char preference size limit. Existing installations with the token already stored in `state.refreshToken` are unaffected.
+
 
 - **Energy reporting** (`EnergyMeter` capability). Reads `data.Energy.Heat.Daily[]` and `data.Energy.Heat.Monthly[]`; emits `energy` (today), `energyYesterday`, `energyMonth`, and `energyLastMonth` in kWh. Gracefully skipped when absent (older firmwares).
 - **Schedule enable/disable** (`setScheduleEnabled("on"|"off")` command). Reads `data.SchedEnable.Val`; populates the `scheduleEnabled` attribute (now `"on"/"off"/"unknown"` instead of `"true"/"false"`). Sends `PATCH /api/Device/{deviceId}` with `{"Settings":{"SchedEnable":"On"|"Off"}}`.

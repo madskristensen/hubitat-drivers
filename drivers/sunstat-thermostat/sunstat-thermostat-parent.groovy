@@ -1,7 +1,7 @@
 /**
  * SunStat Connect Plus — Parent Driver
  * Author:  Mads Kristensen
- * Version: 0.1.3
+ * Version: 0.1.4
  * License: MIT
  *
  * Cloud auth, device discovery, polling, and command routing for the
@@ -13,6 +13,7 @@
  * command on the parent device. The driver rotates the token automatically after that.
  *
  * Changelog:
+ *   0.1.4 — 2026-05-16 — Fix API envelope unwrapping ({errorNumber, errorMessage, body} not unwrapped — caused "Could not resolve a Watts location ID"); URL-encode locationId in URL paths (Watts uses display names like "Misty Gray" as locationIds — spaces broke URL parsing); add diagnostic info logging in discovery
  *   0.1.3 — 2026-05-16 — Replace password preference with setRefreshToken() command to bypass Hubitat's ~1024-char preference limit; existing users with token already in state are unaffected
  *   0.1.2 — 2026-05-16 — Energy reporting, schedule toggle, hold attribute, outdoor temperature, setpoint stepping, floor bounds clamping
  *   0.1.1 — 2026-05-16 — Home/Away mode (location-level): setHome, setAway, setAwayMode; awayMode + locationSupportsAway attributes; location state polled each cycle
@@ -27,8 +28,8 @@ import groovy.json.JsonSlurper
 // Constants — all literals; NO cross-@Field references (Hubitat sandbox rule)
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION               = "0.1.3"
-@Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.3"
+@Field static final String DRIVER_VERSION               = "0.1.4"
+@Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.4"
 @Field static final String WATTS_API_BASE               = "https://home.watts.com/api"
 @Field static final String WATTS_TOKEN_URL              = "https://login.watts.io/tfp/wattsb2cap02.onmicrosoft.com/B2C_1A_Residential_UnifiedSignUpOrSignIn/oauth2/v2.0/token"
 @Field static final String WATTS_CLIENT_ID              = "c832c38c-ce70-4ebc-83b6-b4548083ac90"
@@ -221,11 +222,12 @@ private void setAwayModeInternal(String mode, boolean retry401) {
               descriptionText: "${device.displayName} away mode is ${mode}")
     int awayState = mode == "away" ? 1 : 0
     String body = JsonOutput.toJson([awayState: awayState])
-    Map params = buildApiParams("PATCH", "/Location/${locId}/State", body)
+    String encodedLocId = encodePathSegment(locId)
+    Map params = buildApiParams("PATCH", "/Location/${encodedLocId}/State", body)
     try {
         httpMethod("PATCH", params) { resp ->
             Integer status = safeStatus(resp)
-            debugLog "PATCH /Location/${locId}/State → HTTP ${status}"
+            debugLog "PATCH /Location/${encodedLocId}/State → HTTP ${status}"
             if (status == 401 && retry401) {
                 log.warn "[SunStat] setAwayMode PATCH 401 — refreshing token and retrying once"
                 if (refreshTokensSync()) {
@@ -238,7 +240,7 @@ private void setAwayModeInternal(String mode, boolean retry401) {
                 }
                 infoLog "${device.displayName} away mode set to '${mode}'"
             } else if (status >= 400) {
-                log.error "[SunStat] PATCH /Location/${locId}/State failed: HTTP ${status} — optimistic state may be stale"
+                log.error "[SunStat] PATCH /Location/${encodedLocId}/State failed: HTTP ${status} — optimistic state may be stale"
             }
         }
     } catch (Exception e) {
@@ -299,6 +301,7 @@ private void runDiscovery() {
             String userId           = safeStr(body?.userId)
             String defaultLocId     = safeStr(body?.defaultLocationId)
             String measurementScale = safeStr(body?.measurementScale)
+            log.info "[SunStat] GET /User → userId=${userId}, defaultLocationId=${defaultLocId}, scale=${measurementScale}"
             if (userId) {
                 state.userId = userId
             }
@@ -312,6 +315,7 @@ private void runDiscovery() {
                 resolvedLocationId = fetchFirstLocationId()
             }
             if (!resolvedLocationId) {
+                log.info "[SunStat] locationId resolution: settings='${safeStr(settings.locationId)}', defaultFromUser='${defaultLocId}', fetchFirstResult='${resolvedLocationId}'"
                 log.error "[SunStat] Could not resolve a Watts location ID. Set one in preferences."
                 return
             }
@@ -331,11 +335,16 @@ private String fetchFirstLocationId() {
         httpGet(params) { resp ->
             Integer status = safeStatus(resp)
             if (status == 200) {
-                def body = resp.data
-                List locations = body instanceof List ? body as List : []
+                List locations = parseResponseList(resp)
+                log.info "[SunStat] GET /Location returned ${locations.size()} location(s)"
                 if (locations) {
                     result = safeStr(locations[0]?.locationId)
+                    log.info "[SunStat] Auto-selected locationId: ${result}"
+                } else {
+                    log.warn "[SunStat] GET /Location returned empty list — check account has at least one location"
                 }
+            } else {
+                log.error "[SunStat] GET /Location failed: HTTP ${status}"
             }
         }
     } catch (Exception e) {
@@ -345,16 +354,16 @@ private String fetchFirstLocationId() {
 }
 
 private void discoverDevicesAtLocation(String locationId) {
-    Map params = buildApiParams("GET", "/Location/${locationId}/Devices", null)
+    String encodedLocId = encodePathSegment(locationId)
+    Map params = buildApiParams("GET", "/Location/${encodedLocId}/Devices", null)
     try {
         httpGet(params) { resp ->
             Integer status = safeStatus(resp)
             if (status != 200) {
-                log.error "[SunStat] GET /Location/${locationId}/Devices failed: HTTP ${status}"
+                log.error "[SunStat] GET /Location/${encodedLocId}/Devices failed: HTTP ${status}"
                 return
             }
-            def body = resp.data
-            List devices = body instanceof List ? body as List : []
+            List devices = parseResponseList(resp)
             int created = 0
             int updated = 0
             devices.each { dev ->
@@ -387,7 +396,7 @@ private void discoverDevicesAtLocation(String locationId) {
             infoLog "Discovered ${created + updated} thermostat(s) — ${created} created, ${updated} updated"
         }
     } catch (Exception e) {
-        log.error "[SunStat] GET /Location/${locationId}/Devices exception: ${e.message}"
+        log.error "[SunStat] GET /Location/${encodedLocId}/Devices exception: ${e.message}"
     }
 }
 
@@ -408,8 +417,7 @@ private void fetchAndParseLocationState(String locId) {
                 log.warn "[SunStat] GET /Location failed: HTTP ${status} — location away state unchanged"
                 return
             }
-            def data = resp.data
-            List locations = data instanceof List ? data as List : []
+            List locations = parseResponseList(resp)
             Map loc = locations.find { safeStr(it?.locationId) == locId } as Map
             if (loc) {
                 parseLocationState(loc)
@@ -674,26 +682,47 @@ private void httpMethod(String method, Map params, Closure callback) {
 private Map parseResponseBody(resp) {
     try {
         def data = resp?.data
-        if (data instanceof Map) {
-            return data as Map
-        }
-        // API wraps responses: {"errorNumber":0,"body":{...}}
-        // but the Hubitat JSON parser may already unwrap — handle both shapes
         if (data instanceof String) {
-            def parsed = new JsonSlurper().parseText(data as String)
-            if (parsed instanceof Map) {
-                // Unwrap envelope if present
-                Map envelope = parsed as Map
-                if (envelope.containsKey("body") && envelope.body instanceof Map) {
-                    return envelope.body as Map
-                }
-                return envelope
+            data = new JsonSlurper().parseText(data as String)
+        }
+        if (data instanceof Map) {
+            Map m = data as Map
+            // Unwrap ApiResponse envelope: { errorNumber, errorMessage, body: {...} }
+            if (m.containsKey("body") && m.body instanceof Map) {
+                return m.body as Map
             }
+            return m
         }
     } catch (Exception e) {
         debugLog "parseResponseBody exception: ${e.message}"
     }
     return [:]
+}
+
+private List parseResponseList(resp) {
+    try {
+        def data = resp?.data
+        if (data instanceof String) {
+            data = new JsonSlurper().parseText(data as String)
+        }
+        // Unwrap ApiResponse envelope: { errorNumber, errorMessage, body: [...] }
+        if (data instanceof Map) {
+            Map m = data as Map
+            if (m.containsKey("body") && m.body instanceof List) {
+                return m.body as List
+            }
+        }
+        if (data instanceof List) {
+            return data as List
+        }
+    } catch (Exception e) {
+        debugLog "parseResponseList exception: ${e.message}"
+    }
+    return []
+}
+
+private String encodePathSegment(String s) {
+    return URLEncoder.encode(safeStr(s) ?: "", "UTF-8").replace("+", "%20")
 }
 
 // ---------------------------------------------------------------------------

@@ -82,3 +82,83 @@ Hubitat's `password`/`text` preference type silently truncates values beyond ~10
 **SunStat Connect Plus v0.1.3 complete.** Replaced `refreshToken` password preference with `setRefreshToken(String)` command to bypass Hubitat's ~1024-char preference limit on saved values. Removed initialize() migration block; `state.refreshToken` is now the sole source of truth. packageManifest.json bumped to 0.1.3 across all entries.
 
 - 2026-05-17T04-20-29Z: v0.1.3 SunStat Connect Plus shipped (setRefreshToken command + docs + tests) — tank/link/switch cross-team ship
+
+## Learnings — 2026-05-17T04:24:48Z: locationId Discovery Code Audit
+
+### What I found in the discovery code path
+
+**`runDiscovery()` (lines 287–325)**
+- `defaultLocId` is extracted as `body?.defaultLocationId` from the `GET /User` response.
+- `settings.locationId` is a `text` preference (string). The code does `safeStr(settings.locationId).trim() ?: defaultLocId` — correct, but if the user never set it AND the API omits `defaultLocationId` from the User response (e.g., returns `null` or an empty string), both fallback slots are empty.
+- Third fallback: `fetchFirstLocationId()` — if that also returns null, the "Could not resolve" error fires.
+- No intermediate logging between fallbacks. The user sees only the final error message with no clue which of the three paths failed.
+
+**`fetchFirstLocationId()` (lines 327–345)**
+- Assumes the `/Location` endpoint returns a raw JSON **array** (`body instanceof List ? body : []`).
+- If the API now returns `{"locations": [...], "total": N}` (envelope/wrapper shape), the cast yields `[]` and the method silently returns `null`.
+- Non-200 status codes are silently ignored — the method returns `null` with zero logging.
+- `resp.data` is used raw (no `parseResponseBody()` helper), so Content-Type negotiation surprises can produce unexpected types.
+- Exception is logged but the return value is still `null` with no context about what shape the body was.
+
+**`buildApiParams()` (lines 631–653)**
+- Authorization: `Bearer ${state.accessToken}` ✅
+- `Api-Version: 2.0` (via `WATTS_API_VERSION` constant) ✅
+- `User-Agent: Hubitat SunStat Connect Plus/0.1.3` ✅
+- All three are correctly set. Not the cause.
+
+### What I'd change (ready-to-implement fix, pending Cypher's diagnosis)
+
+**a. Loud diagnostic logging in `fetchFirstLocationId()`**
+```groovy
+if (status == 200) {
+    def body = resp.data
+    String bodyType = body?.getClass()?.simpleName ?: "null"
+    String sample = (body instanceof Map) ? body.keySet().take(5).toString()
+                  : (body instanceof List) ? "size=${body.size()}"
+                  : body?.toString()?.take(80) ?: "(empty)"
+    log.warn "[SunStat] GET /Location → HTTP ${status}, type=${bodyType}, sample=${sample}"
+    // dual-shape handling below
+} else {
+    log.warn "[SunStat] GET /Location → HTTP ${status} (expected 200) — locationId unresolvable from this path"
+}
+```
+
+**b. Handle both response shapes in `fetchFirstLocationId()`**
+```groovy
+List locations
+if (body instanceof List)                        locations = body as List
+else if (body instanceof Map && body.locations instanceof List) locations = body.locations as List
+else                                              locations = []
+
+if (!locations) {
+    log.warn "[SunStat] GET /Location body has no usable locations list (type=${bodyType})"
+}
+result = safeStr(locations[0]?.locationId)
+```
+
+**c. Loud fallback logging in `runDiscovery()`**
+After the three-path resolution chain, before the final error, add:
+```groovy
+String settingsVal = safeStr(settings.locationId).trim()
+log.warn "[SunStat] locationId resolution: settings.locationId='${settingsVal}', " +
+         "defaultLocationId='${defaultLocId}', fetchFirstLocationId='${resolvedLocationId}'"
+```
+
+No file writes, no version bump, no commit — waiting for Cypher's `cypher-sunstat-location-id-discovery-fix.md`.
+
+## Team Updates (2026-05-16T21:24:48-07:00)
+
+**SunStat Connect Plus v0.1.4 shipped.** Implemented Cypher's 6-change spec plus Mads' production URL-encoding bug fix. packageManifest.json and CHANGELOG.md updated.
+
+### Learnings — v0.1.4
+
+#### API Envelope Pattern
+The Watts API wraps every response in `{errorNumber, errorMessage, body: <payload>}`. The previous `parseResponseBody()` returned the whole envelope Map instead of unwrapping `.body`, causing `body?.defaultLocationId` to always be null. Fix: check `m.containsKey("body") && m.body instanceof Map` → return `m.body`. Always do this check before returning a Map from an API response helper.
+
+#### Dedicated List helper (`parseResponseList`)
+List-body endpoints (`GET /Location`, `GET /Location/{id}/Devices`) can't be handled by `parseResponseBody()` because the envelope's `.body` is a List, not a Map. The fix is a dedicated `parseResponseList()` that unwraps `m.body as List`. Lesson: when an API has a universal envelope, write two unwrappers — one for Map payloads, one for List payloads — and never use `resp.data instanceof List` for real envelope-wrapped APIs.
+
+#### URL-encoding for Path Segments (not query params)
+`URLEncoder.encode(s, "UTF-8")` is form-encoding: spaces become `+`. URL path segments require `%20`. Always follow `URLEncoder.encode(...)` with `.replace("+", "%20")` when building path segments. Watts uses location display names (e.g. "Misty Gray") as locationIds — any space in a display name breaks Java's URI parser with "Illegal character in path at index N". Apply `encodePathSegment()` to every dynamic value spliced into a URL path, not just query strings.
+- 2026-05-16: SunStat v0.1.4 shipped — envelope unwrap fix, URL encoding, bootstrap script
+

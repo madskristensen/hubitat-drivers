@@ -4,7 +4,7 @@ Integrates SunStat Connect Plus electric floor heating thermostats with Hubitat 
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: beta — v0.1.3. Cloud REST integration via the Watts® Home API; verified against the Watts iOS app for API shape and auth bootstrap; requires one-time external token capture via the `homebridge-tekmar-wifi` CLI (see Setup). Token is now set via the `setRefreshToken` command (bypasses Hubitat's ~1024-char preference limit). Parent/child architecture; auto-discovers all thermostats in your Watts account. Latest: energy reporting, schedule control, hold detection, outdoor temp + floor bounds. See [releases](https://github.com/madskristensen/hubitat-drivers/releases) for details.**
+> **Status: beta — v0.1.4. Cloud REST integration via the Watts® Home API; verified against the Watts iOS app for API shape and auth bootstrap; requires one-time external token capture via the `homebridge-tekmar-wifi` CLI (see Setup). Token is now set via the `setRefreshToken` command (bypasses Hubitat's ~1024-char preference limit). Parent/child architecture; auto-discovers all thermostats in your Watts account. Latest: bugfix release — fixes discoverDevices auto-resolution and locationId URL encoding. v0.1.3 features: energy reporting, schedule control, hold detection, outdoor temp + floor bounds. See [releases](https://github.com/madskristensen/hubitat-drivers/releases) for details.**
 
 ## Hardware Compatibility
 
@@ -171,6 +171,16 @@ After the driver is configured and saved, go to your **SunStat Connect Plus** pa
 The driver will log `Refresh token stored (NNNN chars)` and immediately begin initializing and polling.
 
 > **Why a command, not a preference?** Watts Home refresh tokens are ~1660 characters. Hubitat's Preferences page has a ~1024-character limit on saved values, which causes a silent "failed to save preferences" error. Running the command bypasses this limit entirely.
+
+### About the location ID
+
+v0.1.4 auto-discovers your `locationId` after `setRefreshToken`. If auto-discovery fails (rare; happens when GET /Location returns no usable locations), fill in the `Watts Home location ID` preference manually. To find your locationId without guessing, run the bundled helper script:
+
+```powershell
+pwsh "drivers/sunstat-thermostat/scripts/get-location-id.ps1"
+```
+
+The script reads your refresh token from `tokens.json` (written by the `homebridge-tekmar-wifi` CLI), exchanges it for a fresh access token, and prints your `locationId`. Paste the printed value into the preference.
 
 ### Step 5: Discover your thermostats
 
@@ -438,6 +448,22 @@ Then go to your parent device's **Commands** tab, find **setRefreshToken**, past
 **Symptom:** Logs show `timed out after 30 seconds`.
 
 **Fix:** Check your internet connection and increase the **Request Timeout** preference on the parent device to 60 seconds.
+
+### "Could not resolve a Watts location ID"
+
+**Symptom:** After `discoverDevices`, the log shows `[SunStat] Could not resolve a Watts location ID. Set one in preferences.`
+
+**Cause (pre-v0.1.4):** A bug prevented auto-resolution.
+
+**Fix:** Update to v0.1.4. If you're already on v0.1.4 and still see this, run `pwsh "drivers/sunstat-thermostat/scripts/get-location-id.ps1"` to fetch your locationId, then paste it into the `Watts Home location ID` preference on the parent device.
+
+### "Illegal character in path"
+
+**Symptom:** `GET /Location/Some Name/Devices exception: Illegal character in path at index NN`
+
+**Cause (pre-v0.1.4):** The Watts API uses your location's display name as the locationId. Names with spaces broke URL parsing.
+
+**Fix:** Update to v0.1.4 — locationIds are now URL-encoded in all API paths.
 
 ## Known Limitations
 

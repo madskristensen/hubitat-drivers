@@ -5,7 +5,7 @@
 **Cloud Control:** Watts iOS app  
 **Platform:** Hubitat C-7 / C-8  
 **Created:** 2026-05-16T20:01:41-07:00  
-**Status:** DRAFT — v0.1.0 core tests finalized; v0.1.1 home/away tests added 2026-05-16; v0.1.2 energy/schedule/hold/outdoor/precision/bounds tests added 2026-05-16; v0.1.3 setRefreshToken command tests added 2026-05-16T21:07:23-07:00
+**Status:** DRAFT — v0.1.0 core tests finalized; v0.1.1 home/away tests added 2026-05-16; v0.1.2 energy/schedule/hold/outdoor/precision/bounds tests added 2026-05-16; v0.1.3 setRefreshToken command tests added 2026-05-16T21:07:23-07:00; v0.1.4 API envelope unwrap + URL encoding tests added 2026-05-16T21:24:48-07:00
 
 ---
 
@@ -2293,3 +2293,592 @@ Once Trinity finalizes the capability profile:
 ---
 
 **Once all items in Tier 1 and Tier 2 are checked and passing, the driver is ready for beta testing with Mads.**
+
+---
+
+## Test Area: v0.1.4 — API Envelope Unwrap + URL Encoding
+
+**Added:** 2026-05-16T21:24:48-07:00  
+**Driver version:** 0.1.4  
+**Background:** Every Watts API response is wrapped in `{errorNumber, errorMessage, body: <payload>}`. Prior to v0.1.4, `parseResponseBody()` and all direct `resp.data` usages returned the raw envelope, causing `discoverDevices` to fail silently. Additionally, locationIds that contain spaces (e.g., Mads' `"Misty Gray"`) broke HTTP requests because they were interpolated into URL paths without encoding. v0.1.4 fixes both issues.
+
+---
+
+### Test 72: `parseResponseBody` Unwraps `GET /User` Envelope — Unit / Code Review
+
+**What:** Verify that `parseResponseBody(resp)` correctly strips the outer `{errorNumber, errorMessage, body}` envelope and returns the inner `body` Map when `resp.data` is the full API envelope for a User response.
+
+**Setup:**
+
+- Open `sunstat-thermostat-parent.groovy` in the Hubitat driver editor (or review locally).
+- Identify the `parseResponseBody()` private method.
+
+**Steps:**
+
+1. Review `parseResponseBody()` source. Confirm it contains logic equivalent to:
+   ```groovy
+   if (m.containsKey("body") && m.body instanceof Map) {
+       return m.body as Map
+   }
+   ```
+2. Simulate or mentally trace: `resp.data` = `{errorNumber:0, errorMessage:null, body:{userId:"u-1", defaultLocationId:"abc-123", measurementScale:"I"}}`.
+3. Confirm that the returned Map has key `userId` at the top level (NOT `errorNumber`).
+4. Confirm the returned Map does NOT contain the key `errorNumber`.
+
+**Expected:**
+
+- `parseResponseBody(resp)` returns `[userId:"u-1", defaultLocationId:"abc-123", measurementScale:"I"]` (the inner body, not the envelope).
+- `body?.defaultLocationId` evaluates to `"abc-123"`, not `null`.
+
+**Pass Criteria:** The unwrap branch is present in source; the returned Map contains `userId` at top level.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 73: `parseResponseList` Unwraps `GET /Location` Envelope — Unit / Code Review
+
+**What:** Verify that `parseResponseList(resp)` correctly strips the envelope and returns a List of 2 items when `resp.data` is a Location array response.
+
+**Setup:**
+
+- Identify the `parseResponseList()` private method in `sunstat-thermostat-parent.groovy`.
+
+**Steps:**
+
+1. Review `parseResponseList()` source. Confirm it contains logic equivalent to:
+   ```groovy
+   if (m.containsKey("body") && m.body instanceof List) {
+       return m.body as List
+   }
+   ```
+2. Simulate: `resp.data` = `{errorNumber:0, errorMessage:null, body:[{locationId:"X", name:"Home"}, {locationId:"Y", name:"Office"}]}`.
+3. Confirm the returned List has exactly 2 elements.
+4. Confirm `list[0]?.locationId` == `"X"`.
+
+**Expected:**
+
+- `parseResponseList(resp)` returns a List of size 2 (not an empty list, not the envelope Map).
+- First element has `locationId == "X"`.
+
+**Pass Criteria:** Method is present in source; returns List with correct size and contents.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 74: `parseResponseBody` Graceful Degradation — Missing `body` Key
+
+**What:** Verify that if `resp.data` is a Map but does NOT contain a `body` key (e.g., old non-enveloped or unexpected response shape), `parseResponseBody` returns the Map as-is without crashing.
+
+**Setup:**
+
+- Review `parseResponseBody()` source for the fallback path.
+
+**Steps:**
+
+1. Simulate: `resp.data` = `{userId:"u-1", defaultLocationId:"abc-123"}` (no `errorNumber`, no `body` key — bare old shape).
+2. Confirm the method returns the map as-is: `[userId:"u-1", defaultLocationId:"abc-123"]`.
+3. Confirm no exception is thrown.
+
+**Expected:**
+
+- Returns `[userId:"u-1", defaultLocationId:"abc-123"]`.
+- No NPE, no ClassCastException, no crash.
+- Graceful degradation: callers can still read `defaultLocationId` from the returned Map.
+
+**Pass Criteria:** The fallback `return m` path is present in source; no crash on this input shape.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 75: `parseResponseList` With API-Level Error Response — No Crash
+
+**What:** Verify that `parseResponseList(resp)` returns an empty List (not an exception) when the API returns an error envelope where `body` is `null` and `errorNumber` is non-zero.
+
+**Setup:**
+
+- Review `parseResponseList()` source.
+
+**Steps:**
+
+1. Simulate: `resp.data` = `{errorNumber:1, errorMessage:"Unauthorized", body:null}`.
+2. Confirm `parseResponseList(resp)` returns `[]`.
+3. Confirm no NPE or ClassCastException.
+4. In live testing: confirm the driver logs a warning or error at the call site (e.g., `fetchFirstLocationId` logs `"GET /Location returned empty list"` or equivalent).
+
+**Expected:**
+
+- Returns `[]`.
+- No crash.
+- Error is surfaced in logs by the calling method (not silently swallowed).
+
+**Pass Criteria:** Method returns empty List; no exception thrown for `body:null` input.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 76: `resp.data` Is a Raw JSON String — Both Helpers Parse and Unwrap
+
+**What:** Verify that both `parseResponseBody()` and `parseResponseList()` correctly parse a raw JSON String (not yet parsed by Hubitat's HTTP client) and then apply envelope unwrapping.
+
+**Setup:**
+
+- Review both helper methods for the `if (data instanceof String)` branch.
+
+**Steps:**
+
+1. For `parseResponseBody`: simulate `resp.data` = the String `'{"errorNumber":0,"errorMessage":null,"body":{"userId":"u-1","defaultLocationId":"abc-123"}}'`.
+   - Confirm method parses the String via `JsonSlurper`, detects the `body` key, returns `[userId:"u-1", defaultLocationId:"abc-123"]`.
+2. For `parseResponseList`: simulate `resp.data` = `'{"errorNumber":0,"errorMessage":null,"body":[{"locationId":"X"},{"locationId":"Y"}]}'`.
+   - Confirm method returns a List of 2 elements.
+
+**Expected:**
+
+- Both helpers handle String input by parsing first, then unwrapping.
+- Returned values are correctly typed (Map vs. List).
+
+**Pass Criteria:** String path is present in both methods' source; traced return values are correct.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 77: `resp.data` Is Null — Both Helpers Return Empty Without NPE
+
+**What:** Verify that both `parseResponseBody()` and `parseResponseList()` return empty collections (not null, no NPE) when `resp.data` is `null`.
+
+**Setup:**
+
+- Review both helper methods for null-safety.
+
+**Steps:**
+
+1. For `parseResponseBody`: simulate `resp.data` = `null`.
+   - Confirm returns `[:]` (empty Map).
+2. For `parseResponseList`: simulate `resp.data` = `null`.
+   - Confirm returns `[]` (empty List).
+3. Confirm neither method throws an NPE.
+
+**Expected:**
+
+- `parseResponseBody` returns `[:]`.
+- `parseResponseList` returns `[]`.
+- No NullPointerException.
+
+**Pass Criteria:** Null path returns empty collections; no exception.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 78: URL Encoding — `locationId = "Misty Gray"` (Space) — Live Test
+
+**What:** Verify that `discoverDevicesAtLocation()` (and any other call using locationId in the URL path) encodes spaces as `%20`, producing a valid HTTP request.
+
+**Setup:**
+
+- v0.1.4 driver installed on Hubitat.
+- In parent device Preferences: set `Watts Home location ID` = `Misty Gray`.
+- Enable debug logging.
+
+**Steps:**
+
+1. Click **discoverDevices** on the parent device page.
+2. Watch the Hubitat live log.
+3. Confirm the log (or underlying HTTP request) constructs the URL `/Location/Misty%20Gray/Devices` (not `/Location/Misty Gray/Devices`).
+4. Confirm the HTTP request succeeds (HTTP 200) — no `IllegalArgumentException` or `URI syntax` error in logs.
+
+**Expected:**
+
+- URL fragment `Misty%20Gray` visible in debug logs.
+- No URI syntax exception.
+- If the locationId is valid on the Watts server, device list is returned.
+
+**Pass Criteria:** No URI error in logs; `%20` encoding visible; request completes without exception.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 79: URL Encoding — UUID `locationId` Is Passed Verbatim — Code Review
+
+**What:** Verify that a standard UUID locationId (e.g., `"12345678-1234-1234-1234-123456789abc"`) passes through `encodePathSegment()` unchanged, since hyphens and alphanumeric characters are safe in URL paths.
+
+**Setup:**
+
+- Review `encodePathSegment()` source in `sunstat-thermostat-parent.groovy`.
+
+**Steps:**
+
+1. Trace: `encodePathSegment("12345678-1234-1234-1234-123456789abc")`.
+2. Confirm output equals `"12345678-1234-1234-1234-123456789abc"` (no percent-encoding applied).
+
+**Expected:**
+
+- UUID is returned verbatim.
+- URL becomes `/Location/12345678-1234-1234-1234-123456789abc/Devices`.
+
+**Pass Criteria:** Encoding is idempotent for RFC 3986 unreserved characters; UUID passes through unchanged.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 80: URL Encoding — Non-ASCII `locationId = "café"` — Code Review
+
+**What:** Verify that non-ASCII characters in a locationId are percent-encoded using UTF-8, e.g., `é` → `%C3%A9`.
+
+**Setup:**
+
+- Review `encodePathSegment()` source.
+
+**Steps:**
+
+1. Trace: `encodePathSegment("café")`.
+2. Confirm output = `"caf%C3%A9"`.
+3. Confirm the URL fragment would be `/Location/caf%C3%A9/Devices`.
+
+**Expected:**
+
+- `é` (U+00E9) encoded as UTF-8 bytes `0xC3 0xA9` → `%C3%A9`.
+- Full output: `"caf%C3%A9"`.
+
+**Pass Criteria:** UTF-8 percent-encoding applied correctly; encoding matches RFC 3986 §2.1.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 81: URL Encoding — `locationId` With Literal Slashes — Code Review
+
+**What:** Verify that a locationId containing literal forward slashes (pathological input) has those slashes encoded as `%2F`, preventing the URL path from being split incorrectly.
+
+**Setup:**
+
+- Review `encodePathSegment()` source.
+
+**Steps:**
+
+1. Trace: `encodePathSegment("name/with/slashes")`.
+2. Confirm output = `"name%2Fwith%2Fslashes"`.
+3. Confirm the URL fragment is `/Location/name%2Fwith%2Fslashes/Devices` — three path segments, not five.
+
+**Expected:**
+
+- `/` encoded as `%2F`.
+- URL path has the correct structure (no accidental path splitting).
+
+**Pass Criteria:** Slashes are encoded; URL structure is preserved.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 82: URL Encoding — Empty `locationId` — Behavior Verification
+
+**What:** Verify that an empty `locationId` string does not cause an unhandled exception. The expected URL would be `/Location//Devices`; the driver should either guard against this before the call or fail loudly (not silently).
+
+**Setup:**
+
+- v0.1.4 driver installed on Hubitat.
+- In parent device Preferences: set `Watts Home location ID` = `` (empty).
+- Clear `state.locationId` if set.
+- Enable debug logging.
+
+**Steps:**
+
+1. Click **discoverDevices**.
+2. Watch logs.
+3. Confirm the driver either: (a) logs a clear error before making the request (preferred), OR (b) makes the request to `/Location//Devices` and logs the resulting HTTP error.
+4. Confirm no stack trace or unhandled exception.
+
+**Expected:**
+
+- `encodePathSegment("")` returns `""`.
+- Driver logs a visible error or warning about missing locationId.
+- No NPE, no unhandled exception.
+
+**Pass Criteria:** No crash; empty locationId produces a log message, not a silent failure.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 83: `encodePathSegment` Used in All Affected Methods — Code Review
+
+**What:** Verify that `discoverDevicesAtLocation()`, `fetchAndParseLocationState()`, and the `setAwayMode` PATCH call all use `encodePathSegment()` on the locationId before constructing the URL path. No raw string interpolation of locationId into URL paths.
+
+**Setup:**
+
+- Open `sunstat-thermostat-parent.groovy` in editor.
+
+**Steps:**
+
+1. Search for all occurrences of `locationId` interpolated into a URL string (e.g., `/Location/${locationId}`).
+2. For each occurrence, confirm the surrounding code applies `encodePathSegment(locationId)` first (e.g., `/Location/${encodePathSegment(locId)}`).
+3. Grep for raw interpolation: no instances of `/Location/${locId}` or `/Location/${locationId}` without `encodePathSegment` wrapping.
+4. Confirm `setAwayMode` PATCH URL is also encoded (search for `/Location/` in the PATCH path-building code).
+
+**Expected:**
+
+- Zero raw `locationId` interpolations into URL paths.
+- All three callers use `encodePathSegment`.
+
+**Pass Criteria:** Grep finds no unencoded locationId in URL strings; all three call sites wrap with `encodePathSegment`.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 84: End-to-End Happy Path — Full Discovery Flow With v0.1.4 — Live Test
+
+**What:** Regression / integration test. Verify the complete `discoverDevices` flow works end-to-end with v0.1.4 installed, no locationId pre-configured: GET /User unwrapped → `defaultLocationId` extracted → GET /Location unwrapped → first location selected → GET /Location/{encoded}/Devices unwrapped → child device created.
+
+**Setup:**
+
+- v0.1.4 driver installed on Hubitat.
+- Parent device has a valid refresh token set via `setRefreshToken`.
+- `Watts Home location ID` preference is BLANK (test auto-discovery).
+- Enable debug logging.
+
+**Steps:**
+
+1. Click **discoverDevices**.
+2. Watch live logs for the following breadcrumbs (all newly added in v0.1.4):
+   - `[SunStat] GET /User → userId=..., defaultLocationId=..., scale=...`
+   - `[SunStat] GET /Location returned N location(s)` (where N ≥ 1)
+   - `[SunStat] Auto-selected locationId: <value>`
+3. Confirm a child device appears under the parent in Hubitat (or existing child is found).
+4. Confirm no `"Could not resolve a Watts location ID"` error in logs.
+
+**Expected:**
+
+- All three breadcrumb log lines appear.
+- `defaultLocationId` extracted correctly from GET /User response.
+- GET /Location returns at least 1 location.
+- Child thermostat device appears in Hubitat.
+
+**Pass Criteria:** Child device created; no "Could not resolve" error; all breadcrumb lines visible.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 85: Regression — `locationId = "Misty Gray"` in Preferences (Mads' Scenario) — Live Test
+
+**What:** Verify that a user who manually set `locationId = "Misty Gray"` in preferences (the Mads scenario, pre-v0.1.4) does NOT need to reconfigure after upgrading to v0.1.4. The preference value is read, URL-encoded, and the request succeeds.
+
+**Setup:**
+
+- v0.1.4 driver installed on Hubitat.
+- In parent device Preferences: `Watts Home location ID` = `Misty Gray` (the space-containing display name).
+- Valid refresh token in state.
+- Enable debug logging.
+
+**Steps:**
+
+1. Click **discoverDevices**.
+2. Watch logs for the HTTP call to GET /Location/Misty%20Gray/Devices.
+3. Confirm no `URI syntax` or `IllegalArgumentException` error.
+4. Confirm the request completes (HTTP 200 if `"Misty Gray"` is a valid locationId on the server, OR a 404/error logged cleanly if not).
+5. Confirm driver does NOT crash regardless of HTTP status.
+
+**Expected:**
+
+- URL constructed as `/Location/Misty%20Gray/Devices` (space encoded).
+- No URI encoding exception thrown.
+- Any server error (e.g., 404 if name isn't the actual locationId) is logged cleanly without a crash.
+
+**Pass Criteria:** No URI exception; `%20` encoding confirmed in debug log; no unhandled crash.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 86: Negative — API Returns `errorNumber: 401` for `/Location` — Error Logging + No Silent Empty List
+
+**What:** Verify that when the Watts API returns a non-zero `errorNumber` (e.g., `{errorNumber:401, errorMessage:"Unauthorized", body:null}`) for the GET /Location call, the driver logs the error number and message, does NOT silently treat the response as an empty location list, and (if implemented) triggers a token refresh.
+
+**Setup:**
+
+- This is difficult to reproduce live without a token expiry. Test via code review for the error-check path, or simulate by revoking the token in the Watts app.
+
+**Steps (code review):**
+
+1. Review `fetchFirstLocationId()` source.
+2. Confirm the method (or `parseResponseList`) checks for `errorNumber != 0` and logs a warning or error (e.g., `log.warn "[SunStat] GET /Location API error ${errorNumber}: ${errorMessage}"`).
+3. Confirm it returns `[]` (not `null`) and does not proceed as if the location list were valid.
+
+**Steps (live — optional, requires expired token):**
+
+1. Let the access token expire (wait, or manually corrupt `state.accessToken`).
+2. Click **discoverDevices**.
+3. Confirm logs show the 401 error number/message.
+4. Confirm the driver attempts a token refresh (or logs a clear message that the token must be refreshed).
+5. Confirm no NPE or crash.
+
+**Expected:**
+
+- Error number and message are logged (not silently swallowed).
+- Driver does not proceed with empty location list as if the call "succeeded".
+- No NPE or ClassCastException.
+
+**Pass Criteria:** Error is logged; behavior is at least non-crashing; driver does not create spurious state from an error response.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 87: Diagnostic Breadcrumb Log — `GET /User` Info Line Visible Without Debug Toggle
+
+**What:** Verify that the info-level breadcrumb `[SunStat] GET /User → userId=..., defaultLocationId=..., scale=...` is logged even when `logEnable = false` (debug logging OFF). This line is NOT behind the debug gate and must always appear.
+
+**Setup:**
+
+- v0.1.4 driver installed on Hubitat.
+- In Preferences: `Enable debug logging` = OFF (unchecked).
+- Valid refresh token in state; `Watts Home location ID` is blank.
+
+**Steps:**
+
+1. Click **discoverDevices**.
+2. In the Hubitat Logs page, filter to INFO level only (hide debug messages).
+3. Confirm the log line `[SunStat] GET /User → userId=..., defaultLocationId=..., scale=...` appears.
+4. Confirm `userId`, `defaultLocationId`, and `scale` fields are present (not null placeholders).
+
+**Expected:**
+
+- Info log line appears at INFO level.
+- Appears even with debug logging OFF.
+- Contains meaningful values extracted from the GET /User response.
+
+**Pass Criteria:** Log line visible at INFO level with debug OFF; all three fields populated.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 88: Diagnostic Breadcrumb Log — `GET /Location returned N location(s)` Visible Without Debug Toggle
+
+**What:** Verify that `fetchFirstLocationId()` logs `[SunStat] GET /Location returned N location(s)` at INFO level (not behind `logEnable`) so that the location count is always visible in production.
+
+**Setup:**
+
+- v0.1.4 driver installed on Hubitat.
+- In Preferences: `Enable debug logging` = OFF.
+- Valid refresh token in state; `Watts Home location ID` is blank (so `fetchFirstLocationId` is called).
+
+**Steps:**
+
+1. Click **discoverDevices**.
+2. In Hubitat Logs, filter to INFO level only.
+3. Confirm the log line `[SunStat] GET /Location returned N location(s)` appears (where N is the actual count).
+4. If N ≥ 1, also confirm `[SunStat] Auto-selected locationId: <value>` appears.
+
+**Expected:**
+
+- `GET /Location returned N location(s)` appears at INFO level.
+- Visible without debug toggle.
+- If locations found: `Auto-selected locationId:` line also appears.
+
+**Pass Criteria:** Both INFO log lines visible with debug OFF; location count is accurate.
+
+**Actual:**
+(To be filled in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+## Test Execution Matrix (v0.1.4 additions)
+
+**Priority Tier 1 (Core — must pass before v0.1.4 release):**
+- Test 84: End-to-End Happy Path — Full Discovery Flow [v0.1.4]
+- Test 85: Regression — `locationId = "Misty Gray"` in Preferences [v0.1.4]
+- Test 78: URL Encoding — `locationId = "Misty Gray"` (Space) [v0.1.4]
+
+**Priority Tier 2 (Feature correctness):**
+- Test 72: `parseResponseBody` Unwraps Envelope [v0.1.4]
+- Test 73: `parseResponseList` Unwraps Envelope [v0.1.4]
+- Test 74: `parseResponseBody` Graceful Degradation [v0.1.4]
+- Test 75: `parseResponseList` With API-Level Error [v0.1.4]
+- Test 83: `encodePathSegment` Used in All Affected Methods — Code Review [v0.1.4]
+- Test 87: Diagnostic Breadcrumb Log — GET /User [v0.1.4]
+- Test 88: Diagnostic Breadcrumb Log — GET /Location [v0.1.4]
+
+**Priority Tier 3 (Edge cases):**
+- Test 76: `resp.data` Is Raw JSON String [v0.1.4]
+- Test 77: `resp.data` Is Null [v0.1.4]
+- Test 79: URL Encoding — UUID Verbatim [v0.1.4]
+- Test 80: URL Encoding — Non-ASCII [v0.1.4]
+- Test 81: URL Encoding — Literal Slashes [v0.1.4]
+- Test 82: URL Encoding — Empty locationId [v0.1.4]
+- Test 86: Negative — API Returns `errorNumber: 401` [v0.1.4]
