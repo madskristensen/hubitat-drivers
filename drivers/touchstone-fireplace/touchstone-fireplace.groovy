@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.4
+ * Version: 0.1.5
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,14 +17,15 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.5 — 2026-05-17T12:22:15-07:00 — BUGFIX: removed paragraph() from preferences (Hubitat app-only, not allowed in drivers)
  *   0.1.4 — 2026-05-17T11:58:55-07:00 — SAFETY: removed defaultHeatLevel auto-apply; BUGFIX: removed sandbox-blocked reflection logging
  *   0.1.3 — 2026-05-17T11:58:55-07:00 — Optional default-on-power-on settings for flame color, log color, brightness, heat level, and temp setpoint
  *   0.1.2 — 2026-05-17 — Replaced blocked CRC32 import with pure-Groovy implementation (Hubitat import allowlist)
  *   0.1.1 — 2026-05-17T11:24:33-07:00 — Generalized device profiles, in-driver DP discovery, and auditable raw DP writes
  *   0.1.0 — 2026-05-17 — Initial Tuya Local scaffold for power, heat level, flame/log lighting, temperature polling, raw DP surfacing, and socket retry/backoff
  */
-// v0.1.4 — SAFETY: removed defaultHeatLevel auto-apply (heater never auto-starts).
-//          BUGFIX: replaced reflection (e.getClass()) with sandbox-safe exception logging.
+// v0.1.5 — BUGFIX: removed paragraph() from preferences (Hubitat app-only, not allowed in drivers).
+// v0.1.4 — SAFETY: removed defaultHeatLevel auto-apply (heater never auto-starts); BUGFIX: replaced reflection (e.getClass()) with sandbox-safe exception logging.
 
 import groovy.transform.Field
 import groovy.json.JsonOutput
@@ -32,8 +33,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.4"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.4"
+@Field static final String DRIVER_VERSION = "0.1.5"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.5"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -159,32 +160,29 @@ metadata {
               defaultValue: "F",
               required: true
 
-        paragraph title: "Default settings on power-on (optional)",
-                  description: "Only safe non-heater defaults are applied after the fireplace is turned on from Hubitat. Leave any field blank to keep the fireplace firmware's remembered value."
-
         if (settings?.deviceProfile != PROFILE_GENERIC) {
             input name: "defaultFlameColor", type: "enum",
-                  title: "Default flame color",
+                  title: "Default flame color (optional)",
+                  description: "Applied ~1.5s after Hubitat turns the fireplace on. Leave blank to keep the fireplace firmware's last-known flame color.",
                   options: FLAME_COLOR_OPTIONS,
-                  description: "Optional. When set, this flame-color DP value is written after the fireplace is turned on from Hubitat. Leave blank to keep the remembered flame color.",
                   required: false
 
             input name: "defaultFlameBrightness", type: "enum",
-                  title: "Default flame brightness",
+                  title: "Default flame brightness (optional)",
+                  description: "Applied ~1.5s after Hubitat turns the fireplace on. Leave blank to keep the fireplace firmware's last-known flame brightness.",
                   options: FLAME_BRIGHTNESS_OPTIONS,
-                  description: "Optional. When set, this flame-brightness DP value is written after the fireplace is turned on from Hubitat. Leave blank to keep the remembered flame brightness.",
                   required: false
 
             input name: "defaultLogColor", type: "enum",
-                  title: "Default log color",
+                  title: "Default log color (optional)",
+                  description: "Applied ~1.5s after Hubitat turns the fireplace on. Leave blank to keep the fireplace firmware's last-known log color.",
                   options: LOG_COLOR_OPTIONS,
-                  description: "Optional. When set, this log-color DP value is written after the fireplace is turned on from Hubitat. Leave blank to keep the remembered log color.",
                   required: false
         }
 
         input name: "defaultHeatingSetpoint", type: "number",
-              title: "Default heating setpoint",
-              description: "Optional. When set, this whole-number target temperature is written after the fireplace is turned on from Hubitat, using the preferred unit above. Leave blank to keep the remembered target temperature.",
+              title: "Default heating setpoint (optional)",
+              description: "Applied ~1.5s after Hubitat turns the fireplace on, using the preferred unit above. Leave blank to keep the fireplace firmware's last-known target temperature.",
               required: false
 
         input name: "pollInterval", type: "enum",

@@ -1,6 +1,26 @@
 # Switch — QA / Testing Engineer
 
-Recent contributions documented in history-archive.md. Current session: SunStat v0.1.4 test design.
+Recent contributions documented in history-archive.md. Current session: Touchstone v0.1.5 smoke test awareness + Scribe batch processing.
+
+## 2026-05-17T19:29:40Z — Touchstone v0.1.5 shipped (App-only UI audit)
+
+**Batch:** Tank v0.1.5, Link v0.1.5 docs, Switch (test surface awareness)
+
+### v0.1.5 Changes for Test Surface
+
+v0.1.5 is a fast-follow patch removing app-only `paragraph()` UI construct from preferences block. No behavior changes; explanatory text moved into per-field `description:`.
+
+**Test surface implications:**
+- Driver should install without "No signature of method: Script1.paragraph()" error
+- Power-on defaults behavior unchanged (~1.5s post-power-on)
+- Heater never auto-toggles (unchanged from v0.1.4)
+- Smoke test plan remains valid for v0.1.5
+
+### Key Learning
+
+Hubitat driver preferences use only `input` fields; app-only UI helpers (`paragraph()`, `section()`, `href()`, `app()`, `mode()`, `pageDefault()`) are not allowed and should be replaced with `description:` text.
+
+---
 
 - 2026-05-17T04:44:01Z: Gemstone v0.4.1 — Added 8 test cases for playEffectByName command (Tests 11–18); shipped v0.4.1 cross-team
 

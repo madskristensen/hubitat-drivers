@@ -1,5 +1,64 @@
 # Decisions
 
+## 2026-05-17T12:22:15-07:00 — Tank — Touchstone v0.1.5 paragraph() fix
+
+**Requested by:** Mads
+
+### What changed
+
+- Removed the `paragraph` header from the `preferences {}` block in `drivers/touchstone-fireplace/touchstone-fireplace.groovy`.
+- Moved the power-on-defaults explanation into the affected `input` descriptions for `defaultFlameColor`, `defaultFlameBrightness`, `defaultLogColor`, and `defaultHeatingSetpoint`.
+- Bumped the driver header/version/user-agent stamp to `v0.1.5` and added the explicit bugfix note for the Hubitat driver preference allowlist issue.
+
+### App-only preference UI audit result
+
+- Audited the full driver for app-only preference constructs: `paragraph`, `section`, `href`, `app`, `mode`, and `pageDefault`.
+- Found one executable hit: the single `paragraph` block that labeled the optional power-on defaults group.
+- Found no `section`, `href`, `app`, `mode`, or `pageDefault` constructs in the driver.
+
+### Hubitat sandbox families (consolidated)
+
+1. **Import allowlist** — Hubitat blocks imports like `java.util.zip.*`, `ByteArrayOutputStream`, and much of `java.io.*`, `java.nio.*`, and `java.security.*`; prefer pure-Groovy or already-verified allowed equivalents.
+2. **Reflection blocked** — Hubitat blocks `.getClass()`, instance `.class`, `.metaClass`, `.getMethods()`, `.respondsTo()`, `.hasProperty()`, `Class.forName()`, and sometimes method-pointer `&`; drop reflection or restructure with explicit code paths.
+3. **App-only preference UI** — Hubitat drivers should use only `input` with driver-supported types; app UI helpers like `paragraph`, `section`, `href`, `app`, `mode`, and `pageDefault` are not allowed in drivers and should be replaced by `description:` text on each `input`.
+
+---
+
+## 2026-05-17T12:22:15-07:00 — Link — Touchstone v0.1.5 docs bump
+
+**Summary:** Tank shipped v0.1.5 (removed `paragraph()` from preferences block per Hubitat sandbox app-only restrictions). Documentation updated to match driver code.
+
+### Files Modified
+
+- `drivers/touchstone-fireplace/packageManifest.json` — version bumped 0.1.4 → 0.1.5
+- `drivers/touchstone-fireplace/README.md` — version bumps + changelog + troubleshooting
+
+### Changes
+
+1. **packageManifest.json:** Root `version` and `drivers[0].version` both set to 0.1.5; `dateReleased` remains 2026-05-17
+2. **README.md Status header:** v0.1.4 → v0.1.5
+3. **README.md Latest section:** Updated to describe bugfix (removed app-only `paragraph()` from preferences block; no behavior changes; moved text to field descriptions)
+4. **README.md Troubleshooting (CRC32 entry):** Version anchor updated to "v0.1.5 or later"
+5. **README.md Troubleshooting (Reflection entry):** Version anchor updated to "v0.1.5 or later"
+6. **README.md Troubleshooting (NEW):** Added "No signature of method: Script1.paragraph()" entry → points users to v0.1.4 v0.1.5+ update
+7. **README.md Changelog:** v0.1.5 entry added at top: "BUGFIX — removed `paragraph()` from preferences block (Hubitat driver allowlist; app-only construct). No behavior changes; previous defaults UI text moved into per-field descriptions."
+
+### Rationale
+
+- Fast-follow patch; version anchors in troubleshooting now point to v0.1.5 so users can self-identify which version they're on
+- New `paragraph()` error is the first public user symptom for this restriction family; added as standalone entry so users searching error logs can find it
+- Changelog entry documents the Hubitat sandbox restriction (app-only UI) for future reference — completes the three-family sandbox pattern (imports, reflection, app-only UI)
+
+### Verification
+
+- README structure intact; no section reorganization
+- Version bumped consistently in both manifests and refs
+- Changelog and troubleshooting entries follow established patterns
+
+**Decision:** Accept. Docs ready for v0.1.5 release.
+
+---
+
 ## 2026-05-17T11:58:55-07:00 — Touchstone v0.1.4 — safety + sandbox fixes
 
 **By:** Tank  

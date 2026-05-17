@@ -5,17 +5,96 @@
 - **Stack:** Markdown, JSON (HPM manifests), community documentation patterns
 - **Created:** 2026-05-16
 
+## 2026-05-17T19:29:40Z — Touchstone v0.1.5 docs bump (Tank's paragraph() fix)
+
+**Collaborators:** Tank (v0.1.5 code), Link (docs)
+
+### Documentation Role in v0.1.5 Release
+
+v0.1.5 is a fast-follow patch for Tank's Hubitat sandbox `paragraph()` removal. Documentation bump follows the **rapid version-bump-only pass pattern**: minimal structural changes, version anchors updated, changelog and troubleshooting entries added.
+
+### Changes Made
+
+1. **packageManifest.json:** Version bumped 0.1.4 → 0.1.5; dateReleased kept as 2026-05-17 (same day release)
+2. **README.md:**
+   - Status header: v0.1.4 → v0.1.5
+   - Latest section updated with bugfix note (removed app-only `paragraph()`)
+   - Troubleshooting CRC32 entry: "v0.1.5 or later"
+   - Troubleshooting Reflection entry: "v0.1.5 or later"
+   - **NEW:** Troubleshooting entry: "No signature of method: Script1.paragraph()" → points users to v0.1.5+
+   - Changelog: Added v0.1.5 entry (BUGFIX — removed `paragraph()` from preferences block)
+
+### Key Learnings for Hubitat Sandbox Pattern
+
+**Three Hubitat sandbox families now consolidated in SKILL.md:**
+1. **Import allowlist** — Blocks `java.util.zip.CRC32` and others
+2. **Reflection blocked** — Blocks `.getClass()`, `.getMethods()`, etc.
+3. **App-only preference UI** — Blocks `paragraph()`, `section()`, `href()`, etc. (v0.1.5 fix)
+
+Cross-reference in docs: "driver has now been hardened against all three Hubitat sandbox restriction families."
+
+### Version-Bump-Only Pass Pattern (Established v0.1.4–v0.1.5)
+
+For fast-follow patches with only version changes and minor doc additions:
+- Keep README structure intact; don't reorganize sections
+- Update version in headers/Latest section, troubleshooting entries, and CRC/Reflection anchors
+- Add new troubleshooting entry only if it's a directly new error message
+- Changelog always goes first (before older entries)
+- No need to refactor sections or rewording existing text
+
+---
+
+## 2026-05-17T12:22:15-07:00 — Touchstone v0.1.5 docs bump (Tank's paragraph() fix)
+
+**Collaborators:** Tank (v0.1.5 code), Link (docs)
+
+### Documentation Role in v0.1.5 Release
+
+v0.1.5 is a fast-follow patch for Tank's Hubitat sandbox `paragraph()` removal. Documentation bump follows the **rapid version-bump-only pass pattern**: minimal structural changes, version anchors updated, changelog and troubleshooting entries added.
+
+### Changes Made
+
+1. **packageManifest.json:** Version bumped 0.1.4 → 0.1.5; dateReleased kept as 2026-05-17 (same day release)
+2. **README.md:**
+   - Status header: v0.1.4 → v0.1.5
+   - Latest section updated with bugfix note (removed app-only `paragraph()`)
+   - Troubleshooting CRC32 entry: "v0.1.5 or later"
+   - Troubleshooting Reflection entry: "v0.1.5 or later"
+   - **NEW:** Troubleshooting entry: "No signature of method: Script1.paragraph()" → points users to v0.1.5+
+   - Changelog: Added v0.1.5 entry (BUGFIX — removed `paragraph()` from preferences block)
+
+### Key Learnings for Future Sandbox Fixes
+
+**Three Hubitat sandbox families now documented in Touchstone:**
+1. **Import allowlist** — Blocks `java.util.zip.CRC32` and others
+2. **Reflection blocked** — Blocks `.getClass()`, `.getMethods()`, etc.
+3. **App-only preference UI** — Blocks `paragraph()`, `section()`, `href()`, etc. (v0.1.5 fix)
+
+Cross-reference in docs: "driver has now been hardened against all three Hubitat sandbox restriction families" — pattern borrowed from tuya-local-groovy skill. Enables users to understand the broader defensive architecture without duplicating the full pattern documentation.
+
+### Version-Bump-Only Pass Pattern
+
+For fast-follow patches with only version changes and minor doc additions:
+- Keep README structure intact; don't reorganize sections
+- Update version in headers/Latest section, troubleshooting entries, and CRC/Reflection anchors
+- Add new troubleshooting entry only if it's a directly new error message
+- Changelog always goes first (before older entries)
+- No need to refactor sections or rewording existing text
+
+---
+
 ## Active Milestones Summary
 
-### Touchstone Fireplace Driver (Current)
+### Touchstone Fireplace Driver (v0.1.5 — Current)
 
-v0.1.4 documentation shipped with README covering Power-on Defaults, Safety considerations, Device Profiles, and user-friendly troubleshooting. packageManifest bumped to v0.1.4. Changelog omits v0.1.3 (internal buggy state never released).
+v0.1.5 documentation shipped with fast-follow patch for `paragraph()` sandbox restriction. packageManifest and README updated; changelog reflects all three sandbox families now addressed.
 
 **Key learnings:**
 - Hardware safety in docs: explicit, clear, direct language about intentional feature omissions
 - Version anchoring in troubleshooting: tie error messages to version ranges for user self-service
 - Changelog hygiene: only list versions released to users; internal intermediate states omitted
 - Device Profile docs: enable community contribution via user-discoverable preset patterns
+- **Sandbox pattern docs:** Consolidate across driver families (three restriction families); cross-reference rather than duplicate
 
 ---
 

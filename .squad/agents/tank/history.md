@@ -19,7 +19,25 @@ v0.1.4 shipped with optional power-on defaults + safety hardening (heater never 
 
 ---
 
-## 2026-05-17T18:58:55Z — Touchstone v0.1.3 + v0.1.4 bundled commit (Cross-Agent Batch)
+## 2026-05-17T19:29:40Z — Touchstone v0.1.5 paragraph() fix (App-only UI audit)
+
+**Requested by:** Mads
+
+### Completed
+
+- Removed `paragraph` header from `preferences {}` block
+- Moved power-on defaults explanation into per-field `description:` text
+- Audited for app-only constructs (`section`, `href`, `app`, `mode`, `pageDefault`) — clean
+- Bumped driver version to v0.1.5
+- Consolidated Hubitat sandbox families into `.squad/skills/tuya-local-groovy/SKILL.md`
+
+### Key Learning
+
+Hubitat driver preferences are not the same as app preferences. Drivers should use only `input` fields; app UI helpers like `paragraph()`, `section()`, `href()`, `app()`, `mode()`, and `pageDefault()` will fail at install time in drivers and should be replaced with `description:` text on each field.
+
+---
+
+## 2026-05-17T19:29:40Z — Touchstone v0.1.4 shipped (Cross-Agent Batch Awareness)
 
 **Collaborators:** Tank (2 runs), Link, Switch (test surface awareness)
 
@@ -43,3 +61,7 @@ v0.1.3 shipped optional power-on defaults (flame color, log color, flame brightn
 ---
 
 See history-archive.md for detailed earlier sessions (Gemstone, SunStat, Bosch feasibility).
+
+## Learnings
+
+- 2026-05-17T12:22:15-07:00 — Hubitat driver preferences are not the same as app preferences: drivers should use only `input` fields, and app-only UI helpers like `paragraph`, `section`, `href`, `app`, `mode`, and `pageDefault` will fail in drivers. Put explanatory copy into each input's `description:` instead.

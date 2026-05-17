@@ -141,18 +141,18 @@ Safer pattern:
 - suppress immediate DP14-driven setpoint updates for a short settle window
 - schedule a delayed `refresh()` after writes (especially power on/off)
 
-## Hubitat Import Allowlist — Tuya v3.3 CRC32 in Pure Groovy
+## Hubitat Sandbox Families (Verified)
 
-Hubitat rejects `import java.util.zip.CRC32` in drivers, so Tuya v3.3 LAN drivers must keep CRC32 in pure Groovy.
+Hubitat driver failures cluster into three verified sandbox families. Audit all three whenever a driver hits one sandbox-related install or runtime problem.
 
-Verified pattern:
+### 1. Import allowlist
+
+Hubitat rejects many JDK imports in drivers, including `java.util.zip.*`, `ByteArrayOutputStream`, and large parts of `java.io.*`, `java.nio.*`, and `java.security.*`.
+
+For Tuya v3.3 CRC32, keep the implementation in pure Groovy:
 - build a 256-entry lookup table once with `@Field static final long[] CRC32_TABLE`
 - use canonical CRC-32/ISO-HDLC settings: init `0xFFFFFFFFL`, reversed polynomial `0xEDB88320L`, reflected byte updates, xor-out `0xFFFFFFFFL`
 - return the unsigned 32-bit CRC as a `long`/`Long`, then write it big-endian into the Tuya frame
-
-Practical Hubitat guidance:
-- avoid `java.util.zip.*` imports in drivers
-- be cautious with extra `java.io.*` helpers too; simple byte-array helpers are safer when frame assembly is small
 - keep the table at file scope, not inside the checksum method, so parse/send paths do not rebuild it on every frame
 
 Reference shape:
@@ -175,7 +175,7 @@ private long crc32(byte[] data) {
 }
 ```
 
-## Hubitat Sandbox — Reflection Blocked Too
+### 2. Reflection blocked
 
 Hubitat's sandbox restrictions are not limited to imports. Reflection-style runtime inspection is blocked in drivers too.
 
@@ -185,13 +185,32 @@ Avoid patterns like:
 - `.metaClass`, `.respondsTo()`, and `.hasProperty()`
 - method/field introspection (`getMethods()`, `getFields()`, `getDeclaredMethods()`, etc.)
 - `Class.forName()` and similar runtime type discovery
+- method-pointer syntax (`someObj.&methodName`) when it depends on runtime method lookup
 
 Safer replacements:
 - log `e.message` instead of trying to print the exception class name
 - use explicit `instanceof` checks or typed `catch (...)` blocks when behavior truly differs by type
 - if the reflection was only diagnostic, log a generic fallback such as `"object"` instead of probing runtime metadata
 
-Treat reflection restrictions as part of the same Hubitat sandbox model as the import allowlist.
+### 3. App-only preference UI
+
+Hubitat driver `preferences {}` is much narrower than app UI.
+
+Safe driver patterns:
+- use `input` only, with Hubitat-confirmed driver types: `bool`, `decimal`, `email`, `enum`, `number`, `password`, `phone`, `text`, `time`
+- conditional gating with `if (settings.someField == ...) { input ... }` is valid in drivers
+
+Do not use app-only constructs in drivers:
+- `paragraph`
+- `section`
+- `href`
+- `app`
+- `mode`
+- `pageDefault`
+
+If you need explanatory copy for a group of driver preferences, fold it into each `input`'s `description:` instead of trying to render a section header or paragraph block.
+
+These three families travel together: if a Hubitat driver trips one sandbox rule, audit the file for the other two before shipping.
 
 ## kkossev vs tinytuya Guidance
 

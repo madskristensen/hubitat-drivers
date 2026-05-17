@@ -4,9 +4,9 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: v0.1.4 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
+> **Status: v0.1.5 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
 >
-> **Latest: v0.1.4** — Adds optional power-on defaults (flame color, brightness, log color, temperature setpoint); removes auto-starting heater for safety; fixes Hubitat sandbox reflection error blocking v0.1.3.
+> **Latest: v0.1.5** — BUGFIX — removed `paragraph()` from preferences block (Hubitat driver allowlist; app-only construct). No behavior changes; previous defaults UI text moved into per-field descriptions.
 >
 > **Killer feature:** Works out-of-the-box for Touchstone Sideline Elite; adapts to other Touchstone models (Steel, Forte, Onyx, etc.) and generic Tuya WiFi fireplaces via configurable Device Profiles and in-driver discovery — no Python, no manual tinytuya wizard needed.
 
@@ -329,15 +329,15 @@ Some remote buttons (log brightness, flame tempo, remote timer) don't map to Tuy
 
 **Root cause:** You're on Hubitat driver v0.1.2 or earlier. CRC32 import is required for Tuya packet validation.
 
-**Fix:** Ensure you're running **v0.1.4 or later**. If you see this error, you have an old version. Delete the driver and re-import from GitHub.
+**Fix:** Ensure you're running **v0.1.5 or later**. If you see this error, you have an old version. Delete the driver and re-import from GitHub.
 
 ### `Expression [MethodCallExpression] is not allowed: e.getClass()`
 
 **Symptom:** Driver fails to save in the Hubitat IDE with this error.
 
-**Root cause:** You're on Hubitat driver v0.1.2 or v0.1.3. Hubitat's Groovy sandbox blocks reflection-style method calls (`.getClass()`, `.getMethods()`, etc.). v0.1.4 removes the offending code.
+**Root cause:** You're on Hubitat driver v0.1.2 or v0.1.3. Hubitat's Groovy sandbox blocks reflection-style method calls (`.getClass()`, `.getMethods()`, etc.). v0.1.5 removes the offending code.
 
-**Fix:** Update to **v0.1.4 or later**. Delete the driver and re-import from GitHub.
+**Fix:** Update to **v0.1.5 or later**. Delete the driver and re-import from GitHub.
 
 ### Wrong DP Responses / Commands Don't Work
 
@@ -348,6 +348,14 @@ Some remote buttons (log brightness, flame tempo, remote timer) don't map to Tuy
 2. Run **`discoverDPs()`** and check the logs for the current DP values
 3. Are the raw string values what you expect (e.g., DP 101 shows `"1"` when flame is orange)?
 4. If DPs are missing or show unexpected types, your model may have a different DP map — open a GitHub Issue with your `discoverDPs()` output
+
+### "No signature of method: Script1.paragraph()"
+
+**Symptom:** Driver fails to save with this error in the Hubitat IDE.
+
+**Root cause:** You're on Hubitat driver v0.1.4 or earlier. The preferences block included a `paragraph()` construct, which is app-only UI (not allowed in drivers per the Hubitat sandbox restrictions).
+
+**Fix:** Update to **v0.1.5 or later**. The `paragraph()` construct has been removed, and descriptions have been folded into individual input field descriptions. Delete the driver and re-import from GitHub.
 
 ### Logs Show "power on suppressed by transition window"
 
@@ -365,6 +373,7 @@ Some remote buttons (log brightness, flame tempo, remote timer) don't map to Tuy
 
 ## Changelog
 
+- **v0.1.5 (2026-05-17):** BUGFIX — removed `paragraph()` from preferences block (Hubitat driver allowlist; app-only construct). No behavior changes; previous defaults UI text moved into per-field descriptions.
 - **v0.1.4 (2026-05-17):** Adds optional power-on defaults (flame color, brightness, log color, temperature setpoint); removes auto-starting heater for safety; fixes Hubitat sandbox reflection error blocking v0.1.3.
 - **v0.1.2 (2026-05-17):** Core driver release with Device Profiles and discovery commands.
 - **v0.1.1 (2026-05-17):** Generalized device profiles (Sideline Elite / Generic Tuya / Custom), in-driver DP discovery commands (`discoverDPs()`, `captureBaseline()`, `captureDiff()`), custom DP mapping via preferences, auditable raw DP writes (`setRawDP()`).
