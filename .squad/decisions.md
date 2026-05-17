@@ -1,5 +1,28 @@
 # Decisions
 
+## 2026-05-17T13:24:30-07:00 — Directive — Scribe must push after every commit
+
+**By:** Mads (via Copilot)
+
+### What changed
+
+- After every successful `git commit`, Scribe must also push before ending the task.
+- On `main`, run `git push origin main`.
+- On another branch, push the current branch (`git push -u origin <branch>` the first time).
+- If no commit was made, no push is required.
+
+### Why
+
+- This repo's release and delivery automation is push-driven, so local-only commits can silently block GitHub workflows and release/tag creation.
+- That gap already happened here: commits existed locally on `main`, but GitHub never saw them, so downstream automation did not fire.
+
+### Failure handling
+
+- If push fails because of auth, non-fast-forward, or branch protection, report it immediately.
+- Do not silently skip the push, auto-rebase, or force-push.
+
+---
+
 ## 2026-05-17T12:22:15-07:00 — Tank — Touchstone v0.1.5 paragraph() fix
 
 **Requested by:** Mads

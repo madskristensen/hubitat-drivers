@@ -11,6 +11,20 @@ Agent Scribe initialized and ready for work.
 
 📌 Team initialized on 2026-05-16
 
+## 2026-05-17T13:24:30-07:00 — Touchstone follow-up shipped + push directive activated
+
+**Topic:** touchstone-follow-up-and-push-rule
+
+Scribe landed three scoped follow-up commits on `main`:
+
+1. Tank's Touchstone changelog date-format fix so `release.yml` can parse plain `YYYY-MM-DD` entries reliably.
+2. Link's root README update to add Touchstone as the third published driver.
+3. Directive capture in `decisions.md` so future Scribe runs always push after each commit.
+
+**Operational change now active:** Scribe must push after every successful commit, and must surface auth, non-fast-forward, or branch-protection failures instead of leaving local-only commits behind.
+
+---
+
 ## 2026-05-17T18:55:16Z — Touchstone v0.1.2 Shipped (Scribe Session)
 
 **Topic:** touchstone-driver-shipped
