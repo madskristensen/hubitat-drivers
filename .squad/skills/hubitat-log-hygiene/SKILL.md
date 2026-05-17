@@ -1,7 +1,10 @@
-# Skill: Hubitat Log Hygiene
-
-**Confidence:** high  
-**Source:** gemstone-lights.groovy v0.4.7
+---
+name: "hubitat-log-hygiene"
+description: "Avoid flooding Hubitat's live-log view by curating catalog dumps, large lists, and error messages."
+domain: "hubitat-drivers"
+confidence: "high"
+source: "earned"
+---
 
 ## Problem
 
