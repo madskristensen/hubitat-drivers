@@ -3,7 +3,7 @@
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
   "dateReleased": "2026-05-17",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/README.md",
   "drivers": [
@@ -13,7 +13,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/touchstone-fireplace.groovy",
       "required": true,
-      "version": "0.1.9"
+      "version": "0.1.10"
     }
   ]
 }

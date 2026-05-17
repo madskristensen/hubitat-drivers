@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.10 — 2026-05-17 — fix off-by-one in inbound enum DP display
  *   0.1.9 — 2026-05-17 — default log brightness preference
  *   0.1.8 — 2026-05-17 — default flame speed preference
  *   0.1.7 — 2026-05-17 — hotfix: restore setHeatLevel signature
@@ -28,6 +29,7 @@
  *   0.1.1 — 2026-05-17 — Generalized device profiles, in-driver DP discovery, and auditable raw DP writes
  *   0.1.0 — 2026-05-17 — Initial Tuya Local scaffold for power, heat level, flame/log lighting, temperature polling, raw DP surfacing, and socket retry/backoff
  */
+// v0.1.10 — off-by-one fix: inbound enum DP values are now validated before emit; unrecognised values log-and-bail.
 // v0.1.9 — defaultLogBrightness preference: completes v0.1.6 symmetry for DP 105.
 // v0.1.8 — defaultFlameSpeed preference: auto-applies during the power-on defaults window.
 // v0.1.7 — hotfix: restore setHeatLevel signature (parse error introduced in v0.1.6).
@@ -41,8 +43,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.9"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.9"
+@Field static final String DRIVER_VERSION = "0.1.10"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.10"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -1241,17 +1243,32 @@ private void applyDps(Map<String, Object> dps) {
 
     String flameColorDpId = dpIdFor("flameColor")
     if (flameColorDpId && dps.containsKey(flameColorDpId)) {
-        emitAttribute("flameColor", safeStr(dps[flameColorDpId]), "${device.displayName} flame color is ${dps[flameColorDpId]}")
+        String flameColorVal = safeStr(dps[flameColorDpId])
+        if (!(flameColorVal in FLAME_COLOR_OPTIONS)) {
+            log.warn "[Touchstone] applyDps: ignoring unrecognised flameColor DP value '${flameColorVal}'"
+        } else {
+            emitAttribute("flameColor", flameColorVal, "${device.displayName} flame color is ${flameColorVal}")
+        }
     }
 
     String flameBrightnessDpId = dpIdFor("flameBrightness")
     if (flameBrightnessDpId && dps.containsKey(flameBrightnessDpId)) {
-        emitAttribute("flameBrightness", safeStr(dps[flameBrightnessDpId]), "${device.displayName} flame brightness is ${dps[flameBrightnessDpId]}")
+        String flameBrightnessVal = safeStr(dps[flameBrightnessDpId])
+        if (!(flameBrightnessVal in FLAME_BRIGHTNESS_OPTIONS)) {
+            log.warn "[Touchstone] applyDps: ignoring unrecognised flameBrightness DP value '${flameBrightnessVal}'"
+        } else {
+            emitAttribute("flameBrightness", flameBrightnessVal, "${device.displayName} flame brightness is ${flameBrightnessVal}")
+        }
     }
 
     String logColorDpId = dpIdFor("logColor")
     if (logColorDpId && dps.containsKey(logColorDpId)) {
-        emitAttribute("logColor", safeStr(dps[logColorDpId]), "${device.displayName} log color is ${dps[logColorDpId]}")
+        String logColorVal = safeStr(dps[logColorDpId])
+        if (!(logColorVal in LOG_COLOR_OPTIONS)) {
+            log.warn "[Touchstone] applyDps: ignoring unrecognised logColor DP value '${logColorVal}'"
+        } else {
+            emitAttribute("logColor", logColorVal, "${device.displayName} log color is ${logColorVal}")
+        }
     }
 
     if (activeDeviceProfile() == PROFILE_SIDELINE) {
@@ -1261,6 +1278,8 @@ private void applyDps(Map<String, Object> dps) {
             String speedLabel = DP_TO_FLAME_SPEED[rawSpeed]
             if (speedLabel) {
                 emitAttribute("flameSpeed", speedLabel, "${device.displayName} flame speed is ${speedLabel}")
+            } else {
+                log.warn "[Touchstone] applyDps: ignoring unrecognised flameSpeed DP 103 value '${rawSpeed}'"
             }
         }
         if (dps.containsKey("105")) {
@@ -1268,6 +1287,8 @@ private void applyDps(Map<String, Object> dps) {
             emitAttribute("dp105", rawBrightness, "${device.displayName} DP 105 is ${rawBrightness}")
             if (rawBrightness in LOG_BRIGHTNESS_OPTIONS) {
                 emitAttribute("logBrightness", rawBrightness, "${device.displayName} log brightness is ${rawBrightness}")
+            } else {
+                log.warn "[Touchstone] applyDps: ignoring unrecognised logBrightness DP 105 value '${rawBrightness}'"
             }
         }
         if (dps.containsKey("107")) {
