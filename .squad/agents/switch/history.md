@@ -47,3 +47,60 @@ Real-device validation will require Mads to run tinytuya tooling against his act
 See `.squad/orchestration-log/2026-05-17T165347Z-cypher.md` for full list of open questions (section 5).
 
 **Key learning:** Palette-indexed colors (not RGB) simplify the DP layer but require named commands for honest UX. No ColorControl capability. Trinity's architecture is sound but capability mapping was corrected.
+
+---
+
+## 2026-05-17T10:47:09Z — Touchstone Sideline Elite — Local LAN Control Confirmed (Coordinator Direct Mode)
+
+**Topic:** touchstone-local-control-achieved
+
+Coordinator walked Mads through end-to-end Tuya IoT setup and local device verification. All heater + LED DPs now mapped and responding.
+
+### Device Facts for Tank Implementation
+
+**Device Credentials** (stored at C:\Users\madsk\devices.json; <see devices.json on Mads' machine> for local_key value)
+- Product: Touchstone Sideline Elite electric LED fireplace
+- Tuya productKey: nc1lwvgjse1ujlr
+- Tuya category: qn (electric fireplace)
+- Device ID: 70223053e8db84d10b53
+- LAN IP: 192.168.1.38
+- MAC: e8:db:84:d1:0b:53
+- Protocol: v3.3, AES-encrypted
+
+**Heater DPs (Official Tuya Schema)**
+
+| DP | Type | Name | Range |
+|---|---|---|---|
+| 1 | bool | switch | on/off |
+| 2 | int | temp_set | 19–30°C |
+| 3 | int | temp_current | 0–50°C |
+| 5 | enum | level | 0/1/2 (heat level) |
+| 13 | enum | temp_unit_convert | c/f |
+| 14 | int | temp_set_f | 67–88°F |
+| 15 | int | temp_current_f | 32–122°F |
+
+**Vendor LED DPs (Empirical, TBD Next Session via Tuya App Interaction)**
+
+| DP | Type | Observed | Notes |
+|---|---|---|---|
+| 101 | string-enum | "1" | Likely flame color/effect |
+| 102 | string-enum | "5" | Likely flame brightness |
+| 103 | string-enum | "1" | Likely flame speed |
+| 104 | string-enum | "4" | Likely log/ember color |
+| 105 | string-enum | "5" | Likely log brightness |
+| 107 | bool | false | TBD |
+| 108 | bool | false | TBD |
+
+### Operational Lesson for README
+
+**Tuya IoT Cloud Project API subscription is MANUAL.** A new project does NOT auto-subscribe to required APIs. Must explicitly enable:
+- IoT Core
+- Authorization Token Management
+- Smart Home Basic Service
+- Device Status Notification
+
+All free trials, no card required. This was the key blocker in the setup flow.
+
+### Next for Switch
+
+Empirical DP mapping for LED effects (101–108) requires real device validation via Tuya app interaction (drag sliders, change colors, observe DP values). Schedule for next Touchstone session after Tank scaffolds driver.

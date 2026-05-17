@@ -160,3 +160,70 @@ drivers/
 2. **Cypher:** Analyze DP map output, confirm protocol version (3.3/3.4/3.5).
 3. **Tank:** Once DP map is known, scaffold driver using Tuya Local protocol layer.
 4. **Link:** README + local-key extraction steps once architecture is locked.
+
+---
+
+## 2026-05-17: Touchstone Sideline Elite — Local LAN Control Achieved
+
+**Date:** 2026-05-17T10:47:09-07:00  
+**Author:** Coordinator (Direct Mode)  
+**Status:** Verified ✅
+
+### Summary
+
+End-to-end LAN control of the Touchstone Sideline Elite fireplace confirmed from Mads' machine. Completed: Tuya IoT signup → tinytuya wizard → local_key extraction → `tinytuya.OutletDevice.status()` query → live DP dump validation.
+
+### Device Facts
+
+- **Product:** Touchstone Sideline Elite electric LED fireplace
+- **Tuya productKey:** nc1lwvgjse1ujlr
+- **Tuya category:** qn (electric fireplace)
+- **Device ID:** 70223053e8db84d10b53
+- **IP (LAN):** 192.168.1.38
+- **MAC:** e8:db:84:d1:0b:53
+- **Protocol:** v3.3, AES-encrypted
+- **local_key:** <stored at C:\Users\madsk\devices.json — DO NOT inline value>
+
+### Heater DP Map (Official Tuya Schema)
+
+| DP | Type | Name | Range |
+|---|---|---|---|
+| 1 | bool | switch | on/off |
+| 2 | int | temp_set | 19–30°C |
+| 3 | int | temp_current | 0–50°C |
+| 5 | enum | level | 0/1/2 (heat level) |
+| 13 | enum | temp_unit_convert | c/f |
+| 14 | int | temp_set_f | 67–88°F |
+| 15 | int | temp_current_f | 32–122°F |
+
+### Vendor-Custom LED DPs (Empirical Mapping — TBD)
+
+Not in Tuya schema. Observed values from live DP dump:
+
+| DP | Type | Observed | Status |
+|---|---|---|---|
+| 101 | string-enum | "1" | TBD |
+| 102 | string-enum | "5" | TBD |
+| 103 | string-enum | "1" | TBD |
+| 104 | string-enum | "4" | TBD |
+| 105 | string-enum | "5" | TBD |
+| 107 | bool | false | TBD |
+| 108 | bool | false | TBD |
+
+Next session: Validate empirical DP mapping via Tuya app interaction.
+
+### Operational Lesson
+
+**Tuya IoT Cloud Project API subscription gotcha:** A new Tuya IoT Cloud Project does NOT auto-subscribe to the APIs needed for `tinytuya wizard`. Must manually subscribe to:
+- IoT Core
+- Authorization Token Management
+- Smart Home Basic Service
+- Device Status Notification
+
+All are free trials with no card on file required. This was the key blocker before Mads could run the wizard.
+
+### Session Context
+
+- **Topic:** touchstone-local-control-achieved
+- **Mode:** Direct (Coordinator — no agent spawns)
+- **Requested by:** Mads Kristensen

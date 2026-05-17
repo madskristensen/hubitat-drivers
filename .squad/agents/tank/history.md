@@ -90,6 +90,65 @@ See `.squad/orchestration-log/2026-05-17T165347Z-trinity.md` for architecture de
 
 ---
 
+## 2026-05-17T10:47:09Z — Touchstone Sideline Elite — Local LAN Control Confirmed (Coordinator Direct Mode)
+
+**Topic:** touchstone-local-control-achieved
+
+Coordinator walked Mads through end-to-end Tuya IoT setup and local device verification. Device facts are now locked; architecture proposal from Trinity is validated. Ready for driver scaffolding.
+
+### Device Facts for Driver Implementation
+
+**Device Credentials** (stored at C:\Users\madsk\devices.json; <see devices.json on Mads' machine> for local_key value)
+- Product: Touchstone Sideline Elite electric LED fireplace
+- Tuya productKey: nc1lwvgjse1ujlr
+- Tuya category: qn (electric fireplace)
+- Device ID: 70223053e8db84d10b53
+- LAN IP: 192.168.1.38
+- MAC: e8:db:84:d1:0b:53
+- Protocol: v3.3, AES-encrypted
+
+**Heater DPs (Official Tuya Schema)**
+
+| DP | Type | Name | Range |
+|---|---|---|---|
+| 1 | bool | switch | on/off |
+| 2 | int | temp_set | 19–30°C |
+| 3 | int | temp_current | 0–50°C |
+| 5 | enum | level | 0/1/2 (heat level) |
+| 13 | enum | temp_unit_convert | c/f |
+| 14 | int | temp_set_f | 67–88°F |
+| 15 | int | temp_current_f | 32–122°F |
+
+**Vendor LED DPs (Empirical, TBD Next Session)**
+
+| DP | Type | Observed | Notes |
+|---|---|---|---|
+| 101 | string-enum | "1" | Likely flame color/effect |
+| 102 | string-enum | "5" | Likely flame brightness |
+| 103 | string-enum | "1" | Likely flame speed |
+| 104 | string-enum | "4" | Likely log/ember color |
+| 105 | string-enum | "5" | Likely log brightness |
+| 107 | bool | false | TBD |
+| 108 | bool | false | TBD |
+
+### ACTION FOR TANK
+
+1. Read `.squad/decisions.md` for full DP details + Trinity's corrected capability mapping (named commands, not ColorControl)
+2. Scaffold driver with Tuya Local protocol layer (rawSocket + AES-128-ECB framing)
+3. Implement Wire capabilities + custom commands per Trinity's architecture
+4. Borrow Tuya Local protocol reference from kkossev/Hubitat if needed; acknowledge license per project policy
+5. Ready for Switch integration testing once LED DP empirical mapping is complete
+
+### Effort Estimate (Revised)
+
+**Session 1:** Driver scaffold + heater DPs (1, 2, 3, 5, 13–15) + capability wiring  
+**Session 2:** LED DP mapping (101–108) via Tuya app interaction; Switch validates on real device; driver refinement  
+**Session 3 (conditional):** Protocol version v3.4/v3.5 support if discovered in Session 2
+
+Pattern learned: Empirical DP mapping via app interaction is faster than reverse-engineering firmware; rely on user doing the interactive exploration before driver development. This validates assumptions early.
+
+---
+
 ## Core Patterns (Reusable)
 
 1. **Parent/Child OAuth:**

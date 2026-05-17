@@ -7,59 +7,14 @@
 
 ## Current Status
 
-Link is the DevRel and Documentation specialist. See `history-archive.md` for detailed learnings from the initial project phase (community conventions survey, HPM release infrastructure, parent/child documentation patterns, README community-conformance audit).
+Link is the DevRel and Documentation specialist. See history-archive.md for detailed learnings from the initial project phase (community conventions survey, HPM release infrastructure, parent/child documentation patterns, README community-conformance audit).
 
-## Team Updates (2026-05-17T03:01:41Z)
+## Team Milestone Summary
 
-**SunStat Connect Plus v0.1.0 shipped.** Documentation delivered: drivers/sunstat-thermostat/README.md, packageManifest.json, TESTING.md (copied from Switch), and root README update. Tank's driver implementation, Trinity's architecture, and Cypher's API research finalized. Awaiting Mads' real-device verification.
-
-## Team Updates (2026-05-17T03:37:53Z)
-
-**SunStat Connect Plus v0.1.2 documentation complete.** Link bumped packageManifest.json + per-driver READMEs (SunStat v0.1.2, Gemstone v0.4.0) with latest-version badges and GitHub Releases links. Link-3 completed comprehensive README community-conformance audit: surveyed 8 community Hubitat driver repos, applied 6 targeted edits (explicit compatibility headers with hub gens + platform min, latest-version badges, releases links). Tank wired 6 v0.1.2 features; Switch added 23 test cases. Awaiting Mads' real-device verification and answers on 3 audit open questions (forum topics, donation link, C-5 testing).
-
-## Team Updates (2026-05-16T21:07:23-07:00)
-
-**SunStat Connect Plus v0.1.3 documentation updated.** Trinity finalized the long-refresh-token workaround (Decision approved). Link rewrote SunStat README install flow: removed `refreshToken` preference row, split Step 3 into two steps (preferences config → `setRefreshToken` command), added `setRefreshToken` command to Parent Device Commands table, updated troubleshooting section with command-based recovery, and bumped root README status badge to v0.1.3. Tank owns implementation of the command + code simplifications per Decision spec 4a–4g. Pattern learned: command-based bootstrap is clearer for long values; preference length limits are a hidden gotcha in Hubitat UX. README now clearly separates "what goes in preferences" vs. "what runs as a command" with an explanatory blockquote.
-
-## Team Updates (2026-05-16T21:24:48-07:00)
-
-**SunStat Connect Plus v0.1.4 documentation complete.** Tank and Cypher shipped two bugfixes in parallel: (1) API envelope unwrap — every Watts response is wrapped in `{errorNumber, errorMessage, body: T}`; the driver now unwraps it, fixing discoverDevices failures. (2) URL-encode locationId in all API paths — Watts uses location display names (with spaces like "Misty Gray") as locationIds; now properly encoded. Cypher also shipped a new bootstrap helper script at `drivers/sunstat-thermostat/scripts/get-location-id.ps1` for manual locationId lookup. Link documented v0.1.4 changes:
-- Bumped status badge in both drivers/sunstat-thermostat/README.md (line 7) and root README.md (line 5) to v0.1.4 with short "bugfix release" notes
-- Added "About the location ID" callout section between Steps 4 and 5 in the setup flow — explains v0.1.4 auto-discovery + references the bootstrap script with a one-liner code example
-- Added two new troubleshooting entries: `### "Could not resolve a Watts location ID"` (symptom → pre-v0.1.4 cause → fix with script reference) and `### "Illegal character in path"` (symptom → pre-v0.1.4 cause about spaces in names → fix with URL-encoding note)
-
-Pattern learned: troubleshooting entries for pre-release bugs should follow symptom → cause (pre-vX.Y.Z) → fix structure; this makes it clear to users on old versions why they're seeing it, and on new versions what to do. Bootstrap script documentation is best kept to a short code block + one-line explanation (tokens.json → access token → locationId); full details about `homebridge-tekmar-wifi` already exist in Step 1.
-
-## Team Updates (2026-05-16T21:44:01-07:00)
-
-**Gemstone Lights v0.4.1 documentation complete.** Tank added `playEffectByName(String)` command to sidestep WebCoRE's capability-metadata shadowing: the `LightEffects` capability declares `setEffect` as taking a NUMBER, so WebCoRE's action picker only exposes that numeric signature and silently hides the `setEffect(String)` overload. The new `playEffectByName()` command (a separate method name with no overload) is fully visible to WebCoRE and delegates to `setEffect(String)` internally. Link documented v0.4.1:
-- Bumped status badge in both drivers/gemstone-lights/README.md (line 9) and root README.md (line 5) to v0.4.1
-- Added `playEffectByName(String name)` to Custom Commands section with full explanation of why it exists (capability metadata shadowing)
-- Added new "Using from WebCoRE" section explaining the visibility issue, how to use the command from WebCoRE pistons, and confirming Rule Machine / Hubitat rules can use either method
-- Added v0.4.1 changelog entry with date (2026-05-16) and short rationale
-- Updated "What v0.4.1 Does" section to mention playEffectByName() as a new feature
-
-Pattern learned: **WebCoRE-command-visibility for overloaded methods.** When a Hubitat capability declares a method with a specific signature (e.g., `setEffect(NUMBER)`), WebCoRE only exposes that signature to its action picker. Custom overloads of that method are invisible. The solution: create a separate command name (no overload conflict) that wraps the string-based implementation. This is clearer than documenting "use Rule Machine instead" because it gives WebCoRE users a direct path. Document the visibility issue, not just the workaround — users need to understand why the separate command exists.
-
-- 2026-05-17T04:44:00Z: v0.4.1 Gemstone Lights shipped (playEffectByName command + docs + tests) — tank/link/switch cross-team ship
-
-## Learnings
-
-- **README install-flow pattern for command-based token bootstrap:** When a value exceeds platform preference limits (Hubitat ~1024 chars), document the command-based path separately from preferences config. Use a blockquote to explain *why* the unusual flow is necessary, so users don't assume it's a workaround. Keep the "why" terse (one sentence max).
-- **Section numbering rules:** When rewording setup steps that involve a new command insertion, renumber all subsequent steps and update cross-references (e.g., "see Step 4"). Link discovered this by carefully re-reading the task requirements — the original Step 4 (Discover Devices) became Step 5 after the new command step was inserted, and all troubleshooting references had to be updated to match.
-
-- 2026-05-17T04-20-29Z: v0.1.3 SunStat Connect Plus shipped (setRefreshToken command + docs + tests) — tank/link/switch cross-team ship
-- 2026-05-16: SunStat v0.1.4 shipped — envelope unwrap fix, URL encoding, bootstrap script
-
-## Team Updates (2026-05-16T22:15:20-07:00)
-
-**SunStat Connect Plus v0.1.4 documentation corrected.** Mads tested the install flow on his hub and found two bugs in the README auth bootstrap section:
-1. **Step 1 now clarifies:** The `homebridge-tekmar-wifi` CLI does **NOT** print tokens to stdout. Tokens are written to `tokens.json`. The old fake stdout block (showing `accessToken:`, `refreshToken:`, etc.) is removed. New Step 1 walks through opening `tokens.json` and copying the `refresh_token` value from the JSON object.
-2. **Step 4b promoted to first-class step:** The "About the location ID" callout (formerly wedged between Steps 4 and 5) is now **Step 4b: Fetch your locationId (if auto-discovery doesn't find it)**. It's now a self-contained, numbered step with full details on where to find `tokens.json`, how to run the PowerShell helper, expected output format, and where to paste the locationId in Preferences.
-3. **Step 5 command name clarified:** Now says `discoverDevices` (the actual command name) instead of the button label "Discover Devices".
-
-Link also tightened the intro paragraph to clarify that the refresh token is handed to the driver via the `setRefreshToken` command, not pasted into preferences. Documentation now accurately reflects the production flow.
-
+**Previous sessions (see history-archive.md for details):**
+- SunStat v0.1.0–v0.1.4 documentation (parent/child OAuth, token bootstrap, envelope unwrap)
+- Gemstone Lights v0.4.0–v0.4.1 documentation (effect naming, WebCoRE visibility, HPM release)
+- Community README conformance audit (6 targeted edits across 3 drivers)
 
 ---
 
@@ -88,37 +43,37 @@ Feasibility pass completed. Documentation phase incoming.
 
 **Device:** Touchstone Sideline LED fireplace (Tuya-based; WiFi)  
 **Control:** Tuya Local (LAN) over rawSocket + AES-128-ECB  
-**Driver Shape:** Single file (`drivers/touchstone-fireplace/touchstone-fireplace.groovy`)
+**Driver Shape:** Single file (drivers/touchstone-fireplace/touchstone-fireplace.groovy)
 
 **ACTION FOR LINK:**
 
 Prepare README documentation for once architecture is locked. Key sections:
 
 1. **Install / Setup Flow**
-   - Device setup prerequisites (WiFi, Smart Life app pairing)
-   - Local IP assignment (recommend DHCP reservation)
-   - **One-time local key extraction step** (critical; two methods provided):
-     - Method A (preferred): Via Home Assistant + `make-all/tuya-local` cloud-auth (SmartLife credentials only; ~5 min)
-     - Method B (fallback): Via `tinytuya wizard` (free Tuya IoT dev account; ~20 min one-time)
-   - Preference configuration: deviceIP, localKey, deviceId
-   - Discover/pair flow
+    - Device setup prerequisites (WiFi, Smart Life app pairing)
+    - Local IP assignment (recommend DHCP reservation)
+    - **One-time local key extraction step** (critical; two methods provided):
+      - Method A (preferred): Via Home Assistant + make-all/tuya-local cloud-auth (SmartLife credentials only; ~5 min)
+      - Method B (fallback): Via 	inytuya wizard (free Tuya IoT dev account; ~20 min one-time)
+    - Preference configuration: deviceIP, localKey, deviceId
+    - Discover/pair flow
 
 2. **Capabilities & Commands**
-   - Standard: `Switch` (on/off), `SwitchLevel` (flame brightness), `Refresh`, `Initialize`
-   - Custom commands: `setFlameColor(name)`, `setLogColor(name)`, `setLogBrightness(level)`, `setFlameSpeed(speed)`
-   - Palette values: 6 flame effects, 12 log colors (list all with descriptions)
-   - **Important:** NOT `ColorControl` — this is palette-based, not RGB
+    - Standard: Switch (on/off), SwitchLevel (flame brightness), Refresh, Initialize
+    - Custom commands: setFlameColor(name), setLogColor(name), setLogBrightness(level), setFlameSpeed(speed)
+    - Palette values: 6 flame effects, 12 log colors (list all with descriptions)
+    - **Important:** NOT ColorControl — this is palette-based, not RGB
 
 3. **Troubleshooting**
-   - Local key extraction errors (cloud-auth vs dev-account paths)
-   - Connection drops (rawSocket idle disconnect; keepalive pattern)
-   - Device accepts only one TCP connection; close mobile app before driver connects
+    - Local key extraction errors (cloud-auth vs dev-account paths)
+    - Connection drops (rawSocket idle disconnect; keepalive pattern)
+    - Device accepts only one TCP connection; close mobile app before driver connects
 
 4. **Compatibility**
-   - Hubitat hub gen (confirm which gens support rawSocket; likely all modern gens)
-   - Tuya protocol versions supported (v3.3 confirmed; v3.4/v3.5 added in Session 3 if needed)
+    - Hubitat hub gen (confirm which gens support rawSocket; likely all modern gens)
+    - Tuya protocol versions supported (v3.3 confirmed; v3.4/v3.5 added in Session 3 if needed)
 
-See `.squad/orchestration-log/2026-05-17T165347Z-trinity.md` for architecture details and `.squad/orchestration-log/2026-05-17T165347Z-cypher.md` for Tuya protocol + local-key extraction deep dive (sources included).
+See .squad/orchestration-log/2026-05-17T165347Z-trinity.md for architecture details and .squad/orchestration-log/2026-05-17T165347Z-cypher.md for Tuya protocol + local-key extraction deep dive (sources included).
 
 **Key learning:** Local key extraction UX is one-time only and has a no-account path (SmartLife credentials via HA). Document both methods clearly so users understand the trade-offs. README should separate "prefer Method A" vs. "fallback to Method B" flow.
 
@@ -138,26 +93,99 @@ Cypher completed definitive audit of all 2026 Tuya local-key extraction methods.
 
 Two documented local-key extraction methods exist:
 
-1. **Preferred path (requires Home Assistant):** `make-all/tuya-local` cloud-auth
-   - Uses SmartLife app credentials directly (QR scan)
-   - ~5 minutes, no developer account needed
-   - **Fragility note:** Relies on Tuya-issued hardcoded `client_id` in HA integration; Tuya can revoke unilaterally
-   - Recommended for users with HA already installed
+1. **Preferred path (requires Home Assistant):** make-all/tuya-local cloud-auth
+    - Uses SmartLife app credentials directly (QR scan)
+    - ~5 minutes, no developer account needed
+    - **Fragility note:** Relies on Tuya-issued hardcoded client_id in HA integration; Tuya can revoke unilaterally
+    - Recommended for users with HA already installed
 
-2. **Fallback path (no HA required):** `tinytuya wizard` via iot.tuya.com
-   - Requires free Tuya IoT developer account (one-time signup)
-   - Full `tinytuya` Python tool setup and wizard flow
-   - ~20 minutes on first try
-   - **Durable:** Once key is extracted, it persists until device re-pairs (dev account status doesn't matter afterward)
-   - Recommended for users without HA
+2. **Fallback path (no HA required):** 	inytuya wizard via iot.tuya.com
+    - Requires free Tuya IoT developer account (one-time signup)
+    - Full 	inytuya Python tool setup and wizard flow
+    - ~20 minutes on first try
+    - **Durable:** Once key is extracted, it persists until device re-pairs (dev account status doesn't matter afterward)
+    - Recommended for users without HA
 
 ### Action for Link
 
 When documenting Touchstone README (Section: "Extracting Your Local Key"):
 - Present **Method A (HA path) as the quick option, Method B (tinytuya path) as the standard alternative**
 - Include short callout explaining the Tuya client_id fragility in Method A
-- Link both to `.squad/decisions.md` section "2026 Tuya Portal-Free Key Extraction Assessment" for full technical details
+- Link both to .squad/decisions.md section "2026 Tuya Portal-Free Key Extraction Assessment" for full technical details
 - Note that Mads is using Method B (iot.tuya.com platform signup) and can provide firsthand walkthrough notes
 
-See `.squad/decisions.md` for full audit details and SUPERSEDES note correcting prior session cypher-6 claims about portal-free being "clean and recommended."
+See .squad/decisions.md for full audit details and SUPERSEDES note correcting prior session cypher-6 claims about portal-free being "clean and recommended."
 
+---
+
+## 2026-05-17T10:47:09Z — Touchstone Sideline Elite — Local LAN Control Confirmed (Coordinator Direct Mode)
+
+**Topic:** touchstone-local-control-achieved
+
+Coordinator walked Mads through end-to-end Tuya IoT setup and local device verification. All heater + LED DPs now mapped and responding. Driver architecture is validated; README documentation phase incoming.
+
+### Touchstone README Sections (Action for Link)
+
+**1. Device Setup Prerequisites**
+- Smart Life app pairing on device
+- WiFi on same LAN as Hubitat hub
+- Local IP assignment (recommend DHCP reservation on 192.168.1.38 or user's IP)
+- Hubitat driver installed via HPM
+
+**2. Extracting Your Local Key (CRITICAL)**
+
+Provide two methods:
+
+**Method A (Preferred if you have Home Assistant):**
+- Use make-all/tuya-local cloud-auth path (SmartLife QR scan)
+- ~5 minutes, no developer account needed
+- **Important caveat:** Relies on Tuya-issued hardcoded client_id; Tuya can revoke unilaterally (unlikely but documented)
+- Link to HA integration docs + Tuya IoT setup walkthrough
+
+**Method B (Standard fallback, no HA required):**
+- Use 	inytuya wizard via iot.tuya.com
+- Requires free Tuya IoT developer account (one-time signup, ~5 min)
+- Full Python tinytuya setup + wizard flow (~20 min)
+- **Key operational note:** API subscription is MANUAL. New Tuya IoT Cloud Project does NOT auto-subscribe. Must manually enable:
+  - IoT Core
+  - Authorization Token Management
+  - Smart Home Basic Service
+  - Device Status Notification
+  - (All free trials; no card required)
+- Then SmartLife account linking via QR, then wizard
+- Result: devices.json with device credentials
+- **Durable:** Once extracted, local_key persists forever (independent of cloud account status)
+
+**3. Preference Configuration**
+- deviceIP: 192.168.1.38 (or auto-discover via app)
+- localKey: <paste from devices.json>
+- deviceId: 70223053e8db84d10b53
+
+**4. Capabilities & Commands**
+
+Standard:
+- Switch — on/off (DP 1)
+- SwitchLevel — flame brightness (DP 102; map 0–100 to string enum "1"–"5")
+- Refresh — query all DPs
+- Initialize — socket connect + heartbeat
+
+Custom:
+- setFlameColor(name) — palette: orange, blue, yellow, orange+blue, orange+yellow, blue+yellow (DP 101)
+- setLogColor(name) — palette: 12 named colors (DP 104)
+- setLogBrightness(level) — 12-step (DP 105)
+- setFlameSpeed(speed) — Slow / Medium / Fast (DP 103)
+
+**5. Troubleshooting**
+- Local key extraction not working (cloud-auth vs dev-account path diagnostics)
+- "Connection dropped" (rawSocket idle disconnect; driver has keepalive heartbeat every 20s)
+- "Device accepts only one connection" (close mobile app before driver connects; will auto-reconnect if app is restarted)
+
+### Key Learning for Link
+
+**Tuya local key extraction UX has two durable paths:**
+1. Home Assistant + SmartLife (fast, no developer account) — fragile on client_id revocation
+2. Tuya IoT developer account + tinytuya (standard, manual API subscription step) — durable, used by Mads
+
+**Document the manual API subscription step explicitly in Method B.** This is a gotcha that blocks users. It's not auto-enabled, and the wizard fails silently if any API is missing.
+
+Next README draft will be ready once Tank scaffolds driver and Switch validates empirical LED DP mapping.
