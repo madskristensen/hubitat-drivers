@@ -2,6 +2,45 @@
 
 ## Active Decisions
 
+---
+
+### 2026-05-16: SunStat Connect Plus — Long Refresh Token Workaround
+**By:** Trinity (Lead / Architect)  
+**Status:** Implemented
+**Driver:** drivers/sunstat-thermostat/sunstat-thermostat-parent.groovy
+
+**Summary:** Azure AD B2C refresh tokens are ~1660 chars (JWE), exceeding Hubitat's ~1024-char preference limit. Replaced password preference with setRefreshToken(String) command — command parameters bypass the preference length limit.
+
+**Implementation:**
+- Removed efreshToken password preference
+- Added setRefreshToken command with STRING parameter
+- Removed pref→state migration from initialize()
+- Updated tokenBootstrapReady() and refreshTokensSync() to use state-only
+- Bumped version to 0.1.3
+- Updated README with Step 4 (setRefreshToken command)
+- Added 13 test cases
+
+**Refs:** .squad/decisions/inbox/trinity-sunstat-long-refresh-token-fix.md (full spec)
+
+---
+
+### 2026-05-16: SunStat — Token Length & Auth Flow Analysis
+**By:** Cypher (Integration / Protocol Engineer)
+**Status:** Complete
+**Context:** Investigated whether auth flows could be simplified to avoid 1660-char refresh token
+
+**Findings:**
+- Measured real token from tokens.json: efresh_token = 1,660 chars (JWE, 5 parts)
+- Device code flow: NOT SUPPORTED (404 on endpoint, null in OIDC metadata)
+- ROPC (dedicated policy): NOT SUPPORTED (404)
+- ROPC (main policy): NOT SUPPORTED (server_error — policy doesn't handle it)
+- Shorter tokens: NOT POSSIBLE (not our tenant, can't control format)
+- Refresh token rotation: STILL REQUIRED (confirmed in homebridge-tekmar-wifi reference)
+
+**Conclusion:** Protocol cannot be simplified server-side. UI input mechanism is the only blocker. Recommended Trinity test Option D (textarea preference) or Option C (REST API curl).
+
+**Refs:** .squad/decisions/inbox/cypher-sunstat-auth-shorter-secret-options.md (full analysis)
+
 ### 2026-05-16: Hubitat static field correction for v0.2.2
 **By:** Tank
 **Status:** Proposed correction

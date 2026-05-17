@@ -81,3 +81,4 @@ Hubitat's `password`/`text` preference type silently truncates values beyond ~10
 
 **SunStat Connect Plus v0.1.3 complete.** Replaced `refreshToken` password preference with `setRefreshToken(String)` command to bypass Hubitat's ~1024-char preference limit on saved values. Removed initialize() migration block; `state.refreshToken` is now the sole source of truth. packageManifest.json bumped to 0.1.3 across all entries.
 
+- 2026-05-17T04-20-29Z: v0.1.3 SunStat Connect Plus shipped (setRefreshToken command + docs + tests) — tank/link/switch cross-team ship

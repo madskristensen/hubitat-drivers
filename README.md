@@ -1,8 +1,8 @@
 # Hubitat Drivers
 
-Community Hubitat Elevation drivers by Mads Kristensen. First public release: **Gemstone Lights**.
+Community Hubitat Elevation drivers by Mads Kristensen.
 
-> **Current status:** Gemstone Lights v0.4.0 is beta software, working in production, and tested by the author on a real controller.
+> **Current status:** Two beta drivers available — **Gemstone Lights** v0.4.0 (working in production, author-tested) and **SunStat Connect Plus** v0.1.3 (cloud scaffold, energy monitoring, schedule control, and hold detection now available; token bootstrap via `setRefreshToken` command).
 
 ## Install via HPM (recommended)
 
@@ -19,6 +19,7 @@ Status: **Submitted** — PR filed as HubitatCommunity/hubitat-packagerepositori
 | Driver | Status | Description | Docs |
 |--------|--------|-------------|------|
 | **Gemstone Lights** | Beta | Cloud REST integration for Gemstone permanent outdoor lighting, including favorites-first LightEffects, named effects, and color-temperature fallback | [Driver README](drivers/gemstone-lights/README.md) |
+| **SunStat Connect Plus** | Beta | Cloud REST integration for SunStat Connect Plus electric floor heating thermostats via the Watts® Home API. Parent/child architecture; auto-discovers thermostats from your Watts account. | [Driver README](drivers/sunstat-thermostat/README.md) |
 
 ## Manual install
 
@@ -32,12 +33,20 @@ Status: **Submitted** — PR filed as HubitatCommunity/hubitat-packagerepositori
 ## Compatibility
 
 - **Hub:** Hubitat Elevation C-7, C-8
-- **Platform:** Recent Hubitat platform releases
-- **Network:** Driver-specific; Gemstone Lights currently requires outbound HTTPS to the Gemstone cloud REST API
+- **Minimum Platform Version:** 2.3.3.x
+- **Network:** Driver-specific; see per-driver README for network requirements
+
+**Driver Compatibility Details:**
+- **Gemstone Lights** — Requires outbound HTTPS to Gemstone cloud API
+- **SunStat Connect Plus** — Requires outbound HTTPS to Watts Home cloud API
 
 ## Contributing
 
 Found a bug or have an idea? Open an issue or send a pull request.
+
+## Changelog
+
+See [RELEASING.md](RELEASING.md) for version history and what's new.
 
 ## License
 
@@ -49,4 +58,4 @@ These drivers are released under the MIT License. See `LICENSE` for details.
 
 ---
 
-Questions? Visit the [Hubitat Community Forums](https://community.hubitat.com/).
+**Questions?** Visit the [Hubitat Community Forums](https://community.hubitat.com/) or open an [issue on GitHub](https://github.com/madskristensen/hubitat-drivers/issues).

@@ -29,6 +29,8 @@
 
 - **State desync is the main failure mode:** After any command or poll failure, verify that Hubitat and the physical device are in sync. Use the polling reconciliation test to catch cases where the device is changed outside Hubitat (e.g., via the manufacturer's mobile app).
 
+- **Parent/child driver architectures must explicitly call out both files and install order:** Test plans for multi-file drivers (e.g., parent + child) must never use singular "the driver" references. Always spell out both filenames and clarify install order (e.g., "install the child driver FIRST so the parent can discover and create child devices"). Single-file references mislead users into thinking one file is sufficient.
+
 ## Team Updates (2026-05-16T21:45:13Z)
 
 Driver scaffold v0.1.0 is ready with all capabilities declared (Actuator, Switch, SwitchLevel, LightEffects, Refresh, Initialize). Your TESTING.md manual test plan applies once Tank wires the HTTP endpoints and Cypher's local API discovery completes. The test plan is executable on any Hubitat hub; use it for v0.1.0 smoke testing and as the template for future drivers.
@@ -123,3 +125,42 @@ This SunStat test plan template is now the canonical pattern for Hubitat cloud t
 
 **SunStat Connect Plus v0.1.2 test coverage expanded.** Switch added 23 new test cases (#26-#48) for the 6 v0.1.2 features (energy, schedule, hold, outdoor, precision, floor bounds). Existing edge cases renumbered to #49-#58. Tank implemented features to match test expectations. Link bumped manifests and READMEs. Link-3 audited READMEs against 8 community Hubitat driver repos. Awaiting Mads' real-device verification and answers on 3 README audit open questions (forum topics, donation link, C-5 testing).
 
+## v0.1.3 Test Case Additions (2026-05-16T21:07:23-07:00)
+
+**Added 13 new test cases (#59–#71) for the v0.1.3 `setRefreshToken` command.** Test plan now totals 71 tests. All new cases live in `drivers/sunstat-thermostat/TESTING.md` under the new section "Test Area: v0.1.3 — setRefreshToken Command".
+
+| Range | Cases |
+|-------|-------|
+| #59 | Happy path — fresh install via setRefreshToken |
+| #60 | Migration — token already in state (v0.1.2 → v0.1.3), no re-entry needed |
+| #61 | Migration — token stuck in preferences (v0.1.2 broken install → v0.1.3 recovery) |
+| #62 | Empty input ("") — warning logged, state unchanged |
+| #63 | Null input — no NPE, warning logged, state unchanged |
+| #64 | Whitespace-only input — treated as empty after trim |
+| #65 | Short string (< 100 chars) — "token too short (N chars)" warning |
+| #66 | Token with surrounding whitespace — trimmed before storage |
+| #67 | Replace existing token — old access token cleared, driver re-initializes |
+| #68 | Concurrent calls — no race condition, no duplicate children |
+| #69 | Token survives hub reboot — state persisted, polling resumes automatically |
+| #70 | tokenBootstrapReady() code review — returns false when empty, true when populated; no settings fallback |
+| #71 | No live references to settings.refreshToken — code review / grep check |
+
+### Learnings from v0.1.3 Test Design
+
+- **Command parameters bypass Hubitat's ~1024-char preference limit:** Hubitat `command` STRING parameters are passed as method arguments, not through the preference UI, so they are not subject to the preference save character limit. This is the core architectural insight that drives v0.1.3.
+
+- **Both null and empty must be guarded separately:** Hubitat may pass `null` for a blank command input. The `token?.trim() ?: ""` pattern handles both null (safe navigation operator) and empty-after-trim (Elvis operator fallback) in a single expression. Tests 62–64 verify all three degenerate cases.
+
+- **Token length is the only safe rejection heuristic:** We cannot validate token signature or structure in Hubitat (no JWT/JWE library). Length < 100 chars is a reliable proxy for "obviously wrong paste." Valid Watts tokens are ~1660 chars; anything under 100 is definitively incomplete.
+
+- **State-clearing on token replacement forces clean re-auth:** When a new token is stored, `state.accessToken` and `state.tokenExpiresAt` must be cleared so the driver does not attempt to use a (possibly expired or mismatched) cached access token. Test 67 verifies this invariant.
+
+- **Code-review checks (Tests 70–71) are first-class test cases:** Verifying that dead code is actually gone (no live settings.refreshToken references) is as important as verifying new code works. Static checks protect against partial refactors that leave silent bugs.
+
+### Test Tier Distribution for v0.1.3
+
+- **Tier 1 (Core):** Tests 59, 60, 69, 71 — must pass; cover the happy path, the migration regression, reboot persistence, and dead-code removal
+- **Tier 2 (Feature):** Tests 61–67, 70 — cover all invalid input branches and the code-review correctness check
+- **Tier 3 (Polish/Optional):** Test 68 — concurrent double-click edge case; unlikely in practice but protects against state corruption
+
+- 2026-05-17T04-20-29Z: v0.1.3 SunStat Connect Plus shipped (setRefreshToken command + docs + tests) — tank/link/switch cross-team ship
