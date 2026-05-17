@@ -17,11 +17,11 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
- *   0.1.5 — 2026-05-17T12:22:15-07:00 — BUGFIX: removed paragraph() from preferences (Hubitat app-only, not allowed in drivers)
- *   0.1.4 — 2026-05-17T11:58:55-07:00 — SAFETY: removed defaultHeatLevel auto-apply; BUGFIX: removed sandbox-blocked reflection logging
- *   0.1.3 — 2026-05-17T11:58:55-07:00 — Optional default-on-power-on settings for flame color, log color, brightness, heat level, and temp setpoint
+ *   0.1.5 — 2026-05-17 — BUGFIX: removed paragraph() from preferences (Hubitat app-only, not allowed in drivers)
+ *   0.1.4 — 2026-05-17 — SAFETY: removed defaultHeatLevel auto-apply; BUGFIX: removed sandbox-blocked reflection logging
+ *   0.1.3 — 2026-05-17 — Optional default-on-power-on settings for flame color, log color, brightness, heat level, and temp setpoint
  *   0.1.2 — 2026-05-17 — Replaced blocked CRC32 import with pure-Groovy implementation (Hubitat import allowlist)
- *   0.1.1 — 2026-05-17T11:24:33-07:00 — Generalized device profiles, in-driver DP discovery, and auditable raw DP writes
+ *   0.1.1 — 2026-05-17 — Generalized device profiles, in-driver DP discovery, and auditable raw DP writes
  *   0.1.0 — 2026-05-17 — Initial Tuya Local scaffold for power, heat level, flame/log lighting, temperature polling, raw DP surfacing, and socket retry/backoff
  */
 // v0.1.5 — BUGFIX: removed paragraph() from preferences (Hubitat app-only, not allowed in drivers).

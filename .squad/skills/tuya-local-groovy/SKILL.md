@@ -238,6 +238,15 @@ Recommended discovery commands:
 
 This keeps the driver honest about what is tested while still giving adjacent Tuya models a workable self-service mapping path inside Hubitat.
 
+## Repo Release Workflow Changelog Format
+
+This repo's `.github/workflows/release.yml` parses each driver's top-of-file `Changelog:` block with the regex `^(\d+\.\d+\.\d+)\s+[—-]\s+(\d{4}-\d{2}-\d{2})\s+[—-]\s+(.*)$` (see line ~106).
+
+When adding or editing driver changelog entries:
+- use `version — YYYY-MM-DD — description`
+- do **not** use full ISO 8601 timestamps like `2026-05-17T12:22:15-07:00`
+- keep the parsable entries in the doc-comment `Changelog:` block even if separate prose `// vX.Y.Z` comments also exist
+
 ## Reusable Checklist
 
 - [ ] Preferences: `deviceIP`, `deviceId`, `localKey(password)`, polling, `logEnable`
