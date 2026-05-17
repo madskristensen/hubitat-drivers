@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.6
+ * Version: 0.1.7
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.7 — 2026-05-17 — hotfix: restore setHeatLevel signature
  *   0.1.6 — 2026-05-17 — flame speed & log brightness, drop duplicate power attribute
  *   0.1.5 — 2026-05-17 — BUGFIX: removed paragraph() from preferences (Hubitat app-only, not allowed in drivers)
  *   0.1.4 — 2026-05-17 — SAFETY: removed defaultHeatLevel auto-apply; BUGFIX: removed sandbox-blocked reflection logging
@@ -25,6 +26,7 @@
  *   0.1.1 — 2026-05-17 — Generalized device profiles, in-driver DP discovery, and auditable raw DP writes
  *   0.1.0 — 2026-05-17 — Initial Tuya Local scaffold for power, heat level, flame/log lighting, temperature polling, raw DP surfacing, and socket retry/backoff
  */
+// v0.1.7 — hotfix: restore setHeatLevel signature (parse error introduced in v0.1.6).
 // v0.1.6 — Added setFlameSpeed (DP 103) + setLogBrightness (DP 105); removed duplicate `power` attribute.
 // v0.1.5 — BUGFIX: removed paragraph() from preferences (Hubitat app-only, not allowed in drivers).
 // v0.1.4 — SAFETY: removed defaultHeatLevel auto-apply (heater never auto-starts); BUGFIX: replaced reflection (e.getClass()) with sandbox-safe exception logging.
@@ -35,8 +37,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.6"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.6"
+@Field static final String DRIVER_VERSION = "0.1.7"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.7"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -426,6 +428,8 @@ def setLogBrightness(String level) {
     emitAttribute("logBrightness", raw, "${device.displayName} log brightness set to ${raw}", "digital")
     sendDpWrite(logBrightnessDp.toString(), raw, "log brightness", WRITE_REFRESH_DELAY_SECONDS)
 }
+
+def setHeatLevel(level) {
     String normalized = safeStr(level)?.trim()?.toLowerCase()
     if (!(normalized in HEAT_LEVEL_OPTIONS)) {
         log.warn "[Touchstone] setHeatLevel: invalid level '${level}' — use off, low, or high"
