@@ -2,6 +2,28 @@
 
 Recent contributions documented in history-archive.md. Current session: Touchstone v0.1.5 smoke test awareness + Scribe batch processing.
 
+---
+
+## 2026-05-17T15:41:32-07:00 — Cross-Driver Reliability Analysis (Mads request)
+
+### Learnings
+
+**Anti-patterns found across all three drivers:**
+
+1. **Optimistic events without rollback** — Both SunStat (setAwayMode, setScheduleEnabled) and Gemstone (on/off) issue optimistic `sendEvent` before the API call. Gemstone deliberately does this and notes cloud lag is expected. SunStat's PATCH calls do not roll back on non-401 failure, leaving attributes stale. Pattern: if you send an optimistic event, you MUST have a reconciliation path (next poll or explicit rollback).
+
+2. **In-flight flag leaks across hub reboots** — Gemstone's `state.effectCatalogRefreshInFlight` is persisted in state. If the hub reboots mid-catalog-load, the flag stays `true` and blocks all future automatic catalog refreshes. Pattern: any `*InFlight` flag stored in `state` MUST be cleared in `initialize()`.
+
+3. **Unbounded retry loops** — Touchstone's `scheduleRetry()` maxes at 30s but retries indefinitely when the device is offline. This generates log noise and never backs off to a "give up" state. Pattern: cap retries to a fixed N, then halt and wait for the next scheduled poll.
+
+4. **`updated()` clearing too much state** — Gemstone's `updated()` calls `clearEffectCatalogState()` on every preference save (even just toggling debug logging). This forces a full re-fetch of potentially 1000+ effects. Pattern: only clear/invalidate state when the affected preference actually changed (e.g., only clear auth tokens when credentials change, only clear effect catalog when never needed on prefs save).
+
+5. **Stub commands reachable from Rule Machine** — SunStat's `setBoost()`/`cancelBoost()` appear in RM and WebCoRE as real commands but do nothing (log.warn only). Users build automations that silently fail. Pattern: either implement or hide stubs; at minimum add `description: "[NOT YET IMPLEMENTED]"` to the command declaration so users see it.
+
+6. **Missing TESTING.md for LAN/protocol drivers** — Touchstone (LAN/Tuya/AES) has no TESTING.md at all. Cloud drivers (Gemstone, SunStat) have test plans. LAN drivers have MORE failure modes (TCP slot contention, AES key errors, polling backoff) and arguably NEED test plans more urgently. Pattern: every driver that ships should have a TESTING.md; LAN drivers are higher priority than cloud drivers.
+
+7. **Proactive token refresh not rescheduled after hub reboot** — SunStat's `initialize()` does not re-arm the proactive token refresh timer when a valid token already exists. `scheduleProactiveRefresh()` is only called inside `refreshTokensSync()`. If the token is still valid post-reboot, the timer is never set, and the token expires without a proactive refresh. Pattern: `initialize()` should always re-arm scheduled maintenance tasks (token refresh, log auto-off) based on current state, not only when state changes.
+
 ## 2026-05-17T19:29:40Z — Touchstone v0.1.5 shipped (App-only UI audit)
 
 **Batch:** Tank v0.1.5, Link v0.1.5 docs, Switch (test surface awareness)
@@ -244,3 +266,9 @@ Switch should be aware of the following v0.1.4 behaviors for the smoke test plan
 ### Version Notes for Test Report
 
 When reporting test results, note that this smoke test validates v0.1.4 (released version) against the real device. v0.1.3 exists only in git history as an intermediate state; it was never tested on real hardware.
+
+---
+
+## 2026-05-17T15:41:32Z — Cross-driver improvement scan (4-way)
+
+Participated in 4-way driver improvement scan with Trinity, Tank, Cypher. Findings consolidated by Squad. Orchestration log: .squad/orchestration-log/2026-05-17T15-41-32-switch.md.

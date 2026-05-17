@@ -92,4 +92,39 @@ See .squad/decisions.md (merged entries) and .squad/orchestration-log/2026-05-17
 
 ---
 
+## Learnings
+
+### 2026-05-17T15:41:32-07:00 — Cross-driver review: Gemstone, SunStat, Touchstone
+
+**Recurring patterns found across all three drivers (good — consistent idioms):**
+- `logEnable` / `txtEnable` preference pair — all three. `logsOff()` auto-disable at 30 min — all three.
+- `@Field static final` constants with no cross-field references — all three respect the Hubitat sandbox rule.
+- `emitIfChanged()` helper to suppress redundant sendEvent calls — SunStat child + Touchstone; Gemstone not needed (always-changing color values).
+- `USER_AGENT` constant on drivers that make HTTP calls (Gemstone, SunStat parent). Touchstone has one too.
+- `installed()` sets preference defaults explicitly; `updated()` calls `initialize()`; `initialize()` guards on config readiness before scheduling.
+
+**Anti-patterns / gaps identified:**
+
+1. **`poll()` without `capability "Polling"`** — Gemstone and SunStat parent both implement `poll()` but don't declare `capability "Polling"`. Touchstone is correct. Undeclared capability means Hubitat Polling app won't discover these devices as compatible.
+
+2. **`capability "Sensor"` missing alongside `TemperatureMeasurement`** — Touchstone has `TemperatureMeasurement` but no `Sensor`. Hubitat convention: `Sensor` is the marker capability that companion apps and dashboards use to classify sensor devices. SunStat child correctly declares both.
+
+3. **`power` attribute duplicating `switch`** — Touchstone declares a custom `power` attribute ("on"/"off") and emits it in parallel with the standard `switch` attribute from every on/off state change. This doubles every event in the Events tab and adds noise. `switch` is the standard; `power` is redundant and should be removed.
+
+4. **Packaging gaps are driver-specific** — SunStat has CHANGELOG.md, TESTING.md, README.md, packageManifest.json. Gemstone has TESTING.md, README.md, packageManifest.json but no CHANGELOG.md. Touchstone has README.md and packageManifest.json but no CHANGELOG.md and no TESTING.md. All drivers should have all four files for HPM compatibility and contributor onboarding.
+
+5. **Named commands missing for known-semantic DPs** — Touchstone surfaced DP 103 (flame speed: Slow/Medium/Fast) and DP 105 (log brightness) as raw `dp103`/`dp105` attributes with no named commands, even though the architecture decision specified `setFlameSpeed()` and `setLogBrightness()` as named commands. DPs with confirmed semantics should graduate to named commands; only truly unknown DPs should stay raw.
+
+6. **Parent/child version skew in SunStat** — Parent at v0.1.4, child at v0.1.2. The last two parent releases were parent-only fixes (no child code changed), so the skew is technically correct but confusing for users comparing versions. Convention: bump child version in lockstep with parent (even no-op) so users see consistent version numbers.
+
+7. **`colorMode` as `string` instead of `enum`** — Gemstone declares `attribute "colorMode", "string"` but only ever emits three values: "RGB", "CT", "EFFECTS". Declaring it as `enum` gives rules engines proper constraint checking and improves dashboard tile behavior.
+
+8. **Utility method duplication across all three drivers** — `safeStr`, `safeInt`, `safeBigDecimal`, `emitIfChanged`, `debugLog`, `infoLog`, `logsOff` are near-identical copies in all three. Hubitat sandbox doesn't allow shared libraries, so runtime duplication is unavoidable — but there is no canonical template source. A `.squad/templates/driver-utilities.groovy` snippet file would serve as the single source of truth that Tank copies from when scaffolding new drivers.
+
 **For detailed learning notes, see archived history.**
+
+---
+
+## 2026-05-17T15:41:32Z — Cross-driver improvement scan (4-way)
+
+Participated in 4-way driver improvement scan with Tank, Cypher, Switch. Findings consolidated by Squad. Orchestration log: `.squad/orchestration-log/2026-05-17T15-41-32-trinity.md`.**

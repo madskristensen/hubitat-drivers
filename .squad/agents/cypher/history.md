@@ -122,3 +122,33 @@ Full report at: `.squad/decisions/inbox/cypher-gemstone-color-ct-both-broken.md`
 
 **Status:** Root cause unconfirmed (response.getData() returns null for 4xx). Three candidates: synthetic pattern ID, missing alpha byte (0xFF), or stale fields in payload. Diagnostic path: capture error message + whitelist fields to 9 canonical ones.
 
+---
+
+### 2026-05-17 — Driver Gap Analysis (all three drivers)
+
+**Touchstone (Tuya Local):**
+- DP 103 (flame speed, enum ~5 steps), DP 105 (log brightness, 12 steps), and DP 108 (child lock, bool) are all discovered and tracked as raw attributes but have NO corresponding commands. Three easy command additions.
+- Socket is deliberately closed 2s after each transaction (SOCKET_IDLE_CLOSE_SECONDS = 2). Consequence: the device-push path (device proactively sends DP updates when user presses physical remote) is NEVER received between polls. The driver is poll-only. Persistent-socket + heartbeat (CMD 9) would enable real-time push receipt.
+- DP 107 is tracked raw but its semantic is unknown; not worth mapping until confirmed via captureDiff().
+- v3.3 is hardcoded. "device22" detection (22-char device ID → TUYA_CMD_CONTROL_NEW) is present but no v3.4/v3.5 session-key negotiation exists.
+
+**SunStat (Watts Home API):**
+- setBoost / cancelBoost are explicit stubs (log.warn "not yet implemented"). This is the #1 missing user-facing feature for a floor heating thermostat.
+- No 429 handling in pollChildDevice or sendDevicePatch — only 401 retry.
+- N+1 sequential synchronous HTTP calls per poll cycle (1 GET /Location + N GET /Device). Blocking calls on Hubitat scheduler thread. 3+ thermostats will feel slow.
+- Vacation mode (date-ranged away) not in the API surface at all.
+- Schedule blocks (time-of-day setpoint programs) never read or written — only the on/off toggle (SchedEnable) is exposed.
+
+**Gemstone (Cognito + REST):**
+- Driver controls entire string as one entity. Gemstone API supports per-segment (zone) patterns; has-gemstone exposes each zone as a separate HA light. No zone support in Hubitat driver.
+- colorMode attribute is NOT cleared on hard-off (pattern == null in handleRefreshResponse). Level and effectName are cleared; colorMode is not.
+- warnColorTemperatureFallback() fires on every setColorTemperature() call — correct behavior but noisy in automation-heavy setups.
+- No schedule/timer API calls (sunrise/sunset triggers, scheduled patterns) — Gemstone app has these but no endpoint is called in the driver.
+- Discovery picks first controller; no preference to target a named controller for multi-controller accounts.
+
+
+---
+
+## 2026-05-17T15:41:32Z — Cross-driver improvement scan (4-way)
+
+Participated in 4-way driver improvement scan with Trinity, Tank, Switch. Findings consolidated by Squad. Orchestration log: .squad/orchestration-log/2026-05-17T15-41-32-cypher.md.
