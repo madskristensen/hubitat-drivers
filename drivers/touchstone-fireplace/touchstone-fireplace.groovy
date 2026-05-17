@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.9 — 2026-05-17 — default log brightness preference
  *   0.1.8 — 2026-05-17 — default flame speed preference
  *   0.1.7 — 2026-05-17 — hotfix: restore setHeatLevel signature
  *   0.1.6 — 2026-05-17 — flame speed & log brightness, drop duplicate power attribute
@@ -27,6 +28,7 @@
  *   0.1.1 — 2026-05-17 — Generalized device profiles, in-driver DP discovery, and auditable raw DP writes
  *   0.1.0 — 2026-05-17 — Initial Tuya Local scaffold for power, heat level, flame/log lighting, temperature polling, raw DP surfacing, and socket retry/backoff
  */
+// v0.1.9 — defaultLogBrightness preference: completes v0.1.6 symmetry for DP 105.
 // v0.1.8 — defaultFlameSpeed preference: auto-applies during the power-on defaults window.
 // v0.1.7 — hotfix: restore setHeatLevel signature (parse error introduced in v0.1.6).
 // v0.1.6 — Added setFlameSpeed (DP 103) + setLogBrightness (DP 105); removed duplicate `power` attribute.
@@ -39,8 +41,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.8"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.8"
+@Field static final String DRIVER_VERSION = "0.1.9"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.9"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -196,6 +198,12 @@ metadata {
                   title: "Default log color (optional)",
                   description: "Applied ~1.5s after Hubitat turns the fireplace on. Leave blank to keep the fireplace firmware's last-known log color.",
                   options: LOG_COLOR_OPTIONS,
+                  required: false
+
+            input name: "defaultLogBrightness", type: "enum",
+                  title: "Default log brightness (applied on power-on)",
+                  description: "Applied ~1.5s after Hubitat turns the fireplace on. Leave blank to keep the fireplace firmware's last-known log brightness.",
+                  options: LOG_BRIGHTNESS_OPTIONS,
                   required: false
         }
 
@@ -824,6 +832,19 @@ def applyOnPowerOnDefaults() {
             appliedAny = true
         } else {
             log.warn "[Touchstone] defaultLogColor is set but log color is not mapped for profile '${activeDeviceProfile()}'"
+        }
+    }
+
+    String logBrightness = safeStr(settings.defaultLogBrightness)?.trim()
+    if (logBrightness && logBrightness in LOG_BRIGHTNESS_OPTIONS) {
+        Integer logBrightnessDp = dpFor("logBrightness")
+        if (logBrightnessDp != null) {
+            emitAttribute("logBrightness", logBrightness, "${device.displayName} default log brightness set to ${logBrightness}", "digital")
+            infoLog "Applied default: logBrightness=${logBrightness}"
+            sendDpWrite(logBrightnessDp.toString(), logBrightness, "${POWER_ON_DEFAULT_REASON_PREFIX}log brightness", WRITE_REFRESH_DELAY_SECONDS)
+            appliedAny = true
+        } else {
+            log.warn "[Touchstone] defaultLogBrightness is set but log brightness is not mapped for profile '${activeDeviceProfile()}'"
         }
     }
 
