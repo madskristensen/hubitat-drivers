@@ -129,3 +129,36 @@ The architecture discovery session (Mads' packet capture across UniFi gateway + 
 - Cloud API spec: decisions.md (Cypher 2026-05-16T14:08:16-07:00)
 - Driver design: decisions.md (Trinity 2026-05-16T14:08:16-07:00)
 - Orchestration log: .squad/orchestration-log/2026-05-16T16-50-00-tank.md
+
+## Milestones
+
+### 2026-05-17: Gemstone Lights v0.4.0 — HPM Release Infrastructure & Public Listing
+**Status:** Complete
+
+**Scope:**
+- Root epository.json — HPM publisher index pointing to driver packageManifest
+- .github/workflows/release.yml — Automated release workflow on packageManifest version bump
+- RELEASING.md — Six-step version-bump checklist
+- README.md (updated) — Added HPM install instructions
+- .gitignore (updated) — Removed .squad/ per user reversal directive
+- elease-tools/ — Community PR handoff (instructions, JSON snippet, PR body)
+- .squad/ team infrastructure — Decisions, agent charters, histories, casting registry
+
+**Deliverables:**
+- **GitHub Release:** https://github.com/madskristensen/hubitat-drivers/releases/tag/gemstone-lights-v0.4.0
+- **HPM Publisher Index:** https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/repository.json
+- **Community PR:** https://github.com/HubitatCommunity/hubitat-packagerepositories/pull/106 (awaiting maintainer merge)
+
+**Key Decisions:**
+- No-agent-pushes directive: agents prepare locally; Mads owns remote mutations
+- Squad-public-reversal: .squad/ is now committed (supersedes earlier gitignore directive)
+- Automated release workflow eliminates manual tag/release steps for future driver versions
+
+**Orchestration Logs:**
+- Tank (tank-11): 2026-05-17T02-20-00Z — Release infrastructure prep
+- Link (link-1): 2026-05-17T02-24-00Z — Push + workflow trigger + community PR
+
+**Status:**
+✅ v0.4.0 released and live on GitHub
+✅ HPM publishing kit complete
+✅ Community PR submitted (awaiting merge for full HPM discoverability)

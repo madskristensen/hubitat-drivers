@@ -1871,3 +1871,96 @@ For v0.4.0, the Gemstone driver layers Hubitat's standard capabilities on top of
 
 
 ---
+
+### 2026-05-17T01:47Z: User directive — .squad/ excluded from public/committed scope [SUPERSEDED]
+**By:** Mads (via Copilot)
+**Status:** Superseded by 2026-05-17T02:01Z: User directive — REVERSAL
+**What:** The .squad/ folder (team coordination state — decisions, agent histories, orchestration logs, casting registry, session logs) is **internal-only** and must be excluded from the public GitHub repo via .gitignore. Squad memory is for the AI team's continuity across sessions; it should never travel with the published driver. The same applies to other internal/transient artifacts: .copilot/ (local Copilot session state), *.pcap files, any .squad/research/ outputs, and similar local-only artifacts.
+**Why (original):** Privacy and signal-to-noise — team-coordination notes are not user-facing project content. The published repo should contain only the driver, docs, manifest, license, and contribution scaffolding.
+**Implementation guidance (original):** .gitignore should include at minimum: .squad/, .copilot/, *.pcap, 
+ode_modules/, and OS junk (Thumbs.db, .DS_Store). Keep the published repo focused on drivers/, README.md, LICENSE, and any top-level scaffolding necessary for HPM consumers.
+
+---
+
+### 2026-05-17T02:01Z: User directive — REVERSAL — .squad/ should be committed, not gitignored
+**By:** Mads (via Copilot)
+**Status:** Active
+**What:** Supersedes the earlier directive copilot-directive-squad-gitignored-2026-05-16.md. The .squad/ folder is now **part of the public repository content** — committed and pushed alongside the driver. Do NOT add .squad/ to .gitignore. If Tank-10 already added it to .gitignore, Tank-11 must remove that line and force-add the existing .squad/ files in a follow-up commit.
+**Why:** Mads's call — the AI-team coordination state (charters, decisions, history, orchestration logs, casting) is interesting/valuable for readers of the repo to see; demonstrates how a Squad-style multi-agent team operates. Effectively turns the repo into both a driver release AND a coordination-pattern reference.
+**Implementation guidance:**
+- .gitignore should NOT contain .squad/. Keep everything else from the earlier gitignore (.copilot/, *.pcap, OS junk, etc.) — those are still excluded.
+- .copilot/ stays excluded (local CLI session memory).
+- *.pcap stays excluded (large research artifacts, not part of the driver story).
+- For follow-up commits Scribe makes to .squad/decisions.md / agent histories / logs: those commits DO go to the public repo now. Scribe should continue its commit-and-skip-push pattern; Mads pushes when ready.
+- Re-evaluate the no-secrets directive (copilot-directive-no-secrets-2026-05-16.md) — it's still in force, and now MORE important since .squad/ is public. The earlier sweep already redacted creds from .squad/; future Scribe writes must continue redaction discipline.
+
+---
+
+### 2026-05-17T01:59Z: User directive — agents do not push or open PRs without explicit per-task approval
+**By:** Mads (via Copilot)
+**Status:** Active
+**What:** Agents may prepare files, commit locally, and document exact next-step commands, but must NOT execute git push, gh pr create, gh repo create --push, or any other operation that mutates a remote (origin or upstream forks) on Mads's behalf. The user owns all remote-touching operations manually after reviewing the local state.
+**Why:** Mads wants visibility/control over what lands in his GitHub account, especially for cross-org actions like opening PRs against community repos (e.g., the HPM hubitat-packagerepositories master list). Local commits are fine — they're easy to undo with git reset. Pushes and PRs aren't.
+**Implementation guidance:**
+- Agents should run all local prep: git init, edits, git add, git commit, gh repo fork --clone (to a local clone is fine, but no upstream push afterwards)
+- Agents must NOT run: git push, gh pr create, gh repo create --push, gh release create --target=<remote>
+- Agents output a clearly-marked "🚀 NEXT STEPS FOR MADS" block at the end of their report listing the exact commands to run, in order, to publish what they prepared
+- **Carve-out exception:** This directive does NOT apply to Tank-10, which was already mid-flight when the rule was set. v0.4.0 may already be on GitHub via that earlier run.
+
+---
+
+### 2026-05-16: Tank HPM release infrastructure
+**By:** Tank
+**Status:** Completed
+**What:** Add the repo-level HPM publishing kit: root epository.json, .github/workflows/release.yml, RELEASING.md, a top-level README HPM install section, and elease-tools/ handoff files for the one-time HubitatCommunity master-list PR.
+**Why:** v0.4.0 is already public, but HPM still needs the publisher index plus a repeatable tag/release flow that does not rely on manual tagging each version.
+**Shape:**
+- epository.json is the publisher index that points Hubitat Package Manager at drivers/gemstone-lights/packageManifest.json.
+- elease.yml derives tags as <driver-folder>-v<version>, parses the matching .groovy header changelog entry, and creates the annotated tag + GitHub Release automatically.
+- RELEASING.md documents the six version touchpoints in the driver/manifest pair.
+- elease-tools/ carries the JSON snippet, PR body, and manual command list Mads needs for the one-time HubitatCommunity epositories.json submission.
+**Operating model:** Per the no-agent-pushes directive, agents stop at the local commit. Mads runs the push, optional manual workflow dispatch, and community-list PR commands himself.
+
+---
+
+### 2026-05-16: Tank public release — Gemstone Lights v0.4.0
+**By:** Tank
+**Commit SHA:** b2ba84e915241e4f4c902427296d9de943342b69 (later pushed as 6f2f85e65c43e6eb7a2165383a70cdba37d4e156)
+**Status:** Released
+**What:** Root-level HPM publishing kit and public repo structure. Committed locally; subsequent push authorization was given as one-time exception per no-agent-pushes directive.
+**Files included:**
+- .gitignore (removed .squad/ per reversal directive Tank-11)
+- LICENSE
+- README.md (added HPM install section)
+- drivers/gemstone-lights/gemstone-lights.groovy
+- drivers/gemstone-lights/README.md
+- drivers/gemstone-lights/TESTING.md
+- drivers/gemstone-lights/packageManifest.json
+- epository.json (HPM publisher index)
+- .github/workflows/release.yml (automated tag + release creation)
+- RELEASING.md (version bump checklist)
+- elease-tools/ (community PR handoff files)
+- .squad/ content (decisions, agent charters, histories, etc.)
+**HPM install URL:** https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/repository.json
+
+---
+
+### 2026-05-16T23:14:20Z: Link v0.4.0 Release & HPM Community List Submission
+**By:** Link
+**Status:** Completed
+**Authorization:** One-time push approval from Mads for v0.4.0 publish cycle (exception per no-agent-pushes directive)
+**Execution:**
+1. **Push to GitHub:** git push origin main — commit 6f2f85e landed on origin ✅
+2. **Release workflow:** gh workflow run release.yml (Run ID: 25978959810) — completed successfully ✅
+   - **Tag created:** gemstone-lights-v0.4.0
+   - **Release URL:** https://github.com/madskristensen/hubitat-drivers/releases/tag/gemstone-lights-v0.4.0
+   - **Body:** Auto-populated from driver Changelog v0.4.0 entry
+3. **Community list PR:** Forked HubitatCommunity/hubitat-packagerepositories, branched dd-madskristensen-hubitat-drivers, surgical JSON edit to preserve file format, pushed, opened PR
+   - **PR URL:** https://github.com/HubitatCommunity/hubitat-packagerepositories/pull/106
+   - **Entry added:** {"name": "Mads Kristensen", "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/repository.json"}
+**Key insight:** PowerShell's ConvertTo-Json reformats entire JSON structure (spaces instead of tabs); surgical text replacement via regex was used to preserve community file format and keep diff clean (4 insertions only).
+**Live URLs:**
+- HPM-friendly manifest: https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/repository.json
+- Direct driver manifest: https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/packageManifest.json
+**Status:** Awaiting HubitatCommunity maintainer merge of PR #106 for inclusion in master list.
+
