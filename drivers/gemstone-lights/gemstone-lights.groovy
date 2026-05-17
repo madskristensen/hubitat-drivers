@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.6 — 2026-05-16 — Log hygiene + favorites-only UI/state: stop dumping the full preset list on every named setEffect call (only on miss, warn level, capped at 20); `lightEffects` UI dropdown now shows favorites only (curated set marked in the Gemstone app); `state.effectCatalog` and `state.effectPatterns` cache favorites only — non-favorites still resolve by name via on-demand catalog lookup, but no longer clog the device State Variables panel. Existing installs prune non-favorite state entries on next driver update.
  *   0.4.5 — 2026-05-16 — Fix color byte order: Gemstone wire format is ABGR (A, B, G, R) not ARGB. v0.4.4 packed bytes as ARGB which caused red to render as blue, green correctly, blue as red. Swap r/b byte positions in hubitatHueSatToArgb and kelvinToArgb; reverse the same in gemstoneArgbToHubitatColor.
  *   0.4.4 — 2026-05-16 — Force ARGB color values to positive Long (Gemstone API requires unsigned 32-bit range [0, 4294967295]; v0.4.2's (0xFF << 24) produced a negative signed-int which failed validation). hubitatHueSatToArgb and kelvinToArgb now use long arithmetic with 0xFFL literals and return Long. gemstoneArgbToHubitatColor accepts Number/Long for symmetry.
  *   0.4.3 — 2026-05-16 — Diagnostic: flatten multi-line 400 response bodies (Python tracebacks from Gemstone API) to single-line log output so the full error is visible. Bumped truncate length to 2000.
@@ -31,7 +32,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.5"
+@Field static final String DRIVER_VERSION = "0.4.6"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -51,7 +52,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.5"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.6"
 
 metadata {
     definition(
@@ -119,6 +120,7 @@ def updated() {
     unschedule()
     clearAuthTokens()
     clearDiscoveryState()
+    pruneNonFavoriteStateEntries()
     clearEffectCatalogState()
     clearPendingRequests()
 
@@ -132,6 +134,7 @@ def updated() {
 
 def initialize() {
     debugLog "initialize() called"
+    pruneNonFavoriteStateEntries()
     unschedule("poll")
     unschedule("refreshAccessTokenTask")
     clearPendingRequests()
@@ -848,11 +851,62 @@ private void processPendingEffectRequest(Map request) {
     }
 }
 
+// Resolves any pending "name" requests for non-favorites from the full in-flight catalog data,
+// playing them directly without writing to state.effectCatalog or state.effectPatterns.
+// Must be called before processPendingEffectRequests() so the local mergedEntries data is available.
+private void processPendingNonFavoriteNameRequests(Map mergedEntries, Map favoriteCatalog) {
+    List pending = (state.pendingEffectRequests ?: []) as List
+    if (!pending) return
+
+    List remainingPending = []
+    pending.each { req ->
+        Map request = req as Map
+        if (safeString(request?.type) != "name") {
+            remainingPending << request
+            return
+        }
+
+        String reqName = safeString(request?.value)
+        String normalizedReq = normalizeEffectName(reqName)
+
+        // If the name resolves in the favorites cache, leave it for normal processing.
+        boolean isFavorite = favoriteCatalog.keySet().any { candidate ->
+            normalizeEffectName(candidate) == normalizedReq
+        }
+        if (isFavorite) {
+            remainingPending << request
+            return
+        }
+
+        // Not a favorite — look it up in the full mergedEntries (keyed by normalizedName).
+        Map foundEntry = mergedEntries[normalizedReq] instanceof Map ? mergedEntries[normalizedReq] as Map : null
+        if (foundEntry) {
+            String patternId = safeString(foundEntry.patternId)
+            String displayName = safeString(foundEntry.displayName) ?: reqName
+            Map pattern = foundEntry.pattern instanceof Map ? cloneMap(foundEntry.pattern as Map) : [:]
+            if (patternId) {
+                log.debug "[Gemstone] Non-favorite '${displayName}' resolved on-demand; playing without caching to state"
+                activateEffectWithPattern(patternId, displayName, pattern)
+            } else {
+                log.error "[Gemstone] No effect named '${reqName}'."
+                warnAvailableEffectNames()
+            }
+        } else {
+            log.error "[Gemstone] No effect named '${reqName}'."
+            warnAvailableEffectNames()
+        }
+    }
+    state.pendingEffectRequests = remainingPending
+}
+
 private void activateEffectByName(String requestedName) {
     String resolvedName = resolveEffectCatalogName(requestedName)
     if (!resolvedName) {
-        log.error "[Gemstone] No effect named '${requestedName}'. Available: ${orderedEffectDisplayNames().join(', ')}"
-        logAvailableEffectNames()
+        // Name not in favorites cache — trigger an on-demand full catalog fetch;
+        // finalizeEffectCatalogRefresh() will resolve the name from the live response
+        // and play it without persisting to state.
+        queuePendingEffectRequest([type: "name", value: requestedName])
+        requestEffectCatalogRefresh(false)
         return
     }
 
@@ -869,7 +923,7 @@ private void activateEffectByIndex(Integer requestedIndex) {
     String patternId = state.effectIndex instanceof Map ? safeString((state.effectIndex as Map)[requestedIndex.toString()]) : ""
     if (!patternId) {
         log.error "[Gemstone] No effect at index ${requestedIndex}. Available indexes: ${availableEffectIndexes().join(', ')}"
-        logAvailableEffectNames()
+        warnAvailableEffectNames()
         return
     }
 
@@ -892,6 +946,10 @@ private void activateEffectByPattern(String patternId, String resolvedName) {
         return
     }
 
+    activateEffectWithPattern(patternId, resolvedName, pattern)
+}
+
+private void activateEffectWithPattern(String patternId, String resolvedName, Map pattern) {
     if (!pattern.name) {
         pattern.name = resolvedName
     }
@@ -1110,6 +1168,21 @@ private void clearEffectCatalogRefreshState() {
     state.remove("effectCatalogRefreshInFlight")
     state.remove("effectCatalogBuildCustom")
     state.remove("effectCatalogBuildManaged")
+}
+
+private void pruneNonFavoriteStateEntries() {
+    Map favorites = (state.favorites instanceof Map) ? state.favorites as Map : [:]
+    Set favoritePatternIds = favorites.values() as Set
+    Set favoriteNames = favorites.keySet() as Set
+
+    if (state.effectCatalog instanceof Map) {
+        Map cat = state.effectCatalog as Map
+        cat.keySet().retainAll(favoriteNames)
+    }
+    if (state.effectPatterns instanceof Map) {
+        Map pats = state.effectPatterns as Map
+        pats.keySet().retainAll(favoritePatternIds)
+    }
 }
 
 private void discoverDevice() {
@@ -1393,14 +1466,8 @@ private void finalizeEffectCatalogRefresh() {
 
     otherEntries.each { entry ->
         String displayName = safeString(entry.displayName)
-        String patternId = safeString(entry.patternId)
-        if (displayName && patternId && !effectCatalog.containsKey(displayName)) {
-            effectCatalog[displayName] = patternId
-            effectPatterns[patternId] = cloneMap(entry.pattern as Map)
-            lightEffects[nextIndex.toString()] = displayName
-            effectIndex[nextIndex.toString()] = patternId
+        if (displayName) {
             otherNames << displayName
-            nextIndex++
         }
     }
 
@@ -1414,8 +1481,8 @@ private void finalizeEffectCatalogRefresh() {
     updateFavoriteEffectsAttribute(favoriteNames.collect { displayEffectName(it) })
 
     Integer count = effectCatalog.size()
-    log.info "[Gemstone] Loaded ${count} effects. Favorites (${favoriteNames.size()}): ${favoriteNames ? favoriteNames.join(', ') : '(none)'}"
-    log.info "[Gemstone] Other patterns (${otherNames.size()}): ${otherNames ? otherNames.join(', ') : '(none)'}"
+    log.debug "[Gemstone] Loaded ${count} effects. Favorites (${favoriteNames.size()}): ${favoriteNames ? favoriteNames.join(', ') : '(none)'}"
+    log.debug "[Gemstone] Other patterns (${otherNames.size()}): ${otherNames ? otherNames.join(', ') : '(none)'}"
 
     String currentPatternId = safeString(state.lastPattern?.id ?: state.lastPattern?.patternId)
     if (currentPatternId) {
@@ -1425,6 +1492,7 @@ private void finalizeEffectCatalogRefresh() {
         }
     }
 
+    processPendingNonFavoriteNameRequests(mergedEntries, effectCatalog)
     processPendingEffectRequests()
 }
 
@@ -1814,7 +1882,15 @@ private List availableEffectIndexes() {
 
 private void logAvailableEffectNames() {
     List names = orderedEffectDisplayNames()
-    log.info "[Gemstone] Available effects: ${names ? names.join(', ') : '(none loaded)'}"
+    log.debug "[Gemstone] Available effects: ${names ? names.join(', ') : '(none loaded)'}"
+}
+
+private void warnAvailableEffectNames() {
+    List names = orderedEffectDisplayNames().sort()
+    Integer total = names.size()
+    List shown = total > 20 ? names.take(20) : names
+    String suffix = total > 20 ? ", … (${total - 20} more)" : ""
+    log.warn "[Gemstone] Available effects: ${shown ? shown.join(', ') + suffix : '(none loaded)'}"
 }
 
 private String inferColorMode(Map pattern, Map previousPattern = [:]) {

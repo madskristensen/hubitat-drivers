@@ -188,3 +188,21 @@ Hubitat's async HTTP framework puts the error response body in `response.getErro
 - v0.4.3 — flattened multi-line 400 bodies for single-line log display so Gemstone server tracebacks are visible. Hubitat log.error truncates at first newline — known platform pattern.
 
 v0.4.4 — Gemstone API uses unsigned uint32 for ARGB. Force long arithmetic with 0xFFL literals; return Long from color generators. Groovy signed-int gotcha: (0xFF << 24) is negative; (0xFFL << 24) is positive. Confirmed by full Python traceback (v0.4.3 diagnostic): 'Color value should be in range [0, 4294967295]'.
+
+## v0.4.5 — Byte Order Fix (2026-05-16)
+
+v0.4.5 — Gemstone wire format is ABGR not ARGB. Empirical signature: red→blue, green→green, blue→red (G middle byte unaffected by R/B swap). Diagnostic pattern useful for future byte-order debugging.
+
+## Learnings — 2026-05-16T23:08:23-07:00: Gemstone v0.4.6 Log Hygiene
+
+v0.4.6 — Gemstone log hygiene. Preset list dump on every named setEffect was floating the live log. Pattern: log full list only on miss (warn level, capped at 20), successful matches log a single ID-resolution line.
+
+v0.4.6 extended — lightEffects UI dropdown is favorites-only. Non-favorites still resolve by name via effectCatalog/effectPatterns. nextIndex no longer advanced for non-favorites so favorites occupy contiguous 0..N-1 slots. Hubitat UI dropdown + numeric setEffect both stay clean.
+
+## v0.4.6 round 3 — 2026-05-16T23:13:41-07:00
+
+state.effectCatalog and state.effectPatterns now favorites-only. Non-favorite resolution: on-demand fetch from catalog, use, discard (don't persist). Added pruneNonFavoriteStateEntries() for upgrade cleanup. Reasoning: Hubitat's State Variables panel surfaces every state.* key. Caching 50+ pattern blobs there is user-visible noise on the device page.
+
+## Policy: State Size — Favorites-Only Caching (v0.4.6)
+
+**Future Gemstone work must not reintroduce non-favorite caching to persistent state.** Hubitat's State Variables inspector is user-visible; transient working state should live in local variables, not persisted to `state.*`. Rule: catalog and pattern caches are favorites-only for Gemstone. Non-favorite names resolve on-demand, execute, and evaporate — nothing persists. Backward compatibility is maintained via name-based `playEffectByName(String)` which calls the same refresh-resolve-play path.
