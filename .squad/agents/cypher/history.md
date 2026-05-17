@@ -170,7 +170,61 @@
 
 **SunStat Connect Plus v0.1.0 released.** Trinity's architecture, Tank's driver implementation, and Switch's test plan shipped together. API specification (cypher-sunstat-connectplus-api.md) merged into decisions.md. Awaiting Mads' real-device verification (Mode.Enum, modelId, ROPC probe, httpPatch sandbox compatibility).
 
+### 2026-05-16T20:58:12-07:00 — homebridge-tekmar-wifi CLI token persistence pattern
+
+**Mission:** Find where the homebridge-tekmar-wifi CLI persists tokens after `node dist/cli/index.js login` so Mads can extract the refresh_token for the Hubitat SunStat driver.
+
+**Finding:** Tokens ARE persisted to disk. The `WattsAuth` class in `src/lib/api/auth.ts` writes a `tokens.json` file. The storage path depends on how `WattsAuth` is constructed:
+- **Homebridge plugin path:** When `storagePath` is passed (Homebridge storage dir), file goes to `{storagePath}/homebridge-tekmar-wifi/tokens.json`
+- **CLI path (no arg):** Constructor falls back to `path.join(process.cwd(), 'tokens.json')` — the working directory at the time the command was run
+
+**Confirmed location on Mads' machine:** `C:\Users\madsk\source\repos\homebridge-tekmar-wifi\tokens.json` (LastWriteTime: 5/16/2026 8:56:38 PM, matching the login session).
+
+**File structure (`StoredTokens` type):**
+```json
+{
+  "access_token": "...",
+  "refresh_token": "...",
+  "expires_at": 1234567890,
+  "refresh_token_expires_at": 1234567890
+}
+```
+
+**CLI does NOT print tokens to stdout** — only `Login successful!` and `Token expires: ...`. There is no `--verbose` or `--show-tokens` flag.
+
+**Pattern for future CLI tool integrations:** When a Node CLI tool uses `process.cwd()` for token storage, the file lands wherever the user `cd`'d before running the command — not a fixed home-directory path. Always check the working directory of the shell session that ran the login.
+
 ## Team Updates (2026-05-17T03:37:53Z)
 
 **SunStat Connect Plus v0.1.2 released with 6 new features.** Tank wired EnergyMeter + 4 energy attrs, schedule control, thermostat hold, outdoor sensor, setpoint rounding, floor bounds. Switch expanded test coverage to 48 cases (#26-#48). Link bumped manifests/READMEs (v0.1.2, v0.4.0). Link-3 audited all 3 READMEs against 8 community Hubitat repos, applied 6 targeted edits (compatibility headers, version badges, releases links). Awaiting Mads' real-device verification and 3 README audit answers (forum threads, donation link, C-5 testing).
+
+---
+
+### 2026-05-16T21:07:23-07:00 — Watts B2C token length & alternative auth flow investigation
+
+**Mission:** Determine whether the 1,660-char `refresh_token` can be shortened or replaced with shorter credentials (ROPC, device code) to work around Hubitat UI's preference field character limit.
+
+**Token length — measured from real tokens.json:**
+- `refresh_token`: **1,660 characters**, JWE format (5 parts, 4 dots), `eyJ…`
+- `access_token`: **1,941 characters**, JWT format (3 parts, 2 dots), `eyJ…`
+- JWE (not JWT) for refresh tokens is an Azure AD B2C custom policy choice — the encrypted envelope is inherently long; cannot be shortened from the client side.
+
+**ROPC probe results:**
+- Dedicated ROPC policy `B2C_1A_ResourceOwnerPasswordCredentials`: **HTTP 404 — does not exist** on `wattsb2cap02.onmicrosoft.com`
+- `grant_type=password` against main sign-in policy: **HTTP 400 `server_error`** — policy XML has no ROPC orchestration step; blows up internally rather than returning `unsupported_grant_type`
+- **ROPC is definitively unavailable** on this tenant. Username+password storage in the driver is not possible.
+
+**Device code flow probe results:**
+- OIDC metadata `device_authorization_endpoint`: **null**
+- Direct probe of device code endpoint: **HTTP 404**
+- Device code flow is not enabled.
+
+**homebridge-tekmar-wifi reference:**
+- Uses 4-step PKCE + HTML form scraping (not feasible in Hubitat)
+- No ROPC, no device code, no shortcut path
+- Stores tokens to `tokens.json` for subsequent refresh cycles
+
+**Conclusion:** The 1,660-character JWE refresh_token is irreducible. All alternative grant flows are unavailable. Problem is 100% Hubitat UI-side. Passed options to Trinity: `textarea` input type, split-token inputs, Hubitat local REST API bootstrap, hub variable bridge.
+
+**Full spec:** `.squad/decisions/inbox/cypher-sunstat-auth-shorter-secret-options.md`
 

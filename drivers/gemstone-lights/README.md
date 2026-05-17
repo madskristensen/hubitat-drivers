@@ -2,7 +2,11 @@
 
 Integrates Gemstone permanent outdoor LED strings with Hubitat Elevation via the Gemstone cloud REST API.
 
+**Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
+
 > **Status: beta — working, author-tested in production on a real Gemstone controller.**
+>
+> **Latest: v0.4.0** — LightEffects with favorites, ColorTemperature RGB fallback, refresh optimizations. See [releases](https://github.com/madskristensen/hubitat-drivers/releases) for what's new.
 >
 > **Killer feature:** favorites-first `LightEffects` plus named-effect support. Dashboards get the standard `lightEffects` dropdown, while Rule Machine and custom actions can call `setEffect("Pulse")` or `setEffect("⭐ Pulse")`.
 >

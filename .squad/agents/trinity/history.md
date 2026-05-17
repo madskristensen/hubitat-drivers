@@ -9,6 +9,25 @@
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
 
+### 2026-05-16T21:07:23-07:00: Hubitat preference length limit & long-secret pattern
+
+**Problem:** Hubitat's preference UI silently rejects or truncates `text`/`password` values exceeding ~1024 characters. Azure AD B2C refresh tokens (Watts Home) are 1500–2500 chars. The "failed to save preferences" error is the symptom.
+
+**Platform limits confirmed (community-sourced):**
+- `text` / `password` preference values: ~1024 chars max (UI/platform limit)
+- `state.*` values: no documented size limit (stored in hub DB)
+- Command `STRING` parameters: substantially higher than preferences (anecdotally 4096+); not formally documented
+
+**Confirmed: Drivers cannot define `mappings {}`** — only Apps can host URL endpoints. Any "POST to driver" idea is dead on arrival.
+
+**Pattern chosen:** Replace the preference with a `setRefreshToken(String token)` command. Command STRING parameters bypass the preference length limit. Token is validated (>100 chars) and stored directly to `state.refreshToken`. Driver initializes immediately on command execution.
+
+**Why not Hub Variables:** Requires user knowledge of Hubitat Hub Variables system; less discoverable; adds a setup step with no meaningful security benefit over `state.*`.
+
+**Why not App+Driver split:** Correct long-term, wrong priority for an immediate unblocking fix. Deferred to v2.0 if commercial-quality App Store integration is desired.
+
+**Security note:** `state.*` is NOT encrypted at rest (unlike `password` preferences). The current driver already migrated tokens to state — this decision removes a brief encrypted-storage window, not a meaningful regression. Always log only token length, never any token characters.
+
 ### 2026-05-16 — Repo layout, conventions, and Gemstone driver architecture
 
 **Folder structure (decided):**
