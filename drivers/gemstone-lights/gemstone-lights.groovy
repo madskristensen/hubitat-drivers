@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.8
+ * Version: 0.4.9
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,10 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.9 — 2026-05-17 — reliability fixes for catalog & in-flight state
+ *     - Stale in-flight flags (effectCatalogRefreshInFlight, discoveryInFlight, authInFlight) now cleared on initialize() — fixes silent no-op state after hub reboot mid-operation
+ *     - Effect catalog is no longer wiped on every preference save — only when credentials change (previously forced a full re-fetch on any pref toggle)
+ *     - Removed dead state.idToken storage — the Cognito IdToken was written but never read (state bloat fix)
  *   0.4.8 — 2026-05-16 — Fill descriptionText on every sendEvent so the Hubitat Events tab Description column is populated for status-refresh events (effectName, colorMode, lightEffects, authStatus, etc.), not just user-initiated commands. Uses device.displayName so it works regardless of what the user renamed the device.
  *   0.4.7 — 2026-05-16 — Drop the non-favorite name list from the debug catalog-load log. Mads has 1457 non-favorite patterns; even at debug level, dumping all names was multi-KB. Log now shows just the count. Non-favorite names are still surfaced (capped at 20) on miss-path warns.
  *   0.4.6 — 2026-05-16 — Log hygiene + favorites-only UI/state: stop dumping the full preset list on every named setEffect call (only on miss, warn level, capped at 20); `lightEffects` UI dropdown now shows favorites only (curated set marked in the Gemstone app); `state.effectCatalog` and `state.effectPatterns` cache favorites only — non-favorites still resolve by name via on-demand catalog lookup, but no longer clog the device State Variables panel. Existing installs prune non-favorite state entries on next driver update.
@@ -34,7 +38,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.8"
+@Field static final String DRIVER_VERSION = "0.4.9"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -120,10 +124,16 @@ def installed() {
 def updated() {
     log.info "Gemstone Lights v" + DRIVER_VERSION + " preferences updated"
     unschedule()
+
+    boolean credentialsChanged = (settings.accountEmail != state.lastKnownEmail)
+    state.lastKnownEmail = settings.accountEmail
+
     clearAuthTokens()
     clearDiscoveryState()
     pruneNonFavoriteStateEntries()
-    clearEffectCatalogState()
+    if (credentialsChanged) {
+        clearEffectCatalogState()
+    }
     clearPendingRequests()
 
     if (settings.logEnable) {
@@ -140,6 +150,11 @@ def initialize() {
     unschedule("poll")
     unschedule("refreshAccessTokenTask")
     clearPendingRequests()
+
+    // clear stale in-flight flags after init (recovery from interrupted operations)
+    state.effectCatalogRefreshInFlight = false
+    state.discoveryInFlight = false
+    state.authInFlight = false
 
     if (!credentialsConfigured()) {
         updateAuthStatus("Not configured")
@@ -1118,7 +1133,6 @@ def refreshAccessTokenTask() {
 
 private void storeTokens(Map authResult, String refreshFallback = null) {
     state.accessToken = safeString(authResult.AccessToken)
-    state.idToken = safeString(authResult.IdToken)
 
     String refreshToken = safeString(authResult.RefreshToken)
     if (!refreshToken && refreshFallback) {
@@ -1135,7 +1149,6 @@ private void storeTokens(Map authResult, String refreshFallback = null) {
 
 private void clearAuthTokens() {
     state.remove("accessToken")
-    state.remove("idToken")
     state.remove("refreshToken")
     state.remove("tokenExpiry")
     unschedule("refreshAccessTokenTask")
