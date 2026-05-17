@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.5
+ * Version: 0.1.6
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.6 — 2026-05-17 — flame speed & log brightness, drop duplicate power attribute
  *   0.1.5 — 2026-05-17 — BUGFIX: removed paragraph() from preferences (Hubitat app-only, not allowed in drivers)
  *   0.1.4 — 2026-05-17 — SAFETY: removed defaultHeatLevel auto-apply; BUGFIX: removed sandbox-blocked reflection logging
  *   0.1.3 — 2026-05-17 — Optional default-on-power-on settings for flame color, log color, brightness, heat level, and temp setpoint
@@ -24,6 +25,7 @@
  *   0.1.1 — 2026-05-17 — Generalized device profiles, in-driver DP discovery, and auditable raw DP writes
  *   0.1.0 — 2026-05-17 — Initial Tuya Local scaffold for power, heat level, flame/log lighting, temperature polling, raw DP surfacing, and socket retry/backoff
  */
+// v0.1.6 — Added setFlameSpeed (DP 103) + setLogBrightness (DP 105); removed duplicate `power` attribute.
 // v0.1.5 — BUGFIX: removed paragraph() from preferences (Hubitat app-only, not allowed in drivers).
 // v0.1.4 — SAFETY: removed defaultHeatLevel auto-apply (heater never auto-starts); BUGFIX: replaced reflection (e.getClass()) with sandbox-safe exception logging.
 
@@ -33,8 +35,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.5"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.5"
+@Field static final String DRIVER_VERSION = "0.1.6"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.6"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -65,11 +67,13 @@ import javax.crypto.spec.SecretKeySpec
 @Field static final String PROFILE_CUSTOM = "Custom"
 @Field static final List<String> FLAME_COLOR_OPTIONS = ["1", "2", "3", "4", "5", "6"]
 @Field static final List<String> FLAME_BRIGHTNESS_OPTIONS = ["1", "2", "3", "4", "5"]
+@Field static final List<String> FLAME_SPEED_OPTIONS = ["Slow", "Medium", "Fast"]
 @Field static final List<String> LOG_COLOR_OPTIONS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
+@Field static final List<String> LOG_BRIGHTNESS_OPTIONS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
 @Field static final List<String> HEAT_LEVEL_OPTIONS = ["off", "low", "high"]
 @Field static final List<String> BASE_STATUS_DPS = ["1", "2", "3", "5", "13", "14", "15"]
 @Field static final List<String> SIDELINE_DISCOVERY_DPS = ["101", "102", "103", "104", "105", "107", "108"]
-@Field static final Map<String, Integer> SIDELINE_PROFILE_DPS = [power: 1, tempSetC: 2, heatLevel: 5, tempSetF: 14, flameColor: 101, flameBrightness: 102, logColor: 104]
+@Field static final Map<String, Integer> SIDELINE_PROFILE_DPS = [power: 1, tempSetC: 2, heatLevel: 5, tempSetF: 14, flameColor: 101, flameBrightness: 102, flameSpeed: 103, logColor: 104, logBrightness: 105]
 @Field static final Map<String, String> CUSTOM_DP_SETTING_NAMES = [power: "powerDp", flameColor: "flameColorDp", flameBrightness: "flameBrightnessDp", logColor: "logColorDp", heatLevel: "heatLevelDp", tempSetF: "tempSetFDp", tempSetC: "tempSetCDp"]
 @Field static final Map<String, String> HEAT_LEVEL_TO_DP = ["off": "0", "low": "1", "high": "2"]
 @Field static final Map<String, String> DP_TO_HEAT_LEVEL = ["0": "off", "1": "low", "2": "high"]
@@ -96,8 +100,12 @@ metadata {
             description: "Raw Tuya enum string for the mapped flame-color DP (Sideline default 101; use setRawDP() for experiments)."]]
         command "setFlameBrightness", [[name: "level*", type: "ENUM", constraints: FLAME_BRIGHTNESS_OPTIONS,
             description: "Raw Tuya enum string for the mapped flame-brightness DP (Sideline default 102)."]]
+        command "setFlameSpeed", [[name: "speed*", type: "ENUM", constraints: FLAME_SPEED_OPTIONS,
+            description: "Flame animation speed (Sideline Elite DP 103). Slow/Medium/Fast — verify labels on real hardware."]]
         command "setLogColor", [[name: "color*", type: "ENUM", constraints: LOG_COLOR_OPTIONS,
             description: "Raw Tuya enum string for the mapped log-color DP (Sideline default 104)."]]
+        command "setLogBrightness", [[name: "level*", type: "ENUM", constraints: LOG_BRIGHTNESS_OPTIONS,
+            description: "Log/ember brightness level 1–12 (Sideline Elite DP 105)."]]
         command "setHeatLevel", [[name: "level*", type: "ENUM", constraints: HEAT_LEVEL_OPTIONS]]
         command "setHeatingSetpoint", [[name: "temperature*", type: "NUMBER", description: "Writes the mapped Fahrenheit or Celsius setpoint DP based on the preferred unit preference."]]
         command "setRawDP", [[name: "dpId*", type: "NUMBER"], [name: "value*", type: "STRING",
@@ -108,10 +116,11 @@ metadata {
         command "captureBaseline"
         command "captureDiff"
 
-        attribute "power",            "enum",   ["on", "off"]
         attribute "flameColor",       "string"
         attribute "flameBrightness",  "string"
+        attribute "flameSpeed",       "enum",   FLAME_SPEED_OPTIONS
         attribute "logColor",         "string"
+        attribute "logBrightness",    "string"
         attribute "heatLevel",        "enum",   ["off", "low", "high"]
         attribute "heatingSetpoint",  "number"
         attribute "online",           "enum",   ["online", "offline", "unknown"]
@@ -378,7 +387,45 @@ def setLogColor(String color) {
     sendDpWrite(logColorDp.toString(), raw, "log color", WRITE_REFRESH_DELAY_SECONDS)
 }
 
-def setHeatLevel(String level) {
+// DP 103 — flame animation speed (Slow="1", Medium="2", Fast="3").
+// Label↔value mapping is community-derived; Switch should verify on real Sideline Elite hardware.
+@Field static final Map<String, String> FLAME_SPEED_TO_DP = ["Slow": "1", "Medium": "2", "Fast": "3"]
+@Field static final Map<String, String> DP_TO_FLAME_SPEED = ["1": "Slow", "2": "Medium", "3": "Fast"]
+
+def setFlameSpeed(String speed) {
+    String label = safeStr(speed)?.trim()
+    if (!(label in FLAME_SPEED_OPTIONS)) {
+        log.warn "[Touchstone] setFlameSpeed: invalid speed '${speed}' — use Slow, Medium, or Fast"
+        return
+    }
+
+    Integer flameSpeedDp = mappedCommandDp("flameSpeed", "Flame speed")
+    if (flameSpeedDp == null) {
+        return
+    }
+
+    String dpValue = FLAME_SPEED_TO_DP[label]
+    infoLog "${device.displayName} flame speed → ${label}"
+    emitAttribute("flameSpeed", label, "${device.displayName} flame speed set to ${label}", "digital")
+    sendDpWrite(flameSpeedDp.toString(), dpValue, "flame speed", WRITE_REFRESH_DELAY_SECONDS)
+}
+
+def setLogBrightness(String level) {
+    String raw = safeStr(level)?.trim()
+    if (!(raw in LOG_BRIGHTNESS_OPTIONS)) {
+        log.warn "[Touchstone] setLogBrightness: invalid level '${level}' — use 1–12"
+        return
+    }
+
+    Integer logBrightnessDp = mappedCommandDp("logBrightness", "Log brightness")
+    if (logBrightnessDp == null) {
+        return
+    }
+
+    infoLog "${device.displayName} log brightness → ${raw}"
+    emitAttribute("logBrightness", raw, "${device.displayName} log brightness set to ${raw}", "digital")
+    sendDpWrite(logBrightnessDp.toString(), raw, "log brightness", WRITE_REFRESH_DELAY_SECONDS)
+}
     String normalized = safeStr(level)?.trim()?.toLowerCase()
     if (!(normalized in HEAT_LEVEL_OPTIONS)) {
         log.warn "[Touchstone] setHeatLevel: invalid level '${level}' — use off, low, or high"
@@ -1162,10 +1209,19 @@ private void applyDps(Map<String, Object> dps) {
 
     if (activeDeviceProfile() == PROFILE_SIDELINE) {
         if (dps.containsKey("103")) {
-            emitAttribute("dp103", safeStr(dps["103"]), "${device.displayName} DP 103 is ${dps["103"]}")
+            String rawSpeed = safeStr(dps["103"])
+            emitAttribute("dp103", rawSpeed, "${device.displayName} DP 103 is ${rawSpeed}")
+            String speedLabel = DP_TO_FLAME_SPEED[rawSpeed]
+            if (speedLabel) {
+                emitAttribute("flameSpeed", speedLabel, "${device.displayName} flame speed is ${speedLabel}")
+            }
         }
         if (dps.containsKey("105")) {
-            emitAttribute("dp105", safeStr(dps["105"]), "${device.displayName} DP 105 is ${dps["105"]}")
+            String rawBrightness = safeStr(dps["105"])
+            emitAttribute("dp105", rawBrightness, "${device.displayName} DP 105 is ${rawBrightness}")
+            if (rawBrightness in LOG_BRIGHTNESS_OPTIONS) {
+                emitAttribute("logBrightness", rawBrightness, "${device.displayName} log brightness is ${rawBrightness}")
+            }
         }
         if (dps.containsKey("107")) {
             emitAttribute("dp107", safeStr(dps["107"]), "${device.displayName} DP 107 is ${dps["107"]}")
@@ -1347,7 +1403,6 @@ private void ensureDefaultAttributes() {
 private void applySwitchState(Boolean isOn, String eventType) {
     String switchValue = isOn ? "on" : "off"
     emitAttribute("switch", switchValue, "${device.displayName} was turned ${switchValue}", eventType)
-    emitAttribute("power", switchValue, "${device.displayName} power is ${switchValue}", eventType)
 }
 
 private void updateOnlineStatus(String value, String detail = null) {
