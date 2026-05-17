@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.1 — 2026-05-16 — Added playEffectByName(String) as a separate (non-overloaded) command so WebCoRE's action picker exposes a String input. Internally delegates to setEffect(String).
  *   0.4.0 — 2026-05-16 — Added LightEffects, ColorTemperature, and colorMode support. Favorites now surface first in lightEffects, info logs, and favoriteEffects.
  *   0.3.0 — 2026-05-16 — Added setEffect(name) custom command, refreshEffectCatalog() helper, and effectName attribute. Effects can now be invoked by name from Hubitat rules.
  *   0.2.5 — 2026-05-16 — Fixed Hubitat encoder rejection by pre-serializing Cognito JSON body and routing AWS Content-Type via headers map
@@ -26,7 +27,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.0"
+@Field static final String DRIVER_VERSION = "0.4.1"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -46,7 +47,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.0"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.1"
 
 metadata {
     definition(
@@ -65,6 +66,8 @@ metadata {
         capability "Initialize"
 
         command "setEffect", [[name: "name", type: "STRING", description: "Gemstone effect name (⭐ prefix optional)"]]
+        command "playEffectByName", [[name: "name*", type: "STRING",
+            description: "Play a Gemstone effect by name (e.g. 'Pulse' or '⭐ Pulse'). Use this from WebCoRE — the standard setEffect command only accepts a number."]]
         command "refreshEffectCatalog"
 
         attribute "effectName", "string"
@@ -313,6 +316,10 @@ def setEffect(String name) {
     }
 
     activateEffectByName(requestedName)
+}
+
+def playEffectByName(String name) {
+    setEffect(name)
 }
 
 def setNextEffect() {
