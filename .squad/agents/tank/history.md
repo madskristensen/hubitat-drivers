@@ -119,3 +119,7 @@ The `power` attribute (`attribute "power", "enum", ["on", "off"]`) was a duplica
 ## Learnings (continued)
 
 - 2026-05-17T16:15:00-07:00 — When inserting a new function near an existing one, ALWAYS verify the surrounding `def` lines are intact in a post-edit view — a single misaligned old_str can swallow a signature line and produce orphan-body parse errors that only surface at hub load time.
+
+- 2026-05-17T16:19:32-07:00 — defaultLogBrightness is the symmetric gap — v0.1.6 added setLogBrightness without a corresponding default preference. Mads asked only for flame speed in v0.1.8; flag this as a likely follow-up if he reports it.
+
+- 2026-05-17T23:22:29-07:00 — Touchstone v0.1.6 power-on defaults now have full v0.1.6-command symmetry — every named command has a `default*` preference counterpart that auto-applies during the defaults window. The pattern is firmly established: input declaration + application block + DP-write.
