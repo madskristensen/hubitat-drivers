@@ -166,7 +166,7 @@ After the driver is configured and saved, go to your **SunStat Connect Plus** pa
 
 1. Scroll down and find **setRefreshToken**
 2. Paste your full refresh token (from Step 1) into the **token** input field
-3. Click **Run**
+3. Click the **setRefreshToken** button (the command name itself acts as the run button)
 
 The driver will log `Refresh token stored (NNNN chars)` and immediately begin initializing and polling.
 
@@ -400,7 +400,7 @@ Actions:
 node dist/cli/index.js login
 ```
 
-Then go to your parent device's **Commands** tab, find **setRefreshToken**, paste the new token into its input field, and click **Run**.
+Then go to your parent device's **Commands** tab, find **setRefreshToken**, paste the new token into its input field, and click the **setRefreshToken** button to execute.
 
 **Why this happens:** Refresh tokens are valid for 90 days. If you don't poll (or the hub loses state), the token may expire. Unlike access tokens, refresh tokens do not auto-renew from an expired state.
 
