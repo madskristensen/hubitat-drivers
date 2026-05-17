@@ -4,7 +4,7 @@ Integrates SunStat Connect Plus electric floor heating thermostats with Hubitat 
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: beta — v0.1.4. Cloud REST integration via the Watts® Home API; verified against the Watts iOS app for API shape and auth bootstrap; requires one-time external token capture via the `homebridge-tekmar-wifi` CLI (see Setup). Token is now set via the `setRefreshToken` command (bypasses Hubitat's ~1024-char preference limit). Parent/child architecture; auto-discovers all thermostats in your Watts account. Latest: bugfix release — fixes discoverDevices auto-resolution and locationId URL encoding. v0.1.3 features: energy reporting, schedule control, hold detection, outdoor temp + floor bounds. See [releases](https://github.com/madskristensen/hubitat-drivers/releases) for details.**
+> **Status: beta — v0.1.6. Cloud REST integration via the Watts® Home API; verified against the Watts iOS app for API shape and auth bootstrap; requires one-time external token capture via the `homebridge-tekmar-wifi` CLI (see Setup). Token is now set via the `setRefreshToken` command (bypasses Hubitat's ~1024-char preference limit). Parent/child architecture; auto-discovers all thermostats in your Watts account. Latest: pseudo-boost (`setBoost`/`cancelBoost`) implemented as driver-managed temporary setpoint overrides. See [releases](https://github.com/madskristensen/hubitat-drivers/releases) for details.**
 
 ## Hardware Compatibility
 
@@ -41,8 +41,8 @@ This driver uses a **parent/child pattern**:
 | Attribute | Type | What it means |
 |---|---|---|
 | **floorTemperature** | number | Temperature reading from the floor sensor (probe). If disconnected, may read 212°F (100°C) — the driver logs a warning and skips updates. |
-| **boostActive** | enum (`true` / `false`) | Whether a timed boost override is currently active |
-| **boostUntil** | string | ISO-8601 datetime when boost expires (empty if no boost active) |
+| **boostActive** | enum (`on` / `off`) | Whether a timed boost override is currently active |
+| **boostUntil** | string | ISO-8601 datetime when boost expires (empty string if no boost active) |
 | **scheduleEnabled** | enum (`on` / `off` / `unknown`) | Whether the device is following its programmed schedule. Toggle with `setScheduleEnabled("on"\|"off")` to control manual vs. programmed mode. |
 | **thermostatHold** | enum (`holding` / `following` / `unknown`) | Whether a manual hold is overriding the device's schedule. `holding` means a user-initiated setpoint; `following` means the device is tracking the program. |
 | **outdoorTemperature** | number | Outdoor probe reading (if equipped), in hub units. May not update if the optional outdoor sensor is not installed. |
@@ -62,8 +62,8 @@ This driver uses a **parent/child pattern**:
 | **setFloorMinTemp** | temperature | Set minimum floor warmth temperature (clamped to device bounds, typically 40–85°F) |
 | **setScheduleEnabled** | `"on"` or `"off"` | Enable or disable the device's programmed schedule. `"off"` = manual mode (device ignores program); `"on"` = programmed mode (device returns control to the schedule). |
 | **refresh** | none | Manually poll Watts API |
-| **setBoost** | minutes (1–120) | *Stubbed in v0.1.2* — activate timed boost override for the given duration |
-| **cancelBoost** | none | *Stubbed in v0.1.2* — cancel active boost |
+| **setBoost** | minutes (1–120) | Activate timed boost override — raises the heating setpoint by the configured `boostDelta` for the given duration, then auto-restores |
+| **cancelBoost** | none | Cancel an active boost immediately and restore the previous setpoint |
 
 ### Parent Device Commands
 
@@ -248,6 +248,9 @@ The refresh token is set via the `setRefreshToken` command (see Setup, Step 4). 
 |---|---|---|---|
 | **Enable Debug Logging** | bool | `false` | Log detailed command execution. Auto-disables after 30 minutes. |
 | **Enable Description Text (info logging)** | bool | `true` | Log human-readable state changes (e.g., "heating", "idle"). |
+| **Boost delta (°F or °C)** | decimal | `5` | Degrees above the current setpoint when boost is activated. Change to `3` if your hub is configured for °C. |
+| **Default boost duration (minutes)** | number | `30` | Duration used when `setBoost()` is called without an argument (e.g., from a dashboard button). |
+| **Suppress schedule during boost** | bool | `true` | Turn off the device's programmed schedule for the boost duration so the schedule does not overwrite the boosted setpoint. The schedule is automatically re-enabled when boost expires or is cancelled. |
 
 ## Home/Away Mode
 
@@ -303,6 +306,44 @@ The SunStat thermostat normally runs on a **programmed daily schedule** (e.g., 6
 **Reading the state:**
 - Check the `scheduleEnabled` attribute (`on` / `off` / `unknown`)
 - Combined with `thermostatHold`, you can detect if a user manually held a setpoint: `thermostatHold` will show `holding` while the schedule is disabled
+
+## Boost
+
+`setBoost(minutes)` temporarily raises the heating setpoint by a configurable delta and then automatically restores the previous setpoint when the timer expires.
+
+> **Note: This is a driver-managed pseudo-boost.** The Watts Home API does not expose a native boost endpoint (confirmed via full reverse-engineering of the API surface — no `Boost`, `BoostMinutes`, `BoostUntil`, or `BoostExpiration` field exists). Boost is implemented entirely in driver state using Hubitat's `runIn` timer.
+
+### How it works
+
+1. Saves the current `heatingSetpoint` to `state.preBoostSetpoint`
+2. Sends `PATCH /Device/{id}` with `{ Heat: <current + boostDelta> }` (clamped to the device's maximum setpoint)
+3. Optionally sends `PATCH /Device/{id}` with `{ SchedEnable: "Off" }` if **Suppress schedule during boost** is enabled
+4. Schedules `boostExpired()` via `runIn(minutes * 60, ...)` to auto-restore
+5. Emits `boostActive = "on"` and `boostUntil = <ISO timestamp>` for dashboards
+
+On expiry (or manual `cancelBoost()`):
+- Restores the saved setpoint
+- Re-enables the schedule if it was suppressed
+- Clears `boostActive` and `boostUntil`
+
+### Boost preferences
+
+| Preference | Default | Notes |
+|---|---|---|
+| **Boost delta** | `5` | °F or °C above current setpoint. Set to `3` for metric hubs. |
+| **Default boost duration** | `30 min` | Used when `setBoost()` is called without an argument (e.g., from a dashboard tile or voice command). |
+| **Suppress schedule during boost** | `true` | Recommended — without this, the next scheduled period overrides the boosted setpoint. |
+
+### Hub-restart recovery
+
+`runIn` callbacks are lost if the hub reboots mid-boost. The driver mitigates this two ways:
+
+- **On `initialize()`** (called after every hub restart): if `state.boostActive` is true, the remaining boost time is recomputed from `state.boostUntil`. If time remains, the expiry timer is re-armed; if the boost window has already passed, the setpoint is restored immediately.
+- **On each poll callback** (`parseDeviceState`): if `state.boostActive` is true and `state.boostUntil` is in the past, the boost is cancelled. This catches the case where the hub was offline long enough that `initialize()` didn't fire during the boost window.
+
+### Important caveat — it's a real setpoint change
+
+The boosted setpoint is sent as a real `Heat` setpoint to the device. Any external automation that watches `heatingSetpoint` will see the elevated value during boost. If you have Rule Machine rules that react to `heatingSetpoint` changes, be aware they will fire during boost activation and cancellation.
 
 ## Setpoint Precision
 

@@ -1,7 +1,7 @@
 /**
  * SunStat Connect Plus — Child Driver (Thermostat)
  * Author:  Mads Kristensen
- * Version: 0.1.2
+ * Version: 0.1.6
  * License: MIT
  *
  * Per-thermostat capability surface for the Watts® Home SunStat Connect Plus
@@ -9,6 +9,8 @@
  * driver (SunStat Connect Plus) via parent.sendDevicePatch(...).
  *
  * Changelog:
+ *   0.1.6 — 2026-05-17 — Pseudo-boost implementation (driver-managed temporary setpoint override)
+ *   0.1.5 — 2026-05-17 — Version synced to parent (v0.1.5); no behavior change in child
  *   0.1.2 — 2026-05-16 — Energy reporting, schedule toggle, hold attribute, outdoor temperature, setpoint stepping, floor bounds clamping
  *   0.1.1 — 2026-05-16 — Mirror parent awayMode attribute; bump version
  *   0.1.0 — 2026-05-16 — Initial release
@@ -22,7 +24,7 @@ import groovy.json.JsonSlurper
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION                    = "0.1.2"
+@Field static final String DRIVER_VERSION                    = "0.1.6"
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_F        = 110L
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_C        = 43L
 
@@ -47,7 +49,7 @@ metadata {
         command "setScheduleEnabled", [[name: "enabled", type: "ENUM", constraints: ["on", "off"]]]
 
         attribute "floorTemperature",    "number"
-        attribute "boostActive",         "enum",   ["true", "false"]
+        attribute "boostActive",         "enum",   ["on", "off"]
         attribute "boostUntil",          "string"
         attribute "deviceOnline",        "enum",   ["true", "false"]
         attribute "scheduleEnabled",     "enum",   ["on", "off", "unknown"]
@@ -68,6 +70,18 @@ metadata {
         input name: "txtEnable", type: "bool",
               title: "Enable descriptionText (info) logging",
               defaultValue: true
+        input name: "boostDelta", type: "decimal",
+              title: "Boost delta (°F or °C)",
+              description: "Degrees above current setpoint when boost is activated. Default: 5°F / 3°C. Change to 3 if your hub is set to °C.",
+              defaultValue: 5, required: false
+        input name: "boostDefaultMinutes", type: "number",
+              title: "Default boost duration (minutes)",
+              description: "Used when setBoost() is called without a minutes argument.",
+              defaultValue: 30, required: false
+        input name: "boostSuppressSchedule", type: "bool",
+              title: "Suppress schedule during boost",
+              description: "Turn off the device schedule for the boost duration so the programmed schedule does not overwrite the boosted setpoint.",
+              defaultValue: true, required: false
     }
 }
 
@@ -87,7 +101,7 @@ def installed() {
     sendEvt("coolingSetpoint",           100,      "100 °")
     sendEvt("thermostatSetpoint",        68,       "68 °")
     sendEvt("thermostatFanMode",         "auto",   "auto")
-    sendEvt("boostActive",               "false",  "false")
+    sendEvt("boostActive",               "off",    "off")
     sendEvt("boostUntil",                "",       "")
     sendEvt("scheduleEnabled",           "off",    "off")
     sendEvt("deviceOnline",              "false",  "false")
@@ -112,6 +126,20 @@ def updated() {
 def initialize() {
     // Child has no independent schedule; parent owns polling
     debugLog "initialize() — child has no independent schedule"
+
+    // Hub-restart boost recovery: re-arm or auto-cancel the expiry timer
+    if (state.boostActive == true && state.boostUntil != null) {
+        long remaining = (state.boostUntil as Long) - now()
+        if (remaining <= 0) {
+            log.info "[SunStat] ${device.displayName}: boost detected as overrun after reboot — auto-cancelling"
+            boostExpired()
+        } else {
+            int secs = (int)(remaining / 1000L)
+            log.info "[SunStat] ${device.displayName}: re-arming boost expiry timer after reboot — ${secs}s remaining"
+            unschedule("boostExpired")
+            runIn(secs, "boostExpired")
+        }
+    }
 }
 
 def uninstalled() {
@@ -198,18 +226,92 @@ def setThermostatFanMode(mode) {
 // ---------------------------------------------------------------------------
 
 /**
- * setBoost(minutes): STUB — no documented first-class boost API in v0.1.0.
- * Pending API discovery (see TESTING.md).
+ * setBoost(minutes): Raise the heating setpoint by boostDelta for the given duration.
+ * This is a driver-managed pseudo-boost — the Watts Home API has no native boost endpoint.
+ * TODO: Monitor Target.Hold in future firmware updates; it may eventually surface as a writable hold-timer field.
  */
 def setBoost(minutes) {
-    log.warn "[SunStat] setBoost not yet implemented — pending API discovery (see TESTING.md)"
+    if (state.boostActive == true) {
+        log.warn "[SunStat] ${device.displayName}: boost already active; call cancelBoost() first or wait for expiry"
+        return
+    }
+
+    String hubScale = location.temperatureScale ?: "F"
+    BigDecimal defaultDelta = (hubScale == "C") ? 3.0 : 5.0
+    BigDecimal delta = safeBigDecimal(settings.boostDelta, defaultDelta)
+
+    BigDecimal mins = safeBigDecimal(minutes, 0.0)
+    if (mins <= 0) {
+        mins = safeBigDecimal(settings.boostDefaultMinutes, 30.0)
+        if (mins <= 0) { mins = 30.0 }
+    }
+
+    BigDecimal currentSetpoint = safeBigDecimal(device.currentValue("heatingSetpoint"), 68.0)
+    state.preBoostSetpoint = currentSetpoint
+
+    BigDecimal boostTarget = currentSetpoint + delta
+    BigDecimal maxSp = safeBigDecimal(state.setpointMax, hubScale == "C" ? 35.0 : 95.0)
+    if (boostTarget > maxSp) {
+        boostTarget = maxSp
+        log.warn "[SunStat] ${device.displayName}: boost target clamped to max setpoint (${maxSp} °${hubScale})"
+    }
+    boostTarget = boostTarget.setScale(1, BigDecimal.ROUND_HALF_UP)
+
+    sendDevicePatch([Heat: boostTarget])
+
+    boolean suppressSched = settings.boostSuppressSchedule != false
+    if (suppressSched) {
+        sendDevicePatch([SchedEnable: "Off"])
+    }
+
+    state.boostActive           = true
+    state.boostUntil            = now() + (mins.toLong() * 60L * 1000L)
+    state.boostScheduleSuppressed = suppressSched
+
+    String untilStr = new Date(state.boostUntil as Long).format("yyyy-MM-dd'T'HH:mm:ssZ")
+    sendEvent(name: "boostActive", value: "on",     descriptionText: "${device.displayName} boostActive is on")
+    sendEvent(name: "boostUntil",  value: untilStr, descriptionText: "${device.displayName} boostUntil is ${untilStr}")
+
+    unschedule("boostExpired")
+    runIn((int)(mins * 60), "boostExpired")
+
+    log.info "[SunStat] ${device.displayName}: boost active — setpoint raised from ${currentSetpoint} to ${boostTarget} °${hubScale} for ${mins} min (until ${untilStr})"
 }
 
 /**
- * cancelBoost: STUB — same reason as setBoost.
+ * cancelBoost(): Restore the pre-boost setpoint and clear boost state.
  */
 def cancelBoost() {
-    log.warn "[SunStat] cancelBoost not yet implemented — pending API discovery (see TESTING.md)"
+    if (state.boostActive != true) {
+        log.warn "[SunStat] ${device.displayName}: cancelBoost() called but no boost is currently active"
+        return
+    }
+
+    BigDecimal restoreSetpoint = safeBigDecimal(state.preBoostSetpoint, 68.0)
+    sendDevicePatch([Heat: restoreSetpoint])
+
+    if (state.boostScheduleSuppressed == true) {
+        sendDevicePatch([SchedEnable: "On"])
+    }
+
+    state.boostActive           = false
+    state.boostUntil            = null
+    state.preBoostSetpoint      = null
+    state.boostScheduleSuppressed = false
+
+    sendEvent(name: "boostActive", value: "off", descriptionText: "${device.displayName} boostActive is off")
+    sendEvent(name: "boostUntil",  value: "",    descriptionText: "${device.displayName} boostUntil cleared")
+    unschedule("boostExpired")
+
+    log.info "[SunStat] ${device.displayName}: boost cancelled — setpoint restored to ${restoreSetpoint}"
+}
+
+/**
+ * boostExpired(): Scheduled callback — auto-cancel after the boost window elapses.
+ */
+def boostExpired() {
+    log.info "[SunStat] ${device.displayName}: boost expired automatically — restoring previous setpoint"
+    cancelBoost()
 }
 
 /**
@@ -471,6 +573,12 @@ private void parseDeviceStateInternal(Map body) {
     String parentAway = safeStr(parent?.currentValue("awayMode"), "unknown")
     emitIfChanged("awayMode", parentAway,
                   "${device.displayName} awayMode is ${parentAway}")
+
+    // Hub-restart boost recovery: if boost was active and has overrun, cancel now
+    if (state.boostActive == true && state.boostUntil != null && now() > (state.boostUntil as Long)) {
+        log.info "[SunStat] ${device.displayName}: boost detected as expired during poll — restoring"
+        boostExpired()
+    }
 }
 
 // ---------------------------------------------------------------------------

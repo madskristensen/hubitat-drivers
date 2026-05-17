@@ -1,7 +1,7 @@
 /**
  * SunStat Connect Plus — Parent Driver
  * Author:  Mads Kristensen
- * Version: 0.1.4
+ * Version: 0.1.6
  * License: MIT
  *
  * Cloud auth, device discovery, polling, and command routing for the
@@ -13,6 +13,8 @@
  * command on the parent device. The driver rotates the token automatically after that.
  *
  * Changelog:
+ *   0.1.6 — 2026-05-17 — Pseudo-boost implementation in child driver (driver-managed temporary setpoint override; no native boost API)
+ *   0.1.5 — 2026-05-17 — Async polling fan-out (asynchttpGet/Patch replaces blocking httpGet/Patch on poll + patch paths); proactive token refresh rescheduled on initialize() when token is already valid; HTTP 429 warn-and-skip handling; child version synced to parent
  *   0.1.4 — 2026-05-16 — Fix API envelope unwrapping ({errorNumber, errorMessage, body} not unwrapped — caused "Could not resolve a Watts location ID"); URL-encode locationId in URL paths (Watts uses display names like "Misty Gray" as locationIds — spaces broke URL parsing); add diagnostic info logging in discovery
  *   0.1.3 — 2026-05-16 — Replace password preference with setRefreshToken() command to bypass Hubitat's ~1024-char preference limit; existing users with token already in state are unaffected
  *   0.1.2 — 2026-05-16 — Energy reporting, schedule toggle, hold attribute, outdoor temperature, setpoint stepping, floor bounds clamping
@@ -28,8 +30,8 @@ import groovy.json.JsonSlurper
 // Constants — all literals; NO cross-@Field references (Hubitat sandbox rule)
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION               = "0.1.4"
-@Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.4"
+@Field static final String DRIVER_VERSION               = "0.1.6"
+@Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.6"
 @Field static final String WATTS_API_BASE               = "https://home.watts.com/api"
 @Field static final String WATTS_TOKEN_URL              = "https://login.watts.io/tfp/wattsb2cap02.onmicrosoft.com/B2C_1A_Residential_UnifiedSignUpOrSignIn/oauth2/v2.0/token"
 @Field static final String WATTS_CLIENT_ID              = "c832c38c-ce70-4ebc-83b6-b4548083ac90"
@@ -124,6 +126,10 @@ def initialize() {
     }
 
     schedulePolling()
+    // Reschedule proactive refresh if a valid token is already in state (e.g., after hub reboot)
+    if (hasUsableToken()) {
+        scheduleProactiveRefresh()
+    }
     runIn(2, "refresh")
 }
 
@@ -257,29 +263,14 @@ private void setAwayModeInternal(String mode, boolean retry401) {
  * Sends PATCH /api/Device/{deviceId} with {"Settings": settingsMap}.
  * Retries once on 401.
  */
-def sendDevicePatch(String deviceId, Map settingsMap, boolean retry401 = true) {
+def sendDevicePatch(String deviceId, Map settingsMap) {
     if (!ensureValidToken()) {
         log.warn "[SunStat] sendDevicePatch() skipped — token unavailable"
         return
     }
     String body = JsonOutput.toJson([Settings: settingsMap])
     Map params = buildApiParams("PATCH", "/Device/${deviceId}", body)
-    try {
-        httpMethod("PATCH", params) { resp ->
-            Integer status = safeStatus(resp)
-            debugLog "PATCH /Device/${deviceId} → HTTP ${status}"
-            if (status == 401 && retry401) {
-                log.warn "[SunStat] PATCH 401 — refreshing token and retrying once"
-                if (refreshTokensSync()) {
-                    sendDevicePatch(deviceId, settingsMap, false)
-                }
-            } else if (status >= 400) {
-                log.error "[SunStat] PATCH /Device/${deviceId} failed: HTTP ${status}"
-            }
-        }
-    } catch (Exception e) {
-        log.error "[SunStat] PATCH /Device/${deviceId} exception: ${e.message}"
-    }
+    asynchttpPatch("sendDevicePatchCallback", params, [deviceId: deviceId, settingsMap: settingsMap, retry401: true])
 }
 
 // ---------------------------------------------------------------------------
@@ -410,24 +401,7 @@ private void discoverDevicesAtLocation(String locationId) {
  */
 private void fetchAndParseLocationState(String locId) {
     Map params = buildApiParams("GET", "/Location", null)
-    try {
-        httpGet(params) { resp ->
-            Integer status = safeStatus(resp)
-            if (status != 200) {
-                log.warn "[SunStat] GET /Location failed: HTTP ${status} — location away state unchanged"
-                return
-            }
-            List locations = parseResponseList(resp)
-            Map loc = locations.find { safeStr(it?.locationId) == locId } as Map
-            if (loc) {
-                parseLocationState(loc)
-            } else {
-                debugLog "fetchAndParseLocationState: locId ${locId} not found in /Location response"
-            }
-        }
-    } catch (Exception e) {
-        log.warn "[SunStat] GET /Location exception: ${e.message}"
-    }
+    asynchttpGet("fetchLocationStateCallback", params, [locId: locId, retry401: true])
 }
 
 /**
@@ -478,32 +452,115 @@ private void parseLocationState(Map loc) {
 // Per-device polling
 // ---------------------------------------------------------------------------
 
-private void pollChildDevice(child, String deviceId, boolean retry401 = true) {
+private void pollChildDevice(child, String deviceId) {
     Map params = buildApiParams("GET", "/Device/${deviceId}", null)
-    try {
-        httpGet(params) { resp ->
-            Integer status = safeStatus(resp)
-            if (status == 401 && retry401) {
-                log.warn "[SunStat] GET /Device/${deviceId} 401 — refreshing token and retrying"
-                if (refreshTokensSync()) {
-                    pollChildDevice(child, deviceId, false)
-                }
-                return
-            }
-            if (status != 200) {
-                log.warn "[SunStat] GET /Device/${deviceId} failed: HTTP ${status} — leaving child state as-is"
-                return
-            }
-            Map body = parseResponseBody(resp)
-            if (!body) {
-                log.warn "[SunStat] GET /Device/${deviceId} returned empty body"
-                return
-            }
-            debugLog "Received state for device ${deviceId}: isConnected=${body?.isConnected}"
-            child.parseDeviceState(body)
+    asynchttpGet("pollChildDeviceCallback", params, [childDni: child.deviceNetworkId, deviceId: deviceId, retry401: true])
+}
+
+// ---------------------------------------------------------------------------
+// Async HTTP callbacks
+// ---------------------------------------------------------------------------
+
+void pollChildDeviceCallback(response, Map data) {
+    String childDni = safeStr(data?.childDni)
+    String deviceId = safeStr(data?.deviceId)
+    boolean retry401 = data?.retry401 != false
+
+    if (response.hasError()) {
+        log.warn "[SunStat] GET /Device/${deviceId} error: ${response.errorMessage} — leaving child state as-is"
+        return
+    }
+    Integer status = safeStatus(response)
+    if (status == 429) {
+        rateLimit429Warn("GET /Device/${deviceId}")
+        return
+    }
+    if (status == 401 && retry401) {
+        log.warn "[SunStat] GET /Device/${deviceId} 401 — refreshing token and retrying once"
+        if (throttled401Refresh()) {
+            Map retryParams = buildApiParams("GET", "/Device/${deviceId}", null)
+            asynchttpGet("pollChildDeviceCallback", retryParams, [childDni: childDni, deviceId: deviceId, retry401: false])
         }
-    } catch (Exception e) {
-        log.warn "[SunStat] GET /Device/${deviceId} exception: ${e.message} — leaving child state as-is"
+        return
+    }
+    if (status != 200) {
+        log.warn "[SunStat] GET /Device/${deviceId} failed: HTTP ${status} — leaving child state as-is"
+        return
+    }
+    Map body = parseResponseBodyFromString(response.data)
+    if (!body) {
+        log.warn "[SunStat] GET /Device/${deviceId} returned empty body"
+        return
+    }
+    debugLog "Received state for device ${deviceId}: isConnected=${body?.isConnected}"
+    def child = getChildDevice(childDni)
+    if (!child) {
+        log.warn "[SunStat] pollChildDeviceCallback: child device not found for DNI ${childDni}"
+        return
+    }
+    child.parseDeviceState(body)
+}
+
+void fetchLocationStateCallback(response, Map data) {
+    String locId = safeStr(data?.locId)
+    boolean retry401 = data?.retry401 != false
+
+    if (response.hasError()) {
+        log.warn "[SunStat] GET /Location error: ${response.errorMessage} — location away state unchanged"
+        return
+    }
+    Integer status = safeStatus(response)
+    if (status == 429) {
+        rateLimit429Warn("GET /Location")
+        return
+    }
+    if (status == 401 && retry401) {
+        log.warn "[SunStat] GET /Location 401 — refreshing token and retrying once"
+        if (throttled401Refresh()) {
+            Map retryParams = buildApiParams("GET", "/Location", null)
+            asynchttpGet("fetchLocationStateCallback", retryParams, [locId: locId, retry401: false])
+        }
+        return
+    }
+    if (status != 200) {
+        log.warn "[SunStat] GET /Location failed: HTTP ${status} — location away state unchanged"
+        return
+    }
+    List locations = parseResponseListFromString(response.data)
+    Map loc = locations.find { safeStr(it?.locationId) == locId } as Map
+    if (loc) {
+        parseLocationState(loc)
+    } else {
+        debugLog "fetchLocationStateCallback: locId ${locId} not found in /Location response"
+    }
+}
+
+void sendDevicePatchCallback(response, Map data) {
+    String deviceId = safeStr(data?.deviceId)
+    boolean retry401 = data?.retry401 != false
+
+    if (response.hasError()) {
+        log.error "[SunStat] PATCH /Device/${deviceId} error: ${response.errorMessage}"
+        return
+    }
+    Integer status = safeStatus(response)
+    debugLog "PATCH /Device/${deviceId} → HTTP ${status}"
+    if (status == 429) {
+        rateLimit429Warn("PATCH /Device/${deviceId}")
+        return
+    }
+    if (status == 401 && retry401) {
+        log.warn "[SunStat] PATCH /Device/${deviceId} 401 — refreshing token and retrying once"
+        if (throttled401Refresh()) {
+            Map sm = data?.settingsMap as Map ?: [:]
+            String retryBody = JsonOutput.toJson([Settings: sm])
+            Map retryParams = buildApiParams("PATCH", "/Device/${deviceId}", retryBody)
+            asynchttpPatch("sendDevicePatchCallback", retryParams, [deviceId: deviceId, settingsMap: sm, retry401: false])
+        }
+        return
+    }
+    if (status >= 400) {
+        log.error "[SunStat] PATCH /Device/${deviceId} failed: HTTP ${status}"
     }
 }
 
@@ -676,6 +733,69 @@ private void httpMethod(String method, Map params, Closure callback) {
             break
         default:
             log.error "[SunStat] Unsupported HTTP method: ${method}"
+    }
+}
+
+private Map parseResponseBodyFromString(String s) {
+    try {
+        if (!s) { return [:] }
+        def data = new JsonSlurper().parseText(s)
+        if (data instanceof Map) {
+            Map m = data as Map
+            if (m.containsKey("body") && m.body instanceof Map) {
+                return m.body as Map
+            }
+            return m
+        }
+    } catch (Exception e) {
+        debugLog "parseResponseBodyFromString exception: ${e.message}"
+    }
+    return [:]
+}
+
+private List parseResponseListFromString(String s) {
+    try {
+        if (!s) { return [] }
+        def data = new JsonSlurper().parseText(s)
+        if (data instanceof Map) {
+            Map m = data as Map
+            if (m.containsKey("body") && m.body instanceof List) {
+                return m.body as List
+            }
+        }
+        if (data instanceof List) {
+            return data as List
+        }
+    } catch (Exception e) {
+        debugLog "parseResponseListFromString exception: ${e.message}"
+    }
+    return []
+}
+
+/**
+ * Rate-limited 401 recovery: refreshes tokens at most once per 60 seconds.
+ * Returns true if refresh succeeded; false if throttled or refresh failed.
+ */
+private boolean throttled401Refresh() {
+    Long now = currentEpochSeconds()
+    Long last = safeLong(state.last401RefreshAt, 0L)
+    if ((now - last) < 60L) {
+        debugLog "401 token refresh throttled — last refresh was ${now - last}s ago"
+        return false
+    }
+    state.last401RefreshAt = now
+    return refreshTokensSync()
+}
+
+/**
+ * Log a 429 rate-limit warning at most once per 60-second window.
+ */
+private void rateLimit429Warn(String endpoint) {
+    Long now = currentEpochSeconds()
+    Long last = safeLong(state.last429WarnAt, 0L)
+    if ((now - last) >= 60L) {
+        log.warn "[SunStat] HTTP 429 (rate-limited) on ${endpoint} — skipping this cycle"
+        state.last429WarnAt = now
     }
 }
 

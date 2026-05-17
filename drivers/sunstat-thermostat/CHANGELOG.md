@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.1.6 — 2026-05-17 — pseudo-boost implementation
+- Implemented `setBoost(minutes)` and `cancelBoost()` as driver-managed temporary setpoint overrides — the Watts Home API does not expose a native boost endpoint, so boost is achieved by raising the heat setpoint by a configurable delta and auto-cancelling via `runIn`
+- Added `boostActive` and `boostUntil` attributes for dashboard visibility
+- Added child preferences: `boostDelta` (default +5°F/+3°C), `boostDefaultMinutes` (default 30), `boostSuppressSchedule` (default true)
+- Hub-restart recovery: if `state.boostActive` is true after reboot, the expiry timer is re-armed from `state.boostUntil`; if the boost has already overrun the reboot, it is cancelled on the next poll
+- Cypher confirmed via the homebridge-tekmar-wifi reference implementation (commit 553ce89) that no `Boost`, `BoostMinutes`, or `BoostUntil` field exists in the Watts API surface — the `Target.Hold` field is GET-only and reserved for future investigation
+
+## 0.1.5 — 2026-05-17 — SunStat reliability improvements
+- Migrated polling fan-out from synchronous `httpGet` to `asynchttpGet` callbacks to prevent hub-thread stalls on slow Watts API responses
+- Proactive token refresh timer is now rescheduled on `initialize()` when a usable token is already in state — prevents silent token expiry after hub reboot
+- Added basic HTTP 429 (rate-limit) handling: warn-and-skip instead of immediate retry storm
+- Synced child driver version to parent (both now v0.1.5); no behavior change in child
+
 ## [0.1.4] — 2026-05-16
 
 - **Fix API envelope unwrapping.** All Watts API responses wrap the payload in `{errorNumber, errorMessage, body: <payload>}`. `parseResponseBody()` was returning the whole envelope instead of `.body`, causing `defaultLocationId` to always be null and discoverDevices to always fail with "Could not resolve a Watts location ID". Fixed `parseResponseBody()` to unwrap the envelope; added `parseResponseList()` helper for List-body endpoints (GET /Location, GET /Location/{id}/Devices).
