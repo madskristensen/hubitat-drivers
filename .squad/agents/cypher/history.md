@@ -152,3 +152,30 @@ Full report at: `.squad/decisions/inbox/cypher-gemstone-color-ct-both-broken.md`
 ## 2026-05-17T15:41:32Z — Cross-driver improvement scan (4-way)
 
 Participated in 4-way driver improvement scan with Trinity, Tank, Switch. Findings consolidated by Squad. Orchestration log: .squad/orchestration-log/2026-05-17T15-41-32-cypher.md.
+
+---
+
+## 2026-05-17T15:50:06-07:00 — Watts Home Boost API Research
+
+**Full report:** `.squad/decisions/inbox/cypher-sunstat-boost-endpoint.md`
+
+**Verdict:** No boost endpoint exists in the Watts Home API.
+
+## Learnings
+
+### 2026-05-17T15:50:06-07:00 — Watts Home API: No Boost Surface
+
+**Confirmed from `homebridge-tekmar-wifi` reference (tree SHA `553ce89`, 2026-01-18):**
+
+- The Watts Home API (`https://home.watts.com/api/`) exposes **no boost, hold-timer, or BoostUntil field** anywhere. Exhaustively verified across all 8 source/doc files in the reference implementation.
+- `PATCH /Device/{id}` accepts only: `{ Settings: { Mode?, Heat?, Cool?, Fan?, Schedule? } }`. No `Boost`, `BoostMinutes`, `BoostUntil`, or `Hold` write field exists.
+- `Target.Hold` appears in GET responses (always `0` in all examples) but is **never written** by the reference implementation. Its semantics are unknown. May be firmware-reserved. Not a usable boost API surface today.
+- `SchedEnable` (`"On"` / `"Off"`) can be toggled off during a pseudo-boost to prevent schedule from overwriting the elevated setpoint.
+- **Correct implementation path:** Driver-managed pseudo-boost — raise `Target.Heat` by a configurable delta, set `SchedEnable = "Off"`, store pre-boost setpoint in `state`, schedule `runIn` for auto-cancel, and re-check on each poll in case Hubitat restarts mid-boost.
+- Rate limit for the API is **undocumented**; 2 PATCHes per boost start/cancel is well within any reasonable budget.
+
+
+## Team updates
+
+- 2026-05-17: Participated in top-3 driver improvements batch — sunstat v0.1.6, touchstone v0.1.6, gemstone v0.4.9.
+

@@ -1,33 +1,34 @@
-# ARCHIVE SUMMARY — Switch Project History
+# Switch — QA / Testing Engineer (Archive)
 
-## Key Contributions (2026-05-16 onwards)
+Earlier work on Touchstone v0.1.0-v0.1.4, Bosch Home Connect scoping, real-device validation workflow. Summarized entries kept in main history.md.
 
-**Gemstone Lights Test Planning:**
-- Test plan structure designed for LAN driver validation
-- Learnings captured: optimistic updates + polling reconciliation pattern standard for LAN drivers
-- Test plan designed but blocked pending Tank's HTTP endpoint wiring (awaits Cypher's protocol discovery)
-- Test plan reusable for future LAN light drivers (brightness, effects, polling reconciliation)
+## Key Learnings (Pre-2026-05-17T15:50)
 
-**SunStat Connect Plus Test Coverage:**
-- **v0.1.0 smoke tests:** 25 core test cases (discovery, modes, setpoints, tile integration)
-- **v0.1.2 feature coverage:** Added 23 test cases (#26–#48) covering energy, schedule, hold, outdoor sensor, precision rounding, bounds clamping
-- **v0.1.3 setRefreshToken:** Added 13 test cases (#59–#71) covering command args, input validation, token persistence, hub reboot recovery, code review checks
-- **v0.1.4 envelope + URL encoding:** Added 16 test cases (#72–#87) covering API envelope unwrap, URL path encoding, discovery logging, end-to-end scenarios
+1. **Tuya Local Device Testing Patterns:**
+   - Single TCP connection hard constraint (close Smart Life app pre-test)
+   - Smoke vs full validation distinction
+   - Known device quirks (temp revert on power cycle, remote-only features)
+   - Recovery testing critical (network drop, power loss, app collision)
+   - Enum validation prevents silent failures
+   - Polling observation (20–30s typical interval)
+   - DP schema vs empirical mapping distinction
 
-### Learnings Recorded
+2. **Touchstone Real-Device Test Plan (v0.1.0):**
+   - 20-test suite covering pre-flight, happy path, state sync, recovery, edge cases, stability
+   - Smoke test: 30 min (tests 1–9)
+   - Full validation: 3+ hours
+   - Enum label confirmation responsibility (after Mads runs tests, report observed values to Link)
 
-- Hubitat drivers tested manually (no Jest/RSpec), via device UI + IDE Logs
-- Parent-to-child attribute mirroring has acceptable lag (one poll cycle)
-- Optimistic state + reconciliation is standard pattern for all network drivers
-- Cloud drivers must expect transient failures; test offline graceful degradation
-- Token command args bypass ~1024-char preference limit
-- Energy attributes require temporal state tracking; tolerances ±0.5 kWh
-- Bounds clamping + warning logs is safe validation pattern
+3. **v0.1.4 Release Awareness:**
+   - Power-on defaults apply ~1.5s after on()
+   - Heater never auto-toggles (intentional design)
+   - Sandbox reflection errors fixed (v0.1.3 intermediate state, never released)
 
-## Status
+4. **TESTING.md Pattern for Tuya/LAN Drivers (2026-05-17T15:50):**
+   - Pre-flight checklist mandatory (close app, ping device, verify key, confirm power)
+   - Section order: Pre-flight → Lifecycle → Happy-path → Power-on defaults → Settings edge cases → Recovery → Discovery → Parsed-not-commanded DPs → Validation summary
+   - Explicit [verify on hardware] flags for unconfirmed behavior
+   - Tank coordination flags for concurrent changes
+   - 33 tests across 9 areas reusable pattern
 
-- Gemstone: Test plan structurally ready; blocked pending protocol discovery
-- SunStat: 71 total test cases across 4 versions; v0.1.4 tests ready for Mads' device verification
-
----
-*Archive created 2026-05-17 — full history > 15KB; moved to history-archive.md*
+See main history.md for current session work.

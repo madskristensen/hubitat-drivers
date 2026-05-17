@@ -744,3 +744,57 @@ The release workflow parser in `.github/workflows/release.yml` only matches chan
 
 Removed the `Thh:mm:ss-07:00` portion from the v0.1.5, v0.1.4, v0.1.3, and v0.1.1 changelog dates while leaving version numbers, descriptions, and code unchanged.
 
+
+---
+
+## 2026-05-17T15:50:06Z — Cypher — Watts Home boost API research
+
+**Status:** Adopted
+
+**By:** Cypher (Research Agent)
+
+### What was researched
+
+No native boost API endpoint exists in the Watts Home thermostat API. Exhaustive reverse-engineering against homebridge-tekmar-wifi (main @ 553ce89) confirmed:
+- docs/API_ENDPOINTS.md — zero boost mentions
+- src/types/api.ts — no Boost, BoostActive, BoostUntil, BoostExpiration, or hold-timer field
+- src/lib/api/client.ts — no setBoost or cancelBoost method
+- src/platformAccessory.ts — no boost characteristic
+
+### Recommendation
+
+Implement pseudo-boost in driver state via temporary setpoint override:
+- setBoost(minutes): Save current heat setpoint, raise to preset or +5°F, schedule expiry
+- cancelBoost() / oostExpired(): Restore saved setpoint, clear state flags
+- Mitigate Hubitat restart loss by checking oostUntil on each poll cycle
+
+### Why this decision
+
+Tank needs the contract to implement setBoost / cancelBoost on SunStat v0.1.6. No API contract exists; driver-managed boost is the only viable path.
+
+---
+
+## 2026-05-17T15:50:06Z — Tank — SunStat async HTTP migration pattern (v0.1.5+)
+
+**Status:** Adopted
+
+**By:** Tank (Driver Developer)
+
+### What changed
+
+Pattern: synchronous token refresh + async fan-out + 401 single-retry.
+
+1. **Token refresh stays synchronous** (efreshTokensSync()) — called before fan-out begins so all async calls share one valid token.
+2. **Polling and patching use synchttpGet / synchttpPatch** — each passes data map with childDni and etry401: true.
+3. **401 recovery uses 	hrottled401Refresh()** — rate-limits refreshes to one per 60 seconds, calls efreshTokensSync(), re-issues with etry401: false.
+4. **429 rate-limit handling** — log warn once per 60 seconds, no retry.
+5. **Discovery stays synchronous** — user-triggered, sequential, not on hot path.
+
+### Why
+
+Hub thread stall eliminated during polling cycles. Backward-compatible (removed etry401 parameter default, but children never passed it explicitly).
+
+### Caveats
+
+- Callback closures cannot capture live objects; use childDni string + getChildDevice() at callback time.
+- httpMethod() shim retained for setAwayModeInternal.

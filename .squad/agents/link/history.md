@@ -171,3 +171,9 @@ v0.1.3 → v0.1.4 fast-follow safety patch pattern:
 ---
 
 See history-archive.md for detailed earlier sessions (Gemstone, SunStat, Bosch README scoping).
+
+
+## Team updates
+
+- 2026-05-17: Participated in top-3 driver improvements batch — sunstat v0.1.6, touchstone v0.1.6, gemstone v0.4.9.
+

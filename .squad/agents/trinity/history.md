@@ -128,3 +128,9 @@ See .squad/decisions.md (merged entries) and .squad/orchestration-log/2026-05-17
 ## 2026-05-17T15:41:32Z — Cross-driver improvement scan (4-way)
 
 Participated in 4-way driver improvement scan with Tank, Cypher, Switch. Findings consolidated by Squad. Orchestration log: `.squad/orchestration-log/2026-05-17T15-41-32-trinity.md`.**
+
+
+## Team updates
+
+- 2026-05-17: Participated in top-3 driver improvements batch — sunstat v0.1.6, touchstone v0.1.6, gemstone v0.4.9.
+
