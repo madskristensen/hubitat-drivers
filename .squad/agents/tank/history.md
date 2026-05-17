@@ -186,3 +186,5 @@ Hubitat's async HTTP framework puts the error response body in `response.getErro
 `pattern.referencePatternId = null` sends `"referencePatternId": null` in the JSON body. If the API schema requires the field to be either a valid UUID or absent, null causes schema validation failure. Fix: `pattern.remove("referencePatternId")` omits the field entirely. Rule: for optional relationship fields, prefer omission over explicit null when the API's validation rules are unknown.
 
 - v0.4.3 — flattened multi-line 400 bodies for single-line log display so Gemstone server tracebacks are visible. Hubitat log.error truncates at first newline — known platform pattern.
+
+v0.4.4 — Gemstone API uses unsigned uint32 for ARGB. Force long arithmetic with 0xFFL literals; return Long from color generators. Groovy signed-int gotcha: (0xFF << 24) is negative; (0xFFL << 24) is positive. Confirmed by full Python traceback (v0.4.3 diagnostic): 'Color value should be in range [0, 4294967295]'.

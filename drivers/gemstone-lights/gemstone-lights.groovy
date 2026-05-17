@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.3
+ * Version: 0.4.4
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.4 — 2026-05-16 — Force ARGB color values to positive Long (Gemstone API requires unsigned 32-bit range [0, 4294967295]; v0.4.2's (0xFF << 24) produced a negative signed-int which failed validation). hubitatHueSatToArgb and kelvinToArgb now use long arithmetic with 0xFFL literals and return Long. gemstoneArgbToHubitatColor accepts Number/Long for symmetry.
  *   0.4.3 — 2026-05-16 — Diagnostic: flatten multi-line 400 response bodies (Python tracebacks from Gemstone API) to single-line log output so the full error is visible. Bumped truncate length to 2000.
  *   0.4.2 — 2026-05-16 — Diagnostic + payload fixes for setColor 400 / setColorTemperature silent-fail. Surface response.getErrorData() in 400 handler; log non-gated info when request is queued (no token or no deviceId); ARGB color generation now includes 0xFF alpha byte; setColor/setColorTemperature no longer override pattern.id (preserves real UUID from refresh); referencePatternId omitted entirely instead of sent as null.
  *   0.4.1 — 2026-05-16 — Added playEffectByName(String) as a separate (non-overloaded) command so WebCoRE's action picker exposes a String input. Internally delegates to setEffect(String).
@@ -29,7 +30,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.3"
+@Field static final String DRIVER_VERSION = "0.4.4"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -49,7 +50,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.3"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.4"
 
 metadata {
     definition(
@@ -1898,7 +1899,7 @@ private String colorTemperatureName(Integer colorTemperature) {
     return "Daylight"
 }
 
-private Integer kelvinToArgb(Integer colorTemperature) {
+private Long kelvinToArgb(Integer colorTemperature) {
     Double temperature = clampColorTemperature(colorTemperature) / 100.0d
     Double red
     Double green
@@ -1927,7 +1928,7 @@ private Integer kelvinToArgb(Integer colorTemperature) {
     Integer redValue = clampByte(Math.round(red) as Integer)
     Integer greenValue = clampByte(Math.round(green) as Integer)
     Integer blueValue = clampByte(Math.round(blue) as Integer)
-    return (0xFF << 24) | ((redValue & 0xFF) << 16) | ((greenValue & 0xFF) << 8) | (blueValue & 0xFF)
+    return ((0xFFL << 24) | ((redValue & 0xFFL) << 16) | ((greenValue & 0xFFL) << 8) | (blueValue & 0xFFL)) as Long
 }
 
 private Integer clampByte(Integer value) {
@@ -1953,7 +1954,7 @@ private Integer wireBrightnessToLevel(Integer brightness) {
     return Math.round((clamped * 100.0d) / 255.0d) as Integer
 }
 
-private Integer hubitatHueSatToArgb(Integer huePercent, Integer saturationPercent) {
+private Long hubitatHueSatToArgb(Integer huePercent, Integer saturationPercent) {
     float h = (clampPercent(huePercent) / 100.0f) * 360.0f
     float s = clampPercent(saturationPercent) / 100.0f
     float c = s
@@ -1982,13 +1983,14 @@ private Integer hubitatHueSatToArgb(Integer huePercent, Integer saturationPercen
     Integer g = Math.round((gf + m) * 255.0f) as Integer
     Integer b = Math.round((bf + m) * 255.0f) as Integer
 
-    return (0xFF << 24) | ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF)
+    return ((0xFFL << 24) | ((r & 0xFFL) << 16) | ((g & 0xFFL) << 8) | (b & 0xFFL)) as Long
 }
 
-private Map gemstoneArgbToHubitatColor(Integer argb) {
-    float r = ((argb >> 16) & 0xFF) / 255.0f
-    float g = ((argb >> 8) & 0xFF) / 255.0f
-    float b = (argb & 0xFF) / 255.0f
+private Map gemstoneArgbToHubitatColor(Number argb) {
+    long argbLong = (argb instanceof Long) ? (long) argb : ((argb ?: 0) as Long)
+    float r = ((argbLong >> 16) & 0xFFL) / 255.0f
+    float g = ((argbLong >> 8)  & 0xFFL) / 255.0f
+    float b = (argbLong         & 0xFFL) / 255.0f
 
     float max = [r, g, b].max() as float
     float min = [r, g, b].min() as float
