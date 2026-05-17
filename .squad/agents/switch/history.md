@@ -107,6 +107,31 @@ Empirical DP mapping for LED effects (101–108) requires real device validation
 
 ---
 
+## 2026-05-17T18:55:16Z — Touchstone v0.1.2 Shipped (Scribe Cross-Agent Sync)
+
+**Topic:** touchstone-driver-shipped
+
+v0.1.1 scaffold + v1.1 generalization + v1.2 import fix have shipped. Switch's 19-test plan remains locked for v0.1.0 (Sideline Elite only).
+
+**v0.1.1 → v0.1.2 outcomes:**
+- Driver renamed to `"Touchstone / Tuya Fireplace"` (Option C: Tuya-generic positioning)
+- Device Profile preference added (Sideline Elite / Generic Tuya / Custom)
+- Discovery commands: `discoverDPs()`, `captureBaseline()`, `captureDiff()`, `setRawDP()`
+- Critical import fix: removed forbidden `java.util.zip.CRC32` + `java.io.ByteArrayOutputStream`
+- README shipped with discovery workflow walkthrough
+
+**Impact on Switch's test plan:**
+- v0.1.0 smoke tests (tests 1–9) remain as-is; Mads can run them against Sideline Elite
+- v1.1 testing will add Device Profile selection tests + Generic/Custom DP override validation (queued for next batch)
+- Enum label confirmation: After Mads runs smoke tests, report actual observed enum values so Link can document authoritative mapping in README
+
+**Next for Switch:**
+- Mads runs smoke pass (30 min) against Sideline Elite on 192.168.1.38
+- If all 9 happy-path tests pass, driver is ready for community beta
+- v1.1 test expansion queued for next batch (requires second test device or simulator if Generic/Custom validation needed)
+
+---
+
 ## 2026-05-17T11:07:22Z — Touchstone Sideline Elite Real-Device Test Plan (Switch)
 
 **Topic:** touchstone-real-device-test-plan

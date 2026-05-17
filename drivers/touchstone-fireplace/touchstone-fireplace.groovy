@@ -1,26 +1,40 @@
 /**
- * Touchstone Fireplace
+ * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.0
+ * Version: 0.1.2
  * License: MIT
  *
- * Local LAN control for the Touchstone Sideline Elite fireplace via Tuya Local
- * protocol v3.3 (AES-128-ECB over raw TCP port 6668).
+ * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
+ * fireplaces — via Tuya Local protocol v3.3 (AES-128-ECB over raw TCP port 6668).
+ *
+ * For non-Sideline-Elite devices:
+ *   1. Set Device Profile = "Custom" (or "Generic Tuya Fireplace" for basic control)
+ *   2. Run discoverDPs() to see your device's DP layout
+ *   3. Run captureBaseline(), press a remote button, run captureDiff() to map each control
+ *   4. Set the DP numbers in Preferences
+ *   See README for the full walkthrough.
  *
  * Changelog:
+ *   0.1.2 — 2026-05-17 — Replaced blocked CRC32 import with pure-Groovy implementation (Hubitat import allowlist)
+ *   0.1.1 — 2026-05-17T11:24:33-07:00 — Generalized device profiles, in-driver DP discovery, and auditable raw DP writes
  *   0.1.0 — 2026-05-17 — Initial Tuya Local scaffold for power, heat level, flame/log lighting, temperature polling, raw DP surfacing, and socket retry/backoff
  */
 
 import groovy.transform.Field
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
-import java.io.ByteArrayOutputStream
-import java.util.zip.CRC32
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.0"
-@Field static final String USER_AGENT = "Hubitat Touchstone Fireplace/0.1.0"
+@Field static final String DRIVER_VERSION = "0.1.2"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.2"
+@Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
+    long c = n as long
+    8.times {
+        c = ((c & 1L) != 0L) ? (0xEDB88320L ^ (c >>> 1)) : (c >>> 1)
+    }
+    c & 0xFFFFFFFFL
+} as long[]
 @Field static final Integer TUYA_PORT = 6668
 @Field static final String TUYA_VERSION = "3.3"
 @Field static final Long TUYA_PREFIX = 0x000055AAL
@@ -37,13 +51,20 @@ import javax.crypto.spec.SecretKeySpec
 @Field static final Integer POWER_REFRESH_DELAY_SECONDS = 8
 @Field static final Long POWER_TRANSITION_SETTLE_MILLIS = 10000L
 @Field static final List<Integer> RETRY_DELAYS_SECONDS = [5, 15, 30]
-@Field static final List<String> KNOWN_STATUS_DPS = ["1", "2", "3", "5", "13", "14", "15", "101", "102", "103", "104", "105", "107", "108"]
+@Field static final String PROFILE_SIDELINE = "Sideline Elite (tested)"
+@Field static final String PROFILE_GENERIC = "Generic Tuya Fireplace"
+@Field static final String PROFILE_CUSTOM = "Custom"
+@Field static final List<String> BASE_STATUS_DPS = ["1", "2", "3", "5", "13", "14", "15"]
+@Field static final List<String> SIDELINE_DISCOVERY_DPS = ["101", "102", "103", "104", "105", "107", "108"]
+@Field static final Map<String, Integer> SIDELINE_PROFILE_DPS = [power: 1, tempSetC: 2, heatLevel: 5, tempSetF: 14, flameColor: 101, flameBrightness: 102, logColor: 104]
+@Field static final Map<String, String> CUSTOM_DP_SETTING_NAMES = [power: "powerDp", flameColor: "flameColorDp", flameBrightness: "flameBrightnessDp", logColor: "logColorDp", heatLevel: "heatLevelDp", tempSetF: "tempSetFDp", tempSetC: "tempSetCDp"]
 @Field static final Map<String, String> HEAT_LEVEL_TO_DP = ["off": "0", "low": "1", "high": "2"]
 @Field static final Map<String, String> DP_TO_HEAT_LEVEL = ["0": "off", "1": "low", "2": "high"]
 
 metadata {
+    // Keep namespace stable for existing imports/upgrades.
     definition(
-        name:         "Touchstone Fireplace",
+        name:         "Touchstone / Tuya Fireplace",
         namespace:    "mads",
         author:       "Mads Kristensen",
         importUrl:    "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/touchstone-fireplace.groovy",
@@ -59,15 +80,20 @@ metadata {
         // TODO (Switch): verify these community-derived raw Tuya enum ranges on real Touchstone hardware.
         // Keep the command inputs as raw strings for now so the driver does not pretend to know labels it has not verified.
         command "setFlameColor", [[name: "color*", type: "ENUM", constraints: ["1", "2", "3", "4", "5", "6"],
-            description: "Raw Tuya enum string for DP 101 (placeholder palette; use setDpRaw() for experiments)."]]
+            description: "Raw Tuya enum string for the mapped flame-color DP (Sideline default 101; use setRawDP() for experiments)."]]
         command "setFlameBrightness", [[name: "level*", type: "ENUM", constraints: ["1", "2", "3", "4", "5"],
-            description: "Raw Tuya enum string for DP 102 (placeholder range; verify on hardware)."]]
+            description: "Raw Tuya enum string for the mapped flame-brightness DP (Sideline default 102)."]]
         command "setLogColor", [[name: "color*", type: "ENUM", constraints: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
-            description: "Raw Tuya enum string for DP 104 (placeholder palette; verify on hardware)."]]
+            description: "Raw Tuya enum string for the mapped log-color DP (Sideline default 104)."]]
         command "setHeatLevel", [[name: "level*", type: "ENUM", constraints: ["off", "low", "high"]]]
-        command "setHeatingSetpoint", [[name: "temperature*", type: "NUMBER", description: "Writes DP 14 (F) or DP 2 (C) based on the preferred unit preference."]]
-        command "setDpRaw", [[name: "dpId*", type: "NUMBER"], [name: "value*", type: "STRING",
+        command "setHeatingSetpoint", [[name: "temperature*", type: "NUMBER", description: "Writes the mapped Fahrenheit or Celsius setpoint DP based on the preferred unit preference."]]
+        command "setRawDP", [[name: "dpId*", type: "NUMBER"], [name: "value*", type: "STRING",
             description: "Advanced: raw DP write. true/false become booleans; whole numbers become integers; everything else is sent as a string."]]
+        command "setDpRaw", [[name: "dpId*", type: "NUMBER"], [name: "value*", type: "STRING",
+            description: "Legacy alias for setRawDP()."]]
+        command "discoverDPs"
+        command "captureBaseline"
+        command "captureDiff"
 
         attribute "power",            "enum",   ["on", "off"]
         attribute "flameColor",       "string"
@@ -99,6 +125,22 @@ metadata {
               description: "Never hardcode this. Enter the Tuya local key for this device.",
               required: true
 
+        input name: "deviceProfile", type: "enum",
+              title: "Device Profile",
+              options: ["Sideline Elite (tested)", "Generic Tuya Fireplace", "Custom"],
+              defaultValue: "Sideline Elite (tested)",
+              required: true
+
+        if (settings?.deviceProfile == "Custom") {
+            input name: "flameColorDp", type: "number", title: "Flame Color DP", defaultValue: 101
+            input name: "flameBrightnessDp", type: "number", title: "Flame Brightness DP", defaultValue: 102
+            input name: "logColorDp", type: "number", title: "Log Color DP", defaultValue: 104
+            input name: "heatLevelDp", type: "number", title: "Heat Level DP", defaultValue: 5
+            input name: "tempSetFDp", type: "number", title: "Temperature Setpoint (°F) DP", defaultValue: 14
+            input name: "tempSetCDp", type: "number", title: "Temperature Setpoint (°C) DP", defaultValue: 2
+            input name: "powerDp", type: "number", title: "Power DP", defaultValue: 1
+        }
+
         input name: "setpointUnit", type: "enum",
               title: "Preferred setpoint / temperature unit",
               options: ["F": "Fahrenheit (recommended for US Touchstone units)", "C": "Celsius"],
@@ -126,7 +168,8 @@ metadata {
 // ---------------------------------------------------------------------------
 
 def installed() {
-    log.info "Touchstone Fireplace v${DRIVER_VERSION} installed"
+    log.info "Touchstone / Tuya Fireplace v${DRIVER_VERSION} installed"
+    device.updateSetting("deviceProfile", [value: PROFILE_SIDELINE, type: "enum"])
     device.updateSetting("pollInterval", [value: "60", type: "enum"])
     device.updateSetting("setpointUnit", [value: "F", type: "enum"])
     device.updateSetting("logEnable", [value: false, type: "bool"])
@@ -135,7 +178,7 @@ def installed() {
 }
 
 def updated() {
-    log.info "Touchstone Fireplace v${DRIVER_VERSION} preferences updated"
+    log.info "Touchstone / Tuya Fireplace v${DRIVER_VERSION} preferences updated"
     unschedule()
     state.pendingRequests = []
     state.inFlight = null
@@ -145,6 +188,7 @@ def updated() {
     state.statusCommand = null
     state.seqNo = 0L
     state.manualSocketCloseAt = null
+    state.remove("dpBaseline")
 
     if (settings.logEnable) {
         runIn(1800, "logsOff")
@@ -180,7 +224,7 @@ def uninstalled() {
 
 def logsOff() {
     device.updateSetting("logEnable", [value: "false", type: "bool"])
-    log.info "Touchstone Fireplace: debug logging auto-disabled after 30 minutes"
+    log.info "Touchstone / Tuya Fireplace: debug logging auto-disabled after 30 minutes"
 }
 
 // ---------------------------------------------------------------------------
@@ -188,31 +232,55 @@ def logsOff() {
 // ---------------------------------------------------------------------------
 
 def on() {
-    infoLog "${device.displayName} switch → on"
-    markPowerTransitionIfChanged(true)
-    applySwitchState(true, "digital")
-    sendDpWrite("1", true, "power on", POWER_REFRESH_DELAY_SECONDS)
-}
-
-def off() {
-    infoLog "${device.displayName} switch → off"
-    markPowerTransitionIfChanged(false)
-    applySwitchState(false, "digital")
-    sendDpWrite("1", false, "power off", POWER_REFRESH_DELAY_SECONDS)
-}
-
-def refresh() {
-    if (!preferencesReady()) {
-        log.warn "[Touchstone] refresh() skipped — configure device IP, device ID, and local key first"
-        updateOnlineStatus("unknown", "Configuration incomplete")
+    Integer powerDp = dpFor("power")
+    if (powerDp == null) {
+        log.warn "[Touchstone] Power is not mapped for profile '${activeDeviceProfile()}'"
         return
     }
 
-    enqueueRequest(getStatusCommand(), buildStatusPayloadJson(), "refresh")
+    infoLog "${device.displayName} switch → on"
+    markPowerTransitionIfChanged(true)
+    applySwitchState(true, "digital")
+    sendDpWrite(powerDp.toString(), true, "power on", POWER_REFRESH_DELAY_SECONDS)
+}
+
+def off() {
+    Integer powerDp = dpFor("power")
+    if (powerDp == null) {
+        log.warn "[Touchstone] Power is not mapped for profile '${activeDeviceProfile()}'"
+        return
+    }
+
+    infoLog "${device.displayName} switch → off"
+    markPowerTransitionIfChanged(false)
+    applySwitchState(false, "digital")
+    sendDpWrite(powerDp.toString(), false, "power off", POWER_REFRESH_DELAY_SECONDS)
+}
+
+def refresh() {
+    requestStatus("refresh")
 }
 
 def poll() {
     refresh()
+}
+
+def discoverDPs() {
+    requestStatus("discover DPs", "discover", discoveryStatusDpIds())
+}
+
+def captureBaseline() {
+    requestStatus("capture baseline", "baseline", discoveryStatusDpIds())
+}
+
+def captureDiff() {
+    Map baseline = state.dpBaseline instanceof Map ? (Map) state.dpBaseline : [:]
+    if (!baseline) {
+        log.warn "[Touchstone] captureDiff() requires a baseline first — run captureBaseline()"
+        return
+    }
+
+    requestStatus("capture diff", "diff", discoveryStatusDpIds())
 }
 
 def setFlameColor(String color) {
@@ -222,9 +290,14 @@ def setFlameColor(String color) {
         return
     }
 
+    Integer flameColorDp = mappedCommandDp("flameColor", "Flame color")
+    if (flameColorDp == null) {
+        return
+    }
+
     infoLog "${device.displayName} flame color → ${raw}"
     emitAttribute("flameColor", raw, "${device.displayName} flame color set to ${raw}", "digital")
-    sendDpWrite("101", raw, "flame color", WRITE_REFRESH_DELAY_SECONDS)
+    sendDpWrite(flameColorDp.toString(), raw, "flame color", WRITE_REFRESH_DELAY_SECONDS)
 }
 
 def setFlameBrightness(String level) {
@@ -234,9 +307,14 @@ def setFlameBrightness(String level) {
         return
     }
 
+    Integer flameBrightnessDp = mappedCommandDp("flameBrightness", "Flame brightness")
+    if (flameBrightnessDp == null) {
+        return
+    }
+
     infoLog "${device.displayName} flame brightness → ${raw}"
     emitAttribute("flameBrightness", raw, "${device.displayName} flame brightness set to ${raw}", "digital")
-    sendDpWrite("102", raw, "flame brightness", WRITE_REFRESH_DELAY_SECONDS)
+    sendDpWrite(flameBrightnessDp.toString(), raw, "flame brightness", WRITE_REFRESH_DELAY_SECONDS)
 }
 
 def setLogColor(String color) {
@@ -246,9 +324,14 @@ def setLogColor(String color) {
         return
     }
 
+    Integer logColorDp = mappedCommandDp("logColor", "Log color")
+    if (logColorDp == null) {
+        return
+    }
+
     infoLog "${device.displayName} log color → ${raw}"
     emitAttribute("logColor", raw, "${device.displayName} log color set to ${raw}", "digital")
-    sendDpWrite("104", raw, "log color", WRITE_REFRESH_DELAY_SECONDS)
+    sendDpWrite(logColorDp.toString(), raw, "log color", WRITE_REFRESH_DELAY_SECONDS)
 }
 
 def setHeatLevel(String level) {
@@ -258,9 +341,14 @@ def setHeatLevel(String level) {
         return
     }
 
+    Integer heatLevelDp = mappedCommandDp("heatLevel", "Heat level")
+    if (heatLevelDp == null) {
+        return
+    }
+
     infoLog "${device.displayName} heat level → ${normalized}"
     emitAttribute("heatLevel", normalized, "${device.displayName} heat level set to ${normalized}", "digital")
-    sendDpWrite("5", HEAT_LEVEL_TO_DP[normalized], "heat level", WRITE_REFRESH_DELAY_SECONDS)
+    sendDpWrite(heatLevelDp.toString(), HEAT_LEVEL_TO_DP[normalized], "heat level", WRITE_REFRESH_DELAY_SECONDS)
 }
 
 def setHeatingSetpoint(temp) {
@@ -271,23 +359,30 @@ def setHeatingSetpoint(temp) {
     }
 
     String unit = preferredTempUnit()
-    Integer clamped = clampSetpoint(requested, unit)
-    String dpId = unit == "F" ? "14" : "2"
+    Integer targetDp = mappedCommandDp(unit == "F" ? "tempSetF" : "tempSetC", "Heating setpoint")
+    if (targetDp == null) {
+        return
+    }
 
+    Integer clamped = clampSetpoint(requested, unit)
     infoLog "${device.displayName} heating setpoint → ${clamped}°${unit}"
     emitAttribute("heatingSetpoint", clamped, "${device.displayName} heating setpoint set to ${clamped}°${unit}", "digital", unit)
-    sendDpWrite(dpId, clamped, "heating setpoint", WRITE_REFRESH_DELAY_SECONDS)
+    sendDpWrite(targetDp.toString(), clamped, "heating setpoint", WRITE_REFRESH_DELAY_SECONDS)
 }
 
 def setDpRaw(dpId, String value) {
+    setRawDP(safeStr(dpId), value)
+}
+
+def setRawDP(dpId, String value) {
     Integer targetDp = safeInt(dpId, null)
     if (targetDp == null || targetDp <= 0) {
-        log.warn "[Touchstone] setDpRaw: dpId must be a positive integer"
+        log.warn "[Touchstone] setRawDP: dpId must be a positive integer"
         return
     }
 
     Object coerced = coerceRawValue(value)
-    infoLog "${device.displayName} raw DP ${targetDp} → ${coerced}"
+    log.info "[Touchstone][RawDP] Writing DP ${targetDp}=${formatDpValue(coerced)} (${dpValueType(coerced)})"
     sendDpWrite(targetDp.toString(), coerced, "raw DP ${targetDp}", WRITE_REFRESH_DELAY_SECONDS)
 }
 
@@ -355,9 +450,27 @@ def parse(String message) {
     }
 }
 
-private void enqueueRequest(Integer cmd, String payloadJson, String reason) {
+private void requestStatus(String reason, String captureMode = null, List<String> requestedDps = null) {
+    if (!preferencesReady()) {
+        log.warn "[Touchstone] ${reason} skipped — configure device IP, device ID, and local key first"
+        updateOnlineStatus("unknown", "Configuration incomplete")
+        return
+    }
+
+    List<String> effectiveDps = uniqueDpIds(requestedDps ?: statusDpIds())
+    enqueueRequest(getStatusCommand(), buildStatusPayloadJson(effectiveDps), reason, captureMode, effectiveDps)
+}
+
+private void enqueueRequest(Integer cmd, String payloadJson, String reason, String captureMode = null, List<String> requestedDps = null) {
     List<Map> queue = pendingRequestQueue()
-    queue << [cmd: cmd, payloadJson: payloadJson, reason: reason]
+    Map request = [cmd: cmd, payloadJson: payloadJson, reason: reason]
+    if (captureMode) {
+        request.captureMode = captureMode
+    }
+    if (requestedDps) {
+        request.requestedDps = requestedDps.collect { safeStr(it) }
+    }
+    queue << request
     state.pendingRequests = queue
     debugLog "Queued Tuya cmd ${cmd} for ${reason}; pending=${queue.size()}"
     pumpQueue()
@@ -475,7 +588,14 @@ private List<Map> pendingRequestQueue() {
     List<Map> queue = []
     state.pendingRequests.each { entry ->
         if (entry instanceof Map) {
-            queue << [cmd: entry.cmd, payloadJson: entry.payloadJson, reason: entry.reason]
+            Map copy = [cmd: entry.cmd, payloadJson: entry.payloadJson, reason: entry.reason]
+            if (entry.captureMode) {
+                copy.captureMode = safeStr(entry.captureMode)
+            }
+            if (entry.requestedDps instanceof List) {
+                copy.requestedDps = entry.requestedDps.collect { safeStr(it) }
+            }
+            queue << copy
         }
     }
     return queue
@@ -544,19 +664,16 @@ def delayedRefresh() {
 private byte[] buildTuyaFrame(Integer cmd, String payloadJson) {
     byte[] payloadBytes = payloadJson.getBytes("UTF-8")
     byte[] encryptedPayload = encryptTuyaPayload(cmd, payloadBytes)
+    byte[] withoutCrc = concatBytes(
+        intToBytes(TUYA_PREFIX),
+        intToBytes(nextSeqNo()),
+        intToBytes(cmd as Long),
+        intToBytes((encryptedPayload.length + 8) as Long),
+        encryptedPayload
+    )
 
-    ByteArrayOutputStream buffer = new ByteArrayOutputStream()
-    buffer.write(intToBytes(TUYA_PREFIX))
-    buffer.write(intToBytes(nextSeqNo()))
-    buffer.write(intToBytes(cmd as Long))
-    buffer.write(intToBytes((encryptedPayload.length + 8) as Long))
-    buffer.write(encryptedPayload)
-
-    byte[] withoutCrc = buffer.toByteArray()
     Long crc = crc32(withoutCrc)
-    buffer.write(intToBytes(crc))
-    buffer.write(intToBytes(TUYA_SUFFIX))
-    return buffer.toByteArray()
+    return concatBytes(withoutCrc, intToBytes(crc), intToBytes(TUYA_SUFFIX))
 }
 
 private byte[] encryptTuyaPayload(Integer cmd, byte[] payloadBytes) {
@@ -565,10 +682,7 @@ private byte[] encryptTuyaPayload(Integer cmd, byte[] payloadBytes) {
         return encrypted
     }
 
-    ByteArrayOutputStream buffer = new ByteArrayOutputStream()
-    buffer.write(protocol33HeaderBytes())
-    buffer.write(encrypted)
-    return buffer.toByteArray()
+    return concatBytes(protocol33HeaderBytes(), encrypted)
 }
 
 private String decryptTuyaPayload(byte[] payloadBytes) {
@@ -609,10 +723,32 @@ private byte[] aesDecrypt(byte[] ciphertext, byte[] keyBytes) {
     return cipher.doFinal(ciphertext)
 }
 
-private Long crc32(byte[] data) {
-    CRC32 crc = new CRC32()
-    crc.update(data)
-    return crc.getValue() & 0xFFFFFFFFL
+private long crc32(byte[] data) {
+    long crc = 0xFFFFFFFFL
+    for (byte b : data) {
+        crc = CRC32_TABLE[((int) (crc ^ (b & 0xFF))) & 0xFF] ^ (crc >>> 8)
+    }
+    return (crc ^ 0xFFFFFFFFL) & 0xFFFFFFFFL
+}
+
+private byte[] concatBytes(byte[]... arrays) {
+    Integer totalLength = 0
+    for (byte[] part : arrays) {
+        totalLength += part?.length ?: 0
+    }
+
+    byte[] combined = new byte[totalLength]
+    Integer offset = 0
+    for (byte[] part : arrays) {
+        if (!part) {
+            continue
+        }
+        for (Integer i = 0; i < part.length; i++) {
+            combined[offset + i] = part[i]
+        }
+        offset += part.length
+    }
+    return combined
 }
 
 private byte[] intToBytes(Long value) {
@@ -652,12 +788,12 @@ private Boolean startsWithBytes(byte[] data, byte[] prefix) {
 }
 
 private byte[] protocol33HeaderBytes() {
-    ByteArrayOutputStream buffer = new ByteArrayOutputStream()
-    buffer.write(TUYA_VERSION.getBytes("UTF-8"))
-    for (Integer i = 0; i < 12; i++) {
-        buffer.write(0x00)
+    byte[] versionBytes = TUYA_VERSION.getBytes("UTF-8")
+    byte[] header = new byte[versionBytes.length + 12]
+    for (Integer i = 0; i < versionBytes.length; i++) {
+        header[i] = versionBytes[i]
     }
-    return buffer.toByteArray()
+    return header
 }
 
 private Boolean commandNeedsVersionHeader(Integer cmd) {
@@ -681,11 +817,53 @@ private Integer getStatusCommand() {
     return initial
 }
 
-private String buildStatusPayloadJson() {
+private List<String> statusDpIds() {
+    List<String> ids = []
+    ids.addAll(BASE_STATUS_DPS)
+    if (activeDeviceProfile() == PROFILE_SIDELINE) {
+        ids.addAll(SIDELINE_DISCOVERY_DPS)
+    }
+    ["power", "heatLevel", "tempSetF", "tempSetC", "flameColor", "flameBrightness", "logColor"].each { String role ->
+        String dpId = dpIdFor(role)
+        if (dpId) {
+            ids << dpId
+        }
+    }
+    return uniqueDpIds(ids)
+}
+
+private List<String> discoveryStatusDpIds() {
+    List<String> ids = []
+    (1..30).each { Integer dp ->
+        ids << dp.toString()
+    }
+    (101..120).each { Integer dp ->
+        ids << dp.toString()
+    }
+    ids.addAll(statusDpIds())
+    return uniqueDpIds(ids)
+}
+
+private List<String> uniqueDpIds(List<String> dpIds) {
+    List<String> ordered = []
+    (dpIds ?: []).each { Object raw ->
+        Integer normalized = safeInt(raw, null)
+        if (normalized != null && normalized > 0) {
+            String dpId = normalized.toString()
+            if (!(dpId in ordered)) {
+                ordered << dpId
+            }
+        }
+    }
+    return ordered
+}
+
+private String buildStatusPayloadJson(List<String> requestedDps = null) {
     Integer cmd = getStatusCommand()
+    List<String> dpsToRequest = uniqueDpIds(requestedDps ?: statusDpIds())
     if (cmd == TUYA_CMD_CONTROL_NEW) {
         Map dps = [:]
-        KNOWN_STATUS_DPS.each { String dp -> dps[dp] = null }
+        dpsToRequest.each { String dp -> dps[dp] = null }
         return JsonOutput.toJson([
             devId: deviceIdValue(),
             uid:   deviceIdValue(),
@@ -771,6 +949,7 @@ private Boolean processFrame(String frameHex) {
         return true
     }
 
+    Map inFlightRequest = state.inFlight instanceof Map ? (Map) state.inFlight : [:]
     String decoded = decryptTuyaPayload(payload)?.trim()
     if (!decoded) {
         return true
@@ -782,7 +961,8 @@ private Boolean processFrame(String frameHex) {
         if (getStatusCommand() != TUYA_CMD_CONTROL_NEW) {
             log.warn "[Touchstone] Standard DP_QUERY was rejected; switching to device22 status mode"
             state.statusCommand = TUYA_CMD_CONTROL_NEW
-            enqueueRequest(TUYA_CMD_CONTROL_NEW, buildStatusPayloadJson(), "device22 retry")
+            List<String> requestedDps = inFlightRequest.requestedDps instanceof List ? (List<String>) inFlightRequest.requestedDps : statusDpIds()
+            enqueueRequest(TUYA_CMD_CONTROL_NEW, buildStatusPayloadJson(requestedDps), "device22 retry", safeStr(inFlightRequest.captureMode), requestedDps)
         }
         return true
     }
@@ -796,6 +976,7 @@ private Boolean processFrame(String frameHex) {
         Map<String, Object> dps = normaliseDps(response.dps as Map)
         state.lastDps = dps
         applyDps(dps)
+        handleStatusCapture(safeStr(inFlightRequest.captureMode), dps)
     }
 
     return true
@@ -817,42 +998,49 @@ private void applyDps(Map<String, Object> dps) {
         }
     }
 
-    if (dps.containsKey("1")) {
-        Boolean isOn = asBoolean(dps["1"])
+    String powerDpId = dpIdFor("power")
+    if (powerDpId && dps.containsKey(powerDpId)) {
+        Boolean isOn = asBoolean(dps[powerDpId])
         if (isOn != null) {
             markPowerTransitionIfChanged(isOn)
             applySwitchState(isOn, "physical")
         }
     }
 
-    if (dps.containsKey("5")) {
-        String heatLevel = DP_TO_HEAT_LEVEL[safeStr(dps["5"])] ?: safeStr(dps["5"])
+    String heatLevelDpId = dpIdFor("heatLevel")
+    if (heatLevelDpId && dps.containsKey(heatLevelDpId)) {
+        String heatLevel = DP_TO_HEAT_LEVEL[safeStr(dps[heatLevelDpId])] ?: safeStr(dps[heatLevelDpId])
         emitAttribute("heatLevel", heatLevel, "${device.displayName} heat level is ${heatLevel}")
     }
 
-    if (dps.containsKey("101")) {
-        emitAttribute("flameColor", safeStr(dps["101"]), "${device.displayName} flame color is ${dps["101"]}")
+    String flameColorDpId = dpIdFor("flameColor")
+    if (flameColorDpId && dps.containsKey(flameColorDpId)) {
+        emitAttribute("flameColor", safeStr(dps[flameColorDpId]), "${device.displayName} flame color is ${dps[flameColorDpId]}")
     }
 
-    if (dps.containsKey("102")) {
-        emitAttribute("flameBrightness", safeStr(dps["102"]), "${device.displayName} flame brightness is ${dps["102"]}")
+    String flameBrightnessDpId = dpIdFor("flameBrightness")
+    if (flameBrightnessDpId && dps.containsKey(flameBrightnessDpId)) {
+        emitAttribute("flameBrightness", safeStr(dps[flameBrightnessDpId]), "${device.displayName} flame brightness is ${dps[flameBrightnessDpId]}")
     }
 
-    if (dps.containsKey("104")) {
-        emitAttribute("logColor", safeStr(dps["104"]), "${device.displayName} log color is ${dps["104"]}")
+    String logColorDpId = dpIdFor("logColor")
+    if (logColorDpId && dps.containsKey(logColorDpId)) {
+        emitAttribute("logColor", safeStr(dps[logColorDpId]), "${device.displayName} log color is ${dps[logColorDpId]}")
     }
 
-    if (dps.containsKey("103")) {
-        emitAttribute("dp103", safeStr(dps["103"]), "${device.displayName} DP 103 is ${dps["103"]}")
-    }
-    if (dps.containsKey("105")) {
-        emitAttribute("dp105", safeStr(dps["105"]), "${device.displayName} DP 105 is ${dps["105"]}")
-    }
-    if (dps.containsKey("107")) {
-        emitAttribute("dp107", safeStr(dps["107"]), "${device.displayName} DP 107 is ${dps["107"]}")
-    }
-    if (dps.containsKey("108")) {
-        emitAttribute("dp108", safeStr(dps["108"]), "${device.displayName} DP 108 is ${dps["108"]}")
+    if (activeDeviceProfile() == PROFILE_SIDELINE) {
+        if (dps.containsKey("103")) {
+            emitAttribute("dp103", safeStr(dps["103"]), "${device.displayName} DP 103 is ${dps["103"]}")
+        }
+        if (dps.containsKey("105")) {
+            emitAttribute("dp105", safeStr(dps["105"]), "${device.displayName} DP 105 is ${dps["105"]}")
+        }
+        if (dps.containsKey("107")) {
+            emitAttribute("dp107", safeStr(dps["107"]), "${device.displayName} DP 107 is ${dps["107"]}")
+        }
+        if (dps.containsKey("108")) {
+            emitAttribute("dp108", safeStr(dps["108"]), "${device.displayName} DP 108 is ${dps["108"]}")
+        }
     }
 
     Integer setpoint = extractHeatingSetpoint(dps)
@@ -873,16 +1061,19 @@ private void applyDps(Map<String, Object> dps) {
 private Integer extractHeatingSetpoint(Map<String, Object> dps) {
     String sourceUnit = sourceTempUnit(dps)
     String preferred = preferredTempUnit()
+    String tempSetFDpId = dpIdFor("tempSetF")
+    String tempSetCDpId = dpIdFor("tempSetC")
     Integer raw = null
 
-    if (sourceUnit == "F") {
-        raw = safeInt(dps["14"], null)
-    } else if (sourceUnit == "C") {
-        raw = safeInt(dps["2"], null)
+    if (sourceUnit == "F" && tempSetFDpId) {
+        raw = safeInt(dps[tempSetFDpId], null)
+    } else if (sourceUnit == "C" && tempSetCDpId) {
+        raw = safeInt(dps[tempSetCDpId], null)
     }
 
     if (raw == null) {
-        raw = safeInt(preferred == "F" ? dps["14"] : dps["2"], null)
+        String preferredDpId = preferred == "F" ? tempSetFDpId : tempSetCDpId
+        raw = preferredDpId ? safeInt(dps[preferredDpId], null) : null
         sourceUnit = preferred
     }
 
@@ -924,7 +1115,8 @@ private Boolean shouldSuppressSetpointUpdate(Map<String, Object> dps) {
     if ((now() - safeLong(state.lastPowerTransitionAt, 0L)) > POWER_TRANSITION_SETTLE_MILLIS) {
         return false
     }
-    return sourceTempUnit(dps) == "F" || dps.containsKey("14")
+    String tempSetFDpId = dpIdFor("tempSetF")
+    return sourceTempUnit(dps) == "F" && (tempSetFDpId && dps.containsKey(tempSetFDpId))
 }
 
 private String sourceTempUnit(Map<String, Object> dps) {
@@ -933,6 +1125,78 @@ private String sourceTempUnit(Map<String, Object> dps) {
         return reported
     }
     return preferredTempUnit()
+}
+
+// ---------------------------------------------------------------------------
+// Discovery helpers
+// ---------------------------------------------------------------------------
+
+private void handleStatusCapture(String captureMode, Map<String, Object> dps) {
+    switch (captureMode) {
+        case "discover":
+            log.info "[Touchstone][DiscoverDPs] ${formatDpDump(dps)}"
+            break
+        case "baseline":
+            state.dpBaseline = snapshotDps(dps)
+            log.info "[Touchstone][Baseline captured] ${dps.size()} DPs recorded. Now press your remote button, then call captureDiff()."
+            break
+        case "diff":
+            Map<String, Object> baseline = normaliseDps(state.dpBaseline instanceof Map ? (Map) state.dpBaseline : [:])
+            List<String> changes = diffDpEntries(baseline, dps)
+            if (changes) {
+                log.info "[Touchstone][DiscoverDPs DIFF] ${changes.join('  ')}"
+            } else {
+                log.info "[Touchstone][DiscoverDPs DIFF] No DP changes detected."
+            }
+            state.remove("dpBaseline")
+            break
+    }
+}
+
+private Map<String, Object> snapshotDps(Map<String, Object> dps) {
+    return new JsonSlurper().parseText(JsonOutput.toJson(dps)) as Map<String, Object>
+}
+
+private String formatDpDump(Map<String, Object> dps) {
+    List<String> parts = sortedDpKeys(dps).collect { String dpId ->
+        Object value = dps[dpId]
+        "DP ${dpId}=${formatDpValue(value)} (${dpValueType(value)})"
+    }
+    return parts ? parts.join(", ") : "No DPs returned"
+}
+
+private List<String> diffDpEntries(Map<String, Object> before, Map<String, Object> after) {
+    List<String> changes = []
+    sortedDpKeys(before, after).each { String dpId ->
+        if (!sameDpValue(before[dpId], after[dpId])) {
+            changes << "DP ${dpId}: ${formatDpValue(before[dpId])} → ${formatDpValue(after[dpId])}"
+        }
+    }
+    return changes
+}
+
+private List<String> sortedDpKeys(Map primary, Map secondary = [:]) {
+    List<String> keys = []
+    (primary ?: [:]).keySet().each { keys << safeStr(it) }
+    (secondary ?: [:]).keySet().each { keys << safeStr(it) }
+    keys = keys.findAll { it != null }.unique()
+    keys.sort { String left, String right ->
+        Integer leftInt = safeInt(left, Integer.MAX_VALUE)
+        Integer rightInt = safeInt(right, Integer.MAX_VALUE)
+        leftInt == rightInt ? (left <=> right) : (leftInt <=> rightInt)
+    }
+    return keys
+}
+
+private Boolean sameDpValue(Object left, Object right) {
+    return dpComparableValue(left) == dpComparableValue(right)
+}
+
+private String dpComparableValue(Object value) {
+    if (value instanceof Map || value instanceof List) {
+        return "${dpValueType(value)}:${JsonOutput.toJson(value)}"
+    }
+    return "${dpValueType(value)}:${safeStr(value)}"
 }
 
 // ---------------------------------------------------------------------------
@@ -1004,6 +1268,50 @@ private String localKeyValue() {
 
 private byte[] localKeyBytes() {
     return localKeyValue().getBytes("UTF-8")
+}
+
+private String activeDeviceProfile() {
+    String configured = safeStr(settings.deviceProfile)?.trim()
+    return configured in [PROFILE_SIDELINE, PROFILE_GENERIC, PROFILE_CUSTOM] ? configured : PROFILE_SIDELINE
+}
+
+private Integer dpFor(String role) {
+    switch (activeDeviceProfile()) {
+        case PROFILE_GENERIC:
+            return role in ["power", "tempSetC", "heatLevel", "tempSetF"] ? SIDELINE_PROFILE_DPS[role] : null
+        case PROFILE_CUSTOM:
+            String settingName = CUSTOM_DP_SETTING_NAMES[role]
+            if (!settingName) {
+                return SIDELINE_PROFILE_DPS[role]
+            }
+            Integer configured = safeInt(settings[settingName], null)
+            return configured != null && configured > 0 ? configured : SIDELINE_PROFILE_DPS[role]
+        default:
+            return SIDELINE_PROFILE_DPS[role]
+    }
+}
+
+private String dpIdFor(String role) {
+    Integer dpId = dpFor(role)
+    return dpId == null ? null : dpId.toString()
+}
+
+private Integer mappedCommandDp(String role, String label) {
+    Integer targetDp = dpFor(role)
+    if (targetDp != null) {
+        return targetDp
+    }
+    if (activeDeviceProfile() == PROFILE_GENERIC) {
+        log.warn "[Touchstone] ${label} not mapped for Generic profile — use Custom or setRawDP()"
+        return null
+    }
+    String settingName = CUSTOM_DP_SETTING_NAMES[role]
+    if (settingName) {
+        log.warn "[Touchstone] ${label} DP is not configured — set ${settingName} in Preferences or use setRawDP()"
+    } else {
+        log.warn "[Touchstone] ${label} is not mapped"
+    }
+    return null
 }
 
 private String preferredTempUnit() {
@@ -1102,6 +1410,45 @@ private Long safeLong(Object value, Long fallback = null) {
 
 private String safeStr(Object value) {
     return value == null ? null : value.toString()
+}
+
+private String formatDpValue(Object value) {
+    if (value == null) {
+        return "null"
+    }
+    if (value instanceof String || value instanceof GString) {
+        String escaped = value.toString().replace("\\", "\\\\").replace("\"", "\\\"")
+        return "\"${escaped}\""
+    }
+    if (value instanceof Map || value instanceof List) {
+        return JsonOutput.toJson(value)
+    }
+    return safeStr(value)
+}
+
+private String dpValueType(Object value) {
+    if (value == null) {
+        return "null"
+    }
+    if (value instanceof Boolean) {
+        return "bool"
+    }
+    if (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long || value instanceof BigInteger) {
+        return "int"
+    }
+    if (value instanceof Float || value instanceof Double || value instanceof BigDecimal) {
+        return "decimal"
+    }
+    if (value instanceof String || value instanceof GString) {
+        return "string"
+    }
+    if (value instanceof List) {
+        return "list"
+    }
+    if (value instanceof Map) {
+        return "map"
+    }
+    return value.getClass().getSimpleName().toLowerCase()
 }
 
 private Boolean asBoolean(Object value) {

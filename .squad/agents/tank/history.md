@@ -13,7 +13,8 @@
 Key learnings:
 - **API Envelope Pattern:** Unwrap {errorNumber, errorMessage, body: <payload>} in dedicated helpers
 - **WebCoRE Overload Shadowing:** Distinct command names avoid metadata conflicts (playEffectByName)
-- **Error Capture:** Use esponse.getErrorData() for 4xx responses; never skip diagnostic logs
+- **Error Capture:** Use
+esponse.getErrorData() for 4xx responses; never skip diagnostic logs
 - **ARGB & Byte Order:** Gemstone uses ABGR (not ARGB); include 0xFF alpha; force long arithmetic with 0xFFL
 - **State Hygiene:** Favorites-only caching; non-favorites are on-demand; transient state lives in locals
 - **Log Discipline:** Count bounds even at debug; every sendEvent needs descriptionText
@@ -80,7 +81,7 @@ Trinity's initial architecture proposed `ColorControl` for flame color. Cypher's
 
 **Architecture:** Single Groovy driver, Tuya Local (LAN) over rawSocket + AES-128-ECB. Effort: Medium (2–3 sessions).
 
-**ACTION FOR TANK:** 
+**ACTION FOR TANK:**
 1. Read `.squad/decisions.md` for full DP map and capability context
 2. Scaffold driver with corrected named-command approach (NOT ColorControl)
 3. Borrow Tuya Local protocol layer from kkossev/Hubitat (rawSocket + AES framing)
@@ -141,8 +142,8 @@ Coordinator walked Mads through end-to-end Tuya IoT setup and local device verif
 
 ### Effort Estimate (Revised)
 
-**Session 1:** Driver scaffold + heater DPs (1, 2, 3, 5, 13–15) + capability wiring  
-**Session 2:** LED DP mapping (101–108) via Tuya app interaction; Switch validates on real device; driver refinement  
+**Session 1:** Driver scaffold + heater DPs (1, 2, 3, 5, 13–15) + capability wiring
+**Session 2:** LED DP mapping (101–108) via Tuya app interaction; Switch validates on real device; driver refinement
 **Session 3 (conditional):** Protocol version v3.4/v3.5 support if discovered in Session 2
 
 Pattern learned: Empirical DP mapping via app interaction is faster than reverse-engineering firmware; rely on user doing the interactive exploration before driver development. This validates assumptions early.
@@ -153,14 +154,15 @@ Pattern learned: Empirical DP mapping via app interaction is faster than reverse
 
 1. **Parent/Child OAuth:**
    - Parent holds state.accessToken, state.refreshToken, state.tokenExpiresAt
-   - getValidToken() guard before every HTTP call; refresh if 
+   - getValidToken() guard before every HTTP call; refresh if
 ow > expiresAt - 300
    - Children store cloud device IDs as DataValue("cloudDeviceId")
    - isComponent: false on child creation
    - Parent calls child.parseDeviceState(body) after each poll
 
 2. **API Response Handling:**
-   - Check esponse.getErrorData() for 4xx responses (getData() is null)
+   - Check
+esponse.getErrorData() for 4xx responses (getData() is null)
    - Unwrap envelopes in dedicated helpers (parseResponseBody(), parseResponseList())
    - Log diagnostic details (body type, sample data) on every response path
    - Never replace server-assigned IDs with synthetic strings
@@ -180,6 +182,43 @@ ow > expiresAt - 300
 ---
 
 **For detailed learning notes, see archived history.**
+
+---
+
+## 2026-05-17T18:55:16Z — Touchstone v0.1.2 Shipped (Scribe Cross-Agent Sync)
+
+**Topic:** touchstone-driver-shipped
+
+v0.1.1 (Sideline Elite scaffold) + v1.1 (Device Profile generalization) + v1.2 (critical CRC32 import fix) are now landed in main. Both Tank sessions are complete.
+
+**v1.1 outcomes:**
+- Driver renamed to `"Touchstone / Tuya Fireplace"` (Mads' Option C decision)
+- Device Profile preference with three modes (Sideline Elite / Generic Tuya / Custom)
+- Discovery commands: `discoverDPs()`, `captureBaseline()`, `captureDiff()`, `setRawDP()`
+- All commands routed through `dpFor(role)` to respect active profile
+
+**v1.2 outcomes:**
+- Removed forbidden `java.util.zip.CRC32` import; replaced with pure-Groovy table-driven CRC32
+- Removed `java.io.ByteArrayOutputStream`; replaced with `concatBytes()` helper
+- Verified all remaining imports (groovy.transform.Field, groovy.json, javax.crypto) are Hubitat-safe
+- **This was the blocking install error for v0.1.1; unblocked by v1.2**
+
+**Manifest sync (by Scribe):**
+- packageManifest.json version bumped from 0.1.1 → 0.1.2 to match driver code
+
+**Documentation (by Link):**
+- README (18.2 KB): device support, setup, discovery workflow, troubleshooting
+- HPM manifest ready for publish
+
+**Test plan (by Switch, v0.1.0):**
+- 19 tests locked for Sideline Elite; smoke pass = 30 min for Mads
+- v1.1 testing will expand to Generic/Custom profiles (queued for next batch)
+
+**Next phase:**
+- Mads: Re-test Hubitat install to confirm import allowlist fix works
+- Mads: Review documentation; iterate if clarifications needed
+- Switch: Expanded validation for Generic/Custom profiles (queued)
+- Community: Users with other Touchstone models can now use Custom profile + discovery commands
 
 ---
 
@@ -220,11 +259,24 @@ See `.squad/decisions.md` section "2026-05-17: 2026 Tuya Portal-Free Key Extract
 - Touchstone's single-client Tuya socket is worth treating as scarce: queue requests, close the socket quickly after idle, and back off at 5s / 15s / 30s when another client (for example Smart Life) appears to be holding the TCP slot.
 - DP 14 (°F setpoint) can lie immediately after a power transition. Keep optimistic setpoint state locally and schedule a delayed refresh instead of trusting the first post-power status frame.
 
+### 2026-05-17T11:24:33-07:00 — Touchstone v1.1 generalization
+
+- The safest cross-model Tuya pattern is **Tested + Generic + Custom**: keep the verified Sideline Elite DP map as the default, keep the Generic profile conservative (power / heat / setpoint only), and expose explicit DP-number overrides for Custom instead of guessing LED mappings.
+- Hubitat driver preferences can gate Custom-only inputs with `if (settings?.deviceProfile == "Custom")`, but those extra fields only appear after the user saves/reopens the device page. The command/path logic still needs hardcoded fallbacks so an untouched Custom profile resolves to usable defaults.
+- Let `dpFor(role)` resolve the active DP at command time and parse time, not once during `updated()`. That way a profile change or edited DP number takes effect on the very next command/status frame without rebooting the driver.
+- In-driver discovery is practical on Hubitat: `discoverDPs()` logs the typed DP dump, `captureBaseline()` + `captureDiff()` isolate remote-button changes, and `setRawDP()` gives users an auditable way to experiment without leaving the device page.
+
+### 2026-05-17T11:31:31-07:00 — Hubitat import allowlist / CRC32
+
+- Hubitat driver imports are stricter than plain Groovy: `java.util.zip.CRC32` is rejected at install time, and simple `java.io.*` helpers are risky enough that a tiny pure-Groovy byte concatenation helper is the safer default.
+- For reusable lookup tables in Hubitat drivers, `@Field static final` is the right pattern; it builds once at driver load instead of rebuilding inside every parse/send call.
+- Tuya v3.3 packet checksums use canonical CRC-32/ISO-HDLC parameters: init `0xFFFFFFFF`, reversed polynomial `0xEDB88320`, reflected byte updates, xor-out `0xFFFFFFFF`, and the resulting unsigned 32-bit value still gets written big-endian into the `55AA` frame.
+
 ---
 
 ### 2026-05-17T18:24:33Z — Cross-Agent Decision Sync (Scribe)
 
-**Topic:** touchstone-driver-shipped  
+**Topic:** touchstone-driver-shipped
 
 **Naming Decision (Option C):** Driver display name is `"Touchstone / Tuya Fireplace"` (not just "Touchstone Sideline Elite"), and file path remains `drivers/touchstone-fireplace/touchstone-fireplace.groovy`. This threads the needle: community discoverability + honest scope + room for other Tuya WiFi fireplaces. (Decision merged from coordinator directive; Scribe appended for Tank + Switch awareness.)
 

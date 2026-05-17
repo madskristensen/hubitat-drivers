@@ -1,5 +1,186 @@
 # Decisions
 
+## 2026-05-17T11:31:31-07:00 — Touchstone v0.1.2 CRC32 allowlist fix
+
+**By:** Tank
+**Requested by:** Mads
+
+### What was forbidden
+
+- Hubitat rejected the driver at install time because `import java.util.zip.CRC32` is not on the platform import allowlist.
+- During the audit, `java.io.ByteArrayOutputStream` was also treated as risky for the same sandbox reason and removed proactively.
+
+### Replacement strategy
+
+- Replaced the `CRC32` object usage with a pure-Groovy table-driven `crc32(byte[] data)` helper using canonical CRC-32/ISO-HDLC settings:
+  - reversed polynomial `0xEDB88320L`
+  - init `0xFFFFFFFFL`
+  - reflected byte updates
+  - xor-out `0xFFFFFFFFL`
+- Hoisted the 256-entry lookup table into `@Field static final long[] CRC32_TABLE` so the table is built once at driver load, not per frame.
+- Replaced `ByteArrayOutputStream` frame assembly with a small `concatBytes()` helper plus manual byte-array composition so the Tuya `55AA ... CRC32 ... AA55` framing stays identical without depending on extra `java.io` classes.
+
+### Import audit result
+
+Remaining explicit imports in `drivers/touchstone-fireplace/touchstone-fireplace.groovy` after the fix:
+- `groovy.transform.Field`
+- `groovy.json.JsonOutput`
+- `groovy.json.JsonSlurper`
+- `javax.crypto.Cipher`
+- `javax.crypto.spec.SecretKeySpec`
+
+No `java.util.zip.*`, `java.nio.*`, or `java.io.*` imports remain in the driver file.
+
+---
+
+## 2026-05-17T11:24:33-07:00 — Touchstone v1.1 generalization pass
+
+**By:** Tank
+**Requested by:** Mads
+
+### What changed
+
+- Kept the file path stable at `drivers/touchstone-fireplace/touchstone-fireplace.groovy`, but renamed the driver metadata display name to **`Touchstone / Tuya Fireplace`** and updated the top comment header to frame the driver as **Touchstone Sideline Elite — and other Tuya WiFi fireplaces**.
+- Added **Device Profile** handling with three modes:
+  - `Sideline Elite (tested)` → hardcoded verified DP map
+  - `Generic Tuya Fireplace` → only power, heat level, and temperature setpoint commands are wired
+  - `Custom` → per-role DP number preferences for power / flame color / flame brightness / log color / heat level / temp setpoint F / temp setpoint C
+- Added on-device discovery tooling: `discoverDPs()`, `captureBaseline()`, `captureDiff()`, and `setRawDP()` (while keeping `setDpRaw()` as a legacy alias).
+- Moved DP resolution behind `dpFor(role)` so command paths and status parsing both honor the active profile at runtime.
+
+### Tradeoffs
+
+- The **Generic** profile intentionally refuses to guess flame/log/light mappings. Those commands warn and point users to **Custom** or `setRawDP()` instead of pretending the Sideline LED map is universal.
+- `Custom` preferences are gated in the driver UI with `if (settings?.deviceProfile == "Custom")`, which means Hubitat only reveals those fields after the user saves/reopens the device page. The runtime helper still falls back to sane defaults so a fresh Custom selection does not explode.
+- Discovery queries request a broader DP range for mapping work so non-Sideline devices can be explored from Hubitat without tinytuya/Python, while the existing socket/AES/retry/polling behavior stays intact.
+
+### Still TODO
+
+- **Link:** README walkthrough for the new discovery workflow and for other Touchstone / Tuya fireplace models.
+- **Switch:** Expanded validation cases for `Generic Tuya Fireplace` and `Custom`, including `setRawDP()` audit logging and baseline/diff mapping flow.
+
+---
+
+# Touchstone Driver Documentation — Link Shipped
+
+**Date:** 2026-05-17T18:31:31Z  
+**Agent:** Link (DevRel / Documentation)  
+**Status:** Complete  
+
+## What Shipped
+
+**Two new files:**
+
+1. **`drivers/touchstone-fireplace/README.md`** — Per-driver user guide (18.2 KB)
+2. **`drivers/touchstone-fireplace/packageManifest.json`** — HPM manifest
+
+**Scope covered:**
+- Device support matrix (Sideline Elite verified; other Touchstone lines + generic Tuya via Custom profile)
+- Complete capability + command reference
+- Installation (HPM stub + manual)
+- Setup walkthrough: two-path Tuya local key extraction (Method A: iot.tuya.com + tinytuya durable; Method B: Home Assistant with caveat)
+- Preferences reference with all driver settings
+- **Key section:** "Got a Different Touchstone? Map It Yourself" — in-driver discovery walkthrough using `discoverDPs()`, `captureBaseline()`, `captureDiff()`, `setRawDP()` — no Python needed
+- Known quirks: single TCP slot, temperature setpoint persistence, separate °F/°C tracking, remote buttons without Tuya equivalents
+- Troubleshooting (offline, CRC32 import error, wrong DP responses, power transition window)
+- Credits + changelog
+
+## Key Decisions Documented
+
+### Tuya Local Key Extraction Path
+
+Per `.squad/decisions.md` (Cypher's 2026-05-17 Tuya Portal-Free audit), documented both extraction methods:
+
+- **Method A (Primary):** iot.tuya.com portal + tinytuya Python wizard — durable, Tuya controls the outcome, no fragility from hardcoded client_ids
+- **Method B (Alternative):** Home Assistant tuya-local cloud-auth — fast (~5 min) but relies on Tuya's HA-issued hardcoded client_id that Tuya can revoke unilaterally
+
+README presents A as the "durable" standard; B as the "Home Assistant shortcut with caveat." Both link to `.squad/skills/tuya-cloud-key-extraction/SKILL.md` for deep-dives.
+
+**Rationale:** Mads is already on Path A (iot.tuya.com); this documentation reflects that reality + arms users to make informed trade-off choices.
+
+### Device Generalization Strategy
+
+Per `.squad/decisions.md` (Mads's 2026-05-17 user directive):
+
+- **Device Profile preference:** Selects Sideline Elite (default, verified), Generic Tuya Fireplace (basic control), or Custom (user-mapped)
+- **Custom profile reveals DP number overrides** in preferences — users don't need to edit driver code
+- **In-driver discovery commands** (`discoverDPs()`, `captureBaseline()`, `captureDiff()`, `setRawDP()`) enable users to self-discover DP maps for unknown models
+- **Dedicated README section** ("Got a Different Touchstone? Map It Yourself") walks users through the discovery workflow step-by-step
+- **Encourages community contribution:** "Open a GitHub Issue with your DP map so we can ship it as a preset"
+
+**Rationale:** Eliminates the barrier for users with other Touchstone models; community can accumulate presets over time.
+
+### HPM Manifest Format
+
+Matched `.squad/decisions.md` DP map and existing repo patterns (Gemstone, SunStat):
+
+- Single-driver manifest (SunStat is parent/child; Touchstone is single-file)
+- UUID: 63f16ca9-2413-418f-a5d5-b798c23452ee (fresh UUID per driver)
+- Version field in both root + drivers array (matches Gemstone convention)
+- minimumHEVersion: "2.3.0" (matches other drivers)
+- dateReleased: "2026-05-17" (per CURRENT_DATETIME directive)
+
+## Conventions Adopted
+
+From **gemstone-lights/README.md** + **sunstat-thermostat/README.md:**
+
+| Pattern | Source | Adoption |
+|---|---|---|
+| **Header tagline + status line** | Both | ✓ Used; status line includes v0.1.1 + beta note |
+| **Supported Devices table** | SunStat | ✓ Adapted for model/profile variants |
+| **Capabilities + Attributes table** | Gemstone | ✓ Two-table layout (std + custom) |
+| **Command Reference (table)** | Gemstone | ✓ Used; four sub-tables (Standard, Heating, Lighting, Discovery) |
+| **Installation: HPM + Manual** | Both | ✓ Mirrored structure; HPM includes stub for future publish |
+| **Setup with auth bootstrap walkthrough** | SunStat | ✓ Adapted for Tuya local key extraction (two methods, step-by-step) |
+| **Preferences Reference table** | Gemstone | ✓ All prefs + defaults + one-line descriptions |
+| **Known Quirks section** | Gemstone | ✓ Used; 4 quirks relevant to Tuya + Sideline Elite behavior |
+| **Troubleshooting by symptom** | Gemstone | ✓ 4 troubleshooting paths (offline, CRC32, wrong DP, transition window) |
+| **Credits + Changelog** | Gemstone | ✓ Credits: Tuya v3.3 sources, tinytuya, empirical mapping |
+| **GitHub + Community links** | Gemstone | ✓ Footer sign-off |
+
+## Open / Future
+
+1. **HPM publish:** Not in scope; Mads will do separately
+2. **Screenshots:** Optional nice-to-have (Hubitat device page preferences); not blocking
+3. **Hubitat driver README skill:** `.squad/skills/hubitat-driver-readme/SKILL.md` — would standardize this pattern for future drivers; not yet created; consider as future documentation infrastructure task
+
+## Quality Checklist
+
+- ✅ All driver capabilities + commands documented
+- ✅ All preferences with defaults + descriptions
+- ✅ Installation (HPM stub + manual) clear
+- ✅ Tuya local key extraction walkthrough (two methods, step-by-step)
+- ✅ Device generalization via Discovery section (step-by-step; no Python needed)
+- ✅ Known quirks from Switch's test plan + real-device findings
+- ✅ Troubleshooting covers common user errors
+- ✅ Credits acknowledge sources + contributors
+- ✅ Changelog documents v0.1.1 + v0.1.0
+- ✅ Conventions matched to repo style (Gemstone + SunStat)
+
+---
+
+**Next:** Mads reviews docs. If approved, docs are ready for HPM publish (separate step). If clarifications needed, Link can iterate in v0.1.2 README revision.
+
+---
+
+### 2026-05-17T11:31:31-07:00: Bug report from Mads (Touchstone driver install)
+
+**By:** Mads (via Copilot)
+
+**What:** Hubitat rejected the v1 Touchstone driver on install with: `Importing [java.util.zip.CRC32] is not allowed`
+
+**Why captured:** Hubitat enforces a strict import allowlist (it's part of the platform security model — drivers run in a sandboxed Groovy environment). `java.util.zip.CRC32` is NOT on the allowlist, so any Tuya v3.3 driver using it for packet checksums will fail at compile time.
+
+**Fix required (Tank v1.2):**
+1. Remove `import java.util.zip.CRC32`
+2. Implement CRC32 in pure Groovy as a private helper method. Use the standard polynomial 0xEDB88320 + 256-entry precomputed lookup table. Reference: kkossev's Tuya drivers (kkossev/Hubitat - their tuya local protocol files).
+3. Verify every other `import` in the file against Hubitat's allowlist. Likely-safe imports for this driver: `hubitat.helper.HexUtils`, `groovy.transform.Field`, `javax.crypto.Cipher`, `javax.crypto.spec.SecretKeySpec`. If anything else (e.g., from `java.util.zip.*`, `java.nio.*` beyond ByteBuffer, `java.security.*` beyond MessageDigest) is in the file, swap it for an allowed equivalent or implement in-Groovy.
+4. Smoke test by re-attempting install after the fix.
+
+**Skill update:** Add "Hubitat import allowlist" to `.squad/skills/tuya-local-groovy/SKILL.md` — this gotcha applies to every Hubitat driver, not just Tuya.
+
+---
+
 ## 2026-05-17T11:24:33-07:00: User-directed naming decision — "Option C"
 
 **By:** Mads (via Copilot — coordinator decided per autopilot after surfacing trade-offs)
