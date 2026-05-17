@@ -386,7 +386,265 @@ Content-Type: application/x-www-form-urlencoded
 
 grant_type=refresh_token&refresh_token={refresh_token}&client_secret={client_secret}
 ```
-\n\n---\n\n## trinity-bosch-home-connect-architecture\n\n---
+
+### Superseded by
+
+⚠️ **IMPORTANT:** The feasibility verdict above ("user must self-register an app") was challenged in a subsequent user directive. See entries below:
+- `copilot-directive-2026-05-17T093200-no-developer-app` — user request to eliminate developer portal step
+- `cypher-bosch-consumer-auth-options` — Cypher's findings on consumer-auth alternatives
+
+**Summary:** No viable consumer-auth-only path exists within Hubitat's sandbox constraints. The developer portal registration remains unavoidable for the official API path. The alternative (external hcpy bridge + MQTT) is more complex than the 5-minute registration step.
+
+---
+
+## copilot-directive-2026-05-17T093200-no-developer-app
+
+---
+author: Mads Kristensen (via Copilot)
+date: 2026-05-17T09:32:00-07:00
+status: review-in-progress
+subject: User directive — eliminate developer portal step for Bosch Home Connect driver
+---
+
+### 2026-05-17T09:32:00-07:00: User Directive
+
+**By:** Mads Kristensen (via Copilot)
+
+**What:** For the Bosch Home Connect driver, do NOT require the user to register a developer application at developer.home-connect.com. The driver must sign in the same way the consumer Home Connect mobile app does — username/password (or SingleKey ID), no client_id/client_secret entered by the user.
+
+**Why:** UX hurdle. Registering a developer app is a non-trivial onboarding step that defeats the value of an install-and-go Hubitat driver. The fridge already trusts the mobile app's auth — the driver should mirror that.
+
+**Impact:** Supersedes the "register a free app at developer.home-connect.com" step in cypher-bosch-home-connect-feasibility.md. Requires reverse-engineered/community-known consumer auth path (e.g., hcpy, home-assistant community work). May change the API surface (Bosch's consumer back-end may speak WebSocket/MQTT instead of REST + SSE).
+
+---
+
+## cypher-bosch-consumer-auth-options
+
+---
+author: Cypher
+date: 2026-05-17T09:45:09-07:00
+status: ready-for-review
+subject: Bosch Home Connect — Consumer Auth Options for Hubitat
+triggered_by: copilot-directive-2026-05-17T093200-no-developer-app
+---
+
+# Cypher: Bosch Home Connect — Consumer Auth Options for Hubitat
+
+**Author:** Cypher (Integration / Protocol Engineer)  
+**Date:** 2026-05-17T09:45:09-07:00  
+**Triggered by:** `copilot-directive-2026-05-17T093200-no-developer-app`  
+**Question:** Is there a viable path to authenticate as a consumer (username + password, no developer app) that works inside Hubitat's Groovy sandbox?
+
+---
+
+## 1. Candidates Surveyed
+
+### A. `hcpy` / `hcpy2-0` — Local WebSocket via Consumer Auth
+
+**Source:** https://github.com/osresearch/hcpy (original), https://github.com/hcpy2-0/hcpy (maintained fork)
+
+#### What it does
+
+hcpy reverse-engineered the Bosch Home Connect mobile app and found:
+
+1. The BSH mobile app uses a hardcoded `client_id` (not registered by the user):  
+   `9B75AC9EC512F36C84256AC47D813E2C1DD0D6520DF774B020E1E6E2EB29B1F3`
+
+2. Auth flow is OAuth2 PKCE against Bosch's consumer SSO at `singlekey-id.com`, using the BSH app's own client identity:
+   - GET `https://api.home-connect.com/security/oauth/authorize?client_id=<BSH_APP_ID>&redirect_uri=hcauth://auth/prod&...`
+   - The user is redirected to SingleKey ID login at `singlekey-id.com`
+   - Originally: script auto-POSTed email + password (with HTML form scraping / CSRF tokens)
+   - **After CAPTCHA was added (circa 2024):** automation is broken. User must open the URL in a real browser, use F12 Dev Tools to watch network traffic, and manually copy `code` + `state` from the `hcauth://auth/...` redirect URL.
+
+3. After successful PKCE exchange at `https://api.home-connect.com/security/oauth/token`, the bearer token is used against the **consumer backend**:
+   - `https://eu.services.home-connect.com/api/account/v2/accounts/{sub}/paired-appliances` — lists devices
+   - `https://eu.services.home-connect.com/api/appliance/v2/appliances/{haId}/encryption-information` — fetches per-device crypto keys (TLS PSK key or AES key + IV)
+
+4. **Then hcpy connects to the appliance locally over WebSocket:**
+   - TLS-PSK appliances (most modern Bosch/Siemens): WebSocket over HTTPS using `ECDHE-PSK-CHACHA20-POLY1305` — a non-standard cipher requiring a patched TLS library (`sslpsk`)
+   - Older appliances: plain HTTP WebSocket with AES-CBC encrypted frames (binary type `0x82`)
+   - All state updates arrive as events over this persistent WebSocket — there is no request/response polling.
+
+#### Developer portal required?
+
+**No**, for the auth token itself — the BSH app's own `client_id` is hardcoded.
+
+**However**, this is unauthorized use of BSH's internal app credentials. BSH's ToS for the developer API explicitly forbids impersonating BSH's own clients. BSH has tightened the consumer flow by adding CAPTCHA precisely to prevent this scripting.
+
+#### Hubitat feasibility
+
+**Non-starter. Two hard blockers:**
+
+1. **CAPTCHA blocks fully automated auth.** The SingleKey ID form now requires CAPTCHA completion in a real browser. The auth flow cannot be automated from Hubitat's HTTP client (no JavaScript runtime, no browser). Even with the original form-scraping approach, Hubitat has no HTML parser and would need to track 2+ rounds of CSRF tokens and multi-step redirects.
+
+2. **Operational protocol is local WebSocket.** After auth, ALL appliance state is delivered over a persistent WebSocket connection. Hubitat's sandbox has no WebSocket client — `httpGet`/`httpPost` and their async variants are request-response only. They cannot hold a long-lived WebSocket connection.
+
+3. **TLS cipher incompatibility.** Even if Hubitat could do WebSockets, the TLS-PSK cipher (`ECDHE-PSK-CHACHA20-POLY1305`) is not available in standard JVM TLS stacks. hcpy requires a specially patched Python library (`sslpsk`) to negotiate it.
+
+4. **No consumer-backend REST polling API.** The consumer backend at `eu.services.home-connect.com` / `na.services.home-connect.com` is only used for device discovery and key retrieval during setup. There is **no REST endpoint on the consumer backend for polling appliance state** — the local WebSocket IS the operational interface.
+
+---
+
+### B. Home Assistant `home_connect_alt` (ekutner/home-connect-hass)
+
+**Source:** https://github.com/ekutner/home-connect-hass
+
+Requires developer app registration. Step 1 of installation is "Creating a Home Connect developer app." Uses the official `api.home-connect.com` developer API with OAuth2 Authorization Code flow. No bypass of developer portal. **Not applicable.**
+
+---
+
+### C. openHAB Home Connect Direct Binding (bruestel)
+
+**Source:** https://github.com/bruestel/openhab-addons/tree/homeconnectdirect/bundles/org.openhab.binding.homeconnectdirect
+
+Uses the `homeconnect-profile-downloader` desktop GUI app (https://github.com/bruestel/homeconnect-profile-downloader) to authenticate against SingleKey ID via a browser window, download per-device profiles (including encryption keys), and import them into openHAB. The binding then speaks the same local WebSocket protocol as hcpy.
+
+- **Developer portal:** Not required — uses consumer flow via desktop app
+- **Protocol after auth:** Local WebSocket (TLS-PSK or AES-CBC) — same as hcpy
+- **Hubitat feasibility:** Same hard blockers as hcpy. The desktop profile-downloader approach is actually a creative workaround for the CAPTCHA problem — but it's irrelevant here because the local WebSocket is still the operational protocol, and Hubitat can't speak it.
+
+---
+
+### D. Homebridge Plugins
+
+No Homebridge plugin exists for Bosch Home Connect that bypasses the developer portal. All known Homebridge Home Connect plugins (e.g., `homebridge-homeconnect` by nickcoutsos) use the official developer API and require `client_id` + `client_secret`. **Not applicable.**
+
+---
+
+### E. BSH SingleKey ID — Direct Consumer SSO
+
+**What it is:** Bosch's consumer identity platform at `singlekey-id.com`. Used by the Home Connect mobile app and by hcpy.
+
+**Could a Hubitat driver authenticate against it directly?**
+
+Theoretically, the original hcpy approach (form-scraping SingleKey ID) could be re-implemented — but:
+
+1. **CAPTCHA:** Added to the SingleKey ID login form circa 2024. Any fully automated username/password submission is blocked.
+2. **Multi-step redirects:** The flow involves 5–8 HTTP 302 redirects across two domains (`api.home-connect.com` and `singlekey-id.com`), each requiring the session cookie from the previous step. Hubitat's HTTP client does not maintain a persistent cookie jar across separate `httpGet`/`httpPost` calls.
+3. **CSRF tokens:** Each POST requires a `__RequestVerificationToken` extracted from the previous HTML response. Hubitat has no HTML parser.
+4. **Custom redirect scheme:** The final callback is to `hcauth://auth/prod?code=...` — a custom URI scheme. Hubitat cannot be told to intercept this redirect; it would need to manually extract `code` and `state` from the `Location` header of the last `302` before the `hcauth://` step. This is technically possible if the HTTP client stops following redirects at that point, but combined with CAPTCHA it's moot.
+
+**Even if all auth problems were solved:** the consumer backend has no REST polling API for appliance state. A Hubitat driver would successfully authenticate and then have nowhere to go.
+
+---
+
+## 2. Legal / ToS Observations
+
+Community projects (hcpy, openHAB direct binding) use the BSH mobile app's own `client_id` without authorization. BSH has:
+- Added CAPTCHA to SingleKey ID to prevent scripted auth (2024)
+- Not issued widespread account bans for hcpy users (as of early 2026, no mass-ban reports in the community)
+- Rotated internal endpoints — `prod.reu.rest.homeconnectegw.com` in original hcpy became `eu.services.home-connect.com` in hcpy2-0; hcpy users have needed to update periodically
+
+The official ToS forbids reverse-engineering and unauthorized use of BSH's own client credentials. The community treats this as acceptable risk for personal use. A publicly distributed Hubitat driver using these credentials would draw more scrutiny and risk BSH rotating/revoking the hardcoded `client_id` and breaking the driver for all users simultaneously.
+
+---
+
+## 3. Recommendation
+
+**No — there is no viable consumer-auth-only path for Hubitat.**
+
+| Candidate | Developer Portal Required | Hubitat Feasible | Blocker |
+|---|---|---|---|
+| hcpy consumer auth | No | **No** | CAPTCHA + local WebSocket (no REST polling API) |
+| HA `home_connect_alt` | **Yes** | No (irrelevant) | Developer portal required |
+| openHAB direct binding | No | **No** | Local WebSocket — same as hcpy |
+| SingleKey ID scraping | No | **No** | CAPTCHA + no cookie jar + no REST state API |
+| Official developer API | **Yes** | **Yes** | None — this is the viable path |
+
+The fundamental issue is not merely authentication — it is that **Bosch's consumer infrastructure has no cloud REST API for polling appliance state**. The local WebSocket IS the only state channel, and Hubitat cannot speak it. The developer API (`api.home-connect.com/api/`) is architecturally different: it provides a proper cloud-mediated REST interface (GET `/api/homeappliances/{haId}/status`) that is fully compatible with Hubitat's polling model.
+
+**Replacing the developer API path with a consumer path would require:**
+1. Solving CAPTCHA (impossible in Hubitat)
+2. Implementing a local WebSocket client with non-standard TLS cipher (impossible in Hubitat)
+3. Either of which is a permanent platform constraint, not a solvable engineering problem.
+
+---
+
+## 4. Mads' Realistic Options
+
+### Option 1: Developer App (Recommended)
+
+**One-time user onboarding, approximately 5 minutes:**
+
+1. Go to https://developer.home-connect.com
+2. Create account (same email as the Home Connect app)
+3. Register application → select "Device Flow" → copy `client_id` and `client_secret`
+4. Enter both in Hubitat driver preferences
+
+After that, auth is fully automated via the Device Flow (no redirect URI, driver polls until user approves on phone). Token is valid 24 hours, auto-refreshes. **This is the path Tank should implement.**
+
+Friction point: Steps 1–3 are developer portal registration. Estimated time: 3–5 minutes. It is a real hurdle. No way to eliminate it within Hubitat's sandbox constraints.
+
+### Option 2: Python Bridge (hcpy + MQTT)
+
+Run hcpy on a separate always-on device (Pi, NAS, Docker container). hcpy authenticates via consumer flow (requiring one-time manual browser auth due to CAPTCHA), connects to the fridge via local WebSocket, and publishes state to MQTT. Hubitat subscribes via an MQTT driver.
+
+- **Developer portal:** Not required
+- **Hubitat complexity:** Requires MQTT driver + hcpy infrastructure
+- **Ongoing maintenance:** hcpy is beta, endpoints have changed before; also requires the local WebSocket connection to stay up
+- **Verdict:** More infrastructure complexity than registering a developer app; trades one onboarding hurdle for a permanent dependency
+
+### Option 3: Semi-Manual Consumer Token (Fragile, Not Recommended)
+
+Use the BSH app's hardcoded `client_id` and ask Mads to manually complete the browser auth (copy/paste `code` from F12 dev tools into Hubitat preferences), then exchange it for a token via httpPost. The driver would then poll the **developer API endpoint** using this token.
+
+Wait — **this won't work** because the consumer auth token grants access to `eu.services.home-connect.com`, NOT to `api.home-connect.com/api/`. They are different backend systems with different tokens/scopes. You cannot mix them.
+
+**This option is dead.**
+
+---
+
+## 5. If Option 1 (Developer App) Proceeds — Confirmed Auth Spec
+
+This was fully documented in `cypher-bosch-home-connect-feasibility.md` and the `home-connect-oauth-device-flow` skill. Summary:
+
+```
+client_id: user-registered (entered in driver preferences)
+client_secret: user-registered (entered as password preference)
+
+Device Flow:
+  POST https://api.home-connect.com/security/oauth/device_authorization
+  body: client_id={id}&scope=IdentifyAppliance%20FridgeFreezer-Monitor
+
+  → Returns: device_code, user_code, verification_uri_complete, interval
+
+  Poll every {interval} seconds:
+  POST https://api.home-connect.com/security/oauth/token
+  body: grant_type=urn:ietf:params:oauth:grant-type:device_code
+        &device_code={device_code}&client_id={id}
+
+  → On success: access_token (24h), refresh_token (months)
+
+State polling:
+  GET https://api.home-connect.com/api/homeappliances/{haId}/status
+  Authorization: Bearer {access_token}
+  Accept: application/vnd.bsh.sdk.v1+json
+  → Every 120s (720 req/day, safely under 1,000/day limit)
+```
+
+---
+
+## 6. Open Questions for Switch
+
+1. Does Hubitat's `httpPost` follow 302 redirects automatically? (Would affect Option 3, but Option 3 is dead for other reasons — still worth documenting for sandbox reference.)
+2. Is there a Hubitat community MQTT bridge driver that Tank should evaluate for Option 2?
+3. Can Hubitat's device preference UI mark fields as "password" and "link" types — so the `client_id` field could hyperlink to `https://developer.home-connect.com`? (UX improvement for Option 1.)
+4. Does the consumer token from `singlekey-id.com` route to the same `api.home-connect.com` token endpoint, or is it genuinely a different backend? (Clarifies whether semi-consumer auth is even theoretically possible.)
+
+---
+
+## Decision
+
+**Consensus:** Proceed with the developer portal path (Option 1). It is the only viable path given Hubitat's sandbox constraints. The 5-minute one-time onboarding is worth the UX clarity it buys.
+
+The driver will use Device Flow with a user-registered `client_id` and `client_secret`. Tank will implement auth token persistence, token refresh, and state polling per the auth spec above.
+
+---
+
+## trinity-bosch-home-connect-architecture
+
+---
+decision_id: trinity-bosch-home-connect-architecture\n\n---
 decision_id: trinity-bosch-home-connect-architecture
 author: Trinity
 date: 2026-05-17T09:31:55-07:00

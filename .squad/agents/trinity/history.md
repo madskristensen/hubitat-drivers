@@ -131,6 +131,47 @@ Cypher has confirmed that the cloud API is fully documented in public references
 
 **SunStat Connect Plus v0.1.0 shipped.** Architecture proposal (trinity-sunstat-architecture.md) merged into decisions.md. Tank implemented full parent/child driver pair. Switch drafted comprehensive test plan. Cypher's API research finalized. Awaiting Mads' real-device verification (Mode.Enum, modelId, ROPC probe, httpPatch sandbox compatibility).
 
+### 2026-05-17T09:31:55-07:00: Bosch Home Connect — driver architecture design
+
+**Driver:** Bosch Home Connect fridge/freezer door sensor
+**Output:** `.squad/decisions/inbox/trinity-bosch-home-connect-architecture.md`
+
+**Key architectural calls:**
+- **OAuth2 code flow requires a Hubitat App** — confirmed again: only Apps get `mappings {}`; the SunStat `setRefreshToken` workaround is not necessary here if we use the standard App OAuth pattern.
+- **Parent App + child Driver** — App owns tokens, discovery, poll loop; one child Driver per door zone (fridge door + freezer door = 2 children per appliance).
+- **ContactSensor per door child** — more idiomatic than one device with two custom attributes; works with Rule Machine and built-in Notification apps directly.
+- **Polling first, SSE deferred** — Hubitat's `asynchttpGet` doesn't hold long-lived streams; 30-60 s poll is safe and proven. SSE requires Cypher research.
+- **Biggest risk:** Bosch requires exact-match pre-registered redirect URI; Hubitat's cloud endpoint is per-hub (dynamic hub ID). Community driver research by Cypher is the gate before implementation starts.
+
+**New patterns introduced:**
+- `hubitat-cloud-oauth-app` skill extracted to `.squad/skills/hubitat-cloud-oauth-app/SKILL.md`
+- CSRF state parameter must use `atomicState`, not `state` (survives redirect round-trip)
+- `doorAlarm` custom attribute pattern for "left open too long" alarm events (distinct from contact state)
+- Folder naming: `*-app.groovy` (not `*-parent.groovy`) when the entry point is a Hubitat App
+
+**Reused from SunStat / existing patterns:**
+- `state.*` for token storage, `proactiveTokenRefresh` via `runIn` 300 s before expiry
+- `isComponent: false` on children, `cloudDeviceId` as DataValue
+- `logEnable`/`txtEnable` pair with 30-min auto-off
+- `discoverDevices()` + `parseDeviceState()` delegation pattern
+
+**Effort:** Medium — 2 sessions (Session 1: Cypher scouts API; Session 2: Tank implements + Switch tests)
+
+### 2026-05-17T16:45:09Z — Bosch Home Connect Consumer Auth Investigation
+
+**Decision:** Developer portal registration path is unavoidable.
+
+**Context:** User requested elimination of developer portal onboarding. Cypher investigated 5 consumer-auth alternatives (hcpy, SingleKey ID, openHAB direct binding, Homebridge plugins). All blocked by:
+- CAPTCHA on SingleKey ID login (2024)
+- Local WebSocket protocol (no Hubitat support)
+- No consumer REST API for state polling
+
+**Verdict:** Official developer API (Device Flow) remains the only feasible path. One-time 5-minute registration is the cost of a working driver.
+
+**Architecture implication:** Device Flow OAuth2 design stands as proposed. User will register their own client_id + client_secret at developer.home-connect.com (5 min), enter both as preferences. No further design changes needed.
+
+---
+
 ## Team Updates (2026-05-17T03:37:53Z)
 
 **SunStat Connect Plus v0.1.2 released with 6 new features.** Tank wired EnergyMeter + 4 energy attrs, schedule control, thermostat hold, outdoor sensor, setpoint rounding, floor bounds. Switch expanded test coverage to 48 cases (#26-#48). Link bumped manifests/READMEs (v0.1.2, v0.4.0). Link-3 audited all 3 READMEs against 8 community Hubitat repos, applied 6 targeted edits (compatibility headers, version badges, releases links). Awaiting Mads' real-device verification and 3 README audit answers (forum threads, donation link, C-5 testing).

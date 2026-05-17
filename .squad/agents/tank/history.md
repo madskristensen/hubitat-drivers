@@ -44,6 +44,19 @@ Key learnings:
 
 **ACTION:** When spawned for implementation, read .squad/decisions/decisions.md first. Effort: Medium (2 sessions).
 
+### 2026-05-17T16:45:09Z — Bosch Home Connect Consumer Auth Investigation
+
+**Decision:** Developer portal registration path is unavoidable.
+
+**Context:** User requested elimination of developer portal onboarding. Cypher investigated 5 consumer-auth alternatives (hcpy, SingleKey ID, openHAB direct binding, Homebridge plugins). All blocked by:
+- CAPTCHA on SingleKey ID login (2024)
+- Local WebSocket protocol (no Hubitat support)
+- No consumer REST API for state polling
+
+**Verdict:** Official developer API (Device Flow) remains the only feasible path. One-time 5-minute registration is the cost of a working driver.
+
+**Design implication:** When Tank implements, use Device Flow OAuth2 with user-registered client_id + client_secret (entered as preferences). The technical path is confirmed; no further consumer-auth alternatives exist.
+
 ---
 
 ## Core Patterns (Reusable)
