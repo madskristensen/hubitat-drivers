@@ -34,3 +34,24 @@ Use this skill when a Hubitat driver repo needs HPM publisher metadata, a repeat
 - Manifest version: `0.4.0`
 - Tag: `gemstone-lights-v0.4.0`
 - Release body source: `drivers/gemstone-lights/gemstone-lights.groovy` `Changelog:` line for `0.4.0`
+
+## Validation (2026-05-16)
+
+**Executed by:** Link (link-1 spawn)
+
+**What worked:**
+1. ✅ **workflow_dispatch trigger** — Release workflow (`release.yml`) was immediately available for manual `gh workflow run` after commit push. No registration delay.
+2. ✅ **Auto-tag from packageManifest.json** — Workflow correctly read `drivers/gemstone-lights/packageManifest.json`, extracted version `0.4.0`, and created tag `gemstone-lights-v0.4.0`.
+3. ✅ **Auto-populated release body** — Workflow parsed driver header `Changelog:` section and correctly populated the GitHub Release body without manual PR notes.
+4. ✅ **Deterministic tag naming** — Pattern `<driver-folder>-v<version>` survived contact with reality; tag navigation and release lookups worked cleanly.
+5. ✅ **Community list JSON structure preservation** — JSON manipulation pitfall identified and worked around: PowerShell `ConvertFrom-Json | ConvertTo-Json` breaks the file format (changes tabs to spaces). Surgical text replacement (regex or line-by-line) is mandatory.
+
+**Learnings applied:**
+- The workflow dispatch does not depend on push-path triggers — it is always available, making manual releases feasible even if packageManifest.json was not touched.
+- HPM manifests themselves are optional during setup; the workflow only reads packageManifest.json per driver.
+- Community list submission requires preserving the existing JSON indentation style (tab-based for HubitatCommunity repos) — use text-based edits, not JSON serialization.
+
+**URLs:**
+- Release: https://github.com/madskristensen/hubitat-drivers/releases/tag/gemstone-lights-v0.4.0
+- Community PR: https://github.com/HubitatCommunity/hubitat-packagerepositories/pull/106
+- Commit: https://github.com/madskristensen/hubitat-drivers/commit/6f2f85e

@@ -103,3 +103,9 @@ Executed one-time push authorization for Gemstone Lights v0.4.0 release and HPM 
 - **Community PR:** https://github.com/HubitatCommunity/hubitat-packagerepositories/pull/106
 
 **Status:** Awaiting HubitatCommunity maintainer review and merge of the community list PR.
+
+---
+
+### 2026-05-16T19:36:00Z: Reskill — community-json-pr-hygiene
+
+Created `.squad/skills/community-json-pr-hygiene/SKILL.md` to document the surgical text-replacement pattern for editing upstream community JSON files. The skill captures the learnings from PR #106: ConvertFrom-Json | ConvertTo-Json round-trips mangle formatting (tabs to spaces, key order, blank lines), breaking diff hygiene. Future agents submitting to external registries (HPM, npm, GitHub Awesome lists, etc.) will reference this skill to avoid the same trap.

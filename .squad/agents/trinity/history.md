@@ -72,3 +72,7 @@ Cypher has confirmed that the cloud API is fully documented in public references
 **Architecture validated:** Switch, SwitchLevel, LightEffects, Refresh, Initialize remain sound for local-only scope. No changes needed.
 
 **Next gate:** Tank's v0.2.0 implementation blocked until Mads' UniFi pcap reveals routing envelope. Once Tank wires endpoints, Switch's test plan becomes actionable.
+
+### 2026-05-16T23:36Z: Reskill — no-push handoff pattern
+
+**Pattern:** User established a no-agent-pushes operating model mid-session (agents prepare locally, commit, ask for per-task push approval). Captured in `.copilot/skills/git-workflow/SKILL.md` new section "## No-Push Handoff Pattern" (Option A: extended existing skill rather than sibling) because the pattern is fundamental to how agents use git workflow, not a standalone workflow. Confidence `medium`; survived user course-correction and one-shot exception grant. Anti-patterns: pushing on stale approval, conflating "asked" with "approved", forgetting handoff block.
