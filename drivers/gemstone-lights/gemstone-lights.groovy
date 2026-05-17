@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.2
+ * Version: 0.4.3
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.3 — 2026-05-16 — Diagnostic: flatten multi-line 400 response bodies (Python tracebacks from Gemstone API) to single-line log output so the full error is visible. Bumped truncate length to 2000.
  *   0.4.2 — 2026-05-16 — Diagnostic + payload fixes for setColor 400 / setColorTemperature silent-fail. Surface response.getErrorData() in 400 handler; log non-gated info when request is queued (no token or no deviceId); ARGB color generation now includes 0xFF alpha byte; setColor/setColorTemperature no longer override pattern.id (preserves real UUID from refresh); referencePatternId omitted entirely instead of sent as null.
  *   0.4.1 — 2026-05-16 — Added playEffectByName(String) as a separate (non-overloaded) command so WebCoRE's action picker exposes a String input. Internally delegates to setEffect(String).
  *   0.4.0 — 2026-05-16 — Added LightEffects, ColorTemperature, and colorMode support. Favorites now surface first in lightEffects, info logs, and favoriteEffects.
@@ -28,7 +29,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.2"
+@Field static final String DRIVER_VERSION = "0.4.3"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -48,7 +49,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.2"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.3"
 
 metadata {
     definition(
@@ -521,7 +522,8 @@ def apiResponseCallback(response, data) {
                 if (errData) body = safeString(errData)
             } catch (ignored) {}
         }
-        log.error "[Gemstone] Unexpected HTTP ${status} from ${data?.path}${body ? ": ${truncate(extractServiceMessage(body) ?: body, 480)}" : " (empty response body)"}"
+        String displayBody = body ? truncate((extractServiceMessage(body) ?: body).replaceAll("[\\r\\n]+", " | "), 2000) : null
+        log.error "[Gemstone] Unexpected HTTP ${status} from ${data?.path}${displayBody ? ": ${displayBody}" : " (empty response body)"}"
         if (data?.action == "effectCatalogPage") {
             handleEffectCatalogRefreshFailure()
         }
