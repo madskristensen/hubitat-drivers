@@ -167,3 +167,20 @@ List-body endpoints (`GET /Location`, `GET /Location/{id}/Devices`) can't be han
 When a Hubitat driver declares `capability "LightEffects"`, Hubitat registers `setEffect(NUMBER)` as the canonical capability method in its metadata. WebCoRE's action picker reads that metadata. If you also declare `command "setEffect", [[type:"STRING"]]` in the same `definition{}`, it is a *Groovy overload* of the same method name — but WebCoRE only sees the one signature from the capability descriptor, so the String overload is **invisible** to the WebCoRE UI. The fix: give the WebCoRE-facing command a **distinct name** (`playEffectByName`) so there is no overload collision. WebCoRE then sees it as a separate command and renders a STRING input field. The implementation is a one-liner delegate to the existing `setEffect(String)` — no duplicated logic. Confidence: confirmed by Mads' production WebCoRE install.
 
 - 2026-05-17T04:44:00Z: v0.4.1 Gemstone Lights shipped (playEffectByName command + docs + tests) — tank/link/switch cross-team ship
+
+### v0.4.2 Gemstone — Diagnostic-First + Payload Theory (2026-05-16)
+
+#### Capture errorData for 400 responses
+Hubitat's async HTTP framework puts the error response body in `response.getErrorData()`, NOT `response.getData()`. `getData()` returns null on 4xx. Pattern: call `responseBody(response)` first; if empty, fall back to `response.getErrorData()` wrapped in a try/catch. This surfaces the actual API error message (e.g., `{"message":"Invalid pattern id format"}`), enabling targeted follow-up fixes without guessing.
+
+#### Silent-queue guard pattern
+`executeOrQueueRequest`'s Guard 2 (`!hasUsableAccessToken() || requiresDevice && !deviceId`) produces zero logs, making it impossible to distinguish "command queued" from "command silently dropped". Fix: add an unconditional `log.info` (NOT `infoLog` — must not be gated on `txtEnable`) with the specific reason before calling `queueRequest()`. Use `log.info`, never `infoLog`, for any diagnostic guard that must be visible regardless of user preferences.
+
+#### ARGB alpha byte — color functions must include 0xFF alpha
+`hubitatHueSatToArgb` and `kelvinToArgb` returned `0x00RRGGBB` (alpha=0, transparent). The Gemstone API uses full ARGB format; alpha=0 likely means invisible/no-op. Fix: prefix `(0xFF << 24) |` to the return value. Note: `0xFF000000` = `-16777216` as a signed 32-bit int — bitwise OR still produces the correct bit pattern; JSON serializes as a negative integer which is valid. Always include the alpha byte when building ARGB integers for APIs that use ARGB format.
+
+#### UUID preservation in read-modify-write patterns
+`buildColorRequest` and `buildColorTemperatureRequest` both called `pattern.id = generatePatternId()`, overwriting the real UUID returned by the API with a synthetic `"hubitat-{timestamp}-{seq}"` string. The Gemstone API validates pattern IDs as UUIDs and rejects non-UUID strings with HTTP 400. Fix: remove the `pattern.id` override entirely; `currentOrDefaultPattern()` already carries the real UUID from the last `refresh()`. Rule: in read-modify-write patterns, never replace server-assigned identifiers with client-generated synthetic strings unless the API explicitly allows custom IDs.
+
+#### Omit null fields instead of sending null
+`pattern.referencePatternId = null` sends `"referencePatternId": null` in the JSON body. If the API schema requires the field to be either a valid UUID or absent, null causes schema validation failure. Fix: `pattern.remove("referencePatternId")` omits the field entirely. Rule: for optional relationship fields, prefer omission over explicit null when the API's validation rules are unknown.

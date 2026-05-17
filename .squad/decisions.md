@@ -1,3 +1,369 @@
+## 2026-05-16T22:36:55-07:00 — Gemstone Color + CT Both Broken — Root Cause & Recommended Fixes
+
+# Gemstone Color + CT Both Broken — Root Cause & Recommended Fixes
+
+**Date:** 2026-05-16T22:36:55-07:00  
+**Author:** Cypher (Integration / Protocol Engineer)  
+**Status:** READY FOR TANK — diagnosis complete, code changes specified  
+**Driver version in scope:** v0.4.1  
+**Target bump:** v0.4.2 (diagnostic logging) → v0.4.3 if payload fix confirmed
+
+---
+
+## Framing Note
+
+A previous Cypher spawn (cypher-2) incorrectly framed this as "setColorTemperature is the working baseline."
+**Corrected framing:** Both commands fail. They fail in different ways. This document supersedes that framing entirely.
+
+---
+
+## Section 1 — CT Silent-Fail Trace
+
+### The path
+
+`setColorTemperature(3000, 100, 1)` call stack:
+
+```
+setColorTemperature(3000, 100, 1)
+  ├─ warnColorTemperatureFallback()           ← log.warn — first time only; silent if already warned
+  ├─ infoLog "color temperature → 3000K..."   ← gated on txtEnable; may be silent if txtEnable=false
+  └─ executeOrQueueRequest(buildColorTemperatureRequest(3000, 100))
+       └─ executeOrQueueRequest (line 705)
+```
+
+### `executeOrQueueRequest` — the only zero-log path
+
+```groovy
+private void executeOrQueueRequest(Map request) {
+    // Guard 1: credentials check (lines 706-710)
+    if (!credentialsConfigured()) {
+        log.error "[Gemstone] ..."   // ← VISIBLE — Mads would see this
+        return
+    }
+
+    // Guard 2: token / deviceId check (lines 712-716)  ← THE SILENT PATH
+    if (!hasUsableAccessToken() || (request?.requiresDevice && !state.deviceId)) {
+        queueRequest(request)        // silently adds to state.pendingRequests
+        continueSessionSetup()       // may silently no-op if authInFlight=true
+        return                       // ← ZERO LOGS emitted; no info, no warn, no error
+    }
+
+    dispatchApiRequest(request)      // ← only reached when both guards pass
+}
+```
+
+**Guard 2 is the confirmed silent-fail site.** It fires when either:
+- `!hasUsableAccessToken()` — token is expired or not yet obtained; OR  
+- `request.requiresDevice == true && state.deviceId == null` — device not yet discovered
+
+Both the pattern request (`buildPatternRequest`) and the onState wrapper (`buildOnStateRequest`) have `requiresDevice: true`. So CT is silently queued by this guard.
+
+### Why setColor dispatches but CT does not
+
+The two commands reach `executeOrQueueRequest` via different code paths but otherwise the same guards apply. The most consistent explanation:
+
+1. **Testing order** — CT was called first in the session, before device discovery completed (`state.deviceId` still null). The request was queued. By the time discovery finished and `flushPendingRequests()` ran, either (a) the queued CT request dispatched but the payload was rejected silently/visibly, or (b) the pending queue was cleared by a subsequent auth failure or driver re-initialization.
+
+2. **Token leeway window** — `hasUsableAccessToken()` returns `false` if the token expires within 5 minutes (`TOKEN_REFRESH_LEEWAY_SECONDS = 300`). If CT was called in that 5-minute window, it queues while a concurrent refresh is in flight (`state.authInFlight = true`). `continueSessionSetup()` then exits early at `if (state.authInFlight) { return }`. The queued request waits for the refresh to complete and `flushPendingRequests()` to run.
+
+3. **After flush — CT may also 400 silently**: When the queued CT request eventually dispatches via `flushPendingRequests()`, it would produce a 400 error log IF the payload is wrong. If Mads wasn't watching at that moment, it would appear "silent." This is consistent with CT's payload having the same underlying defect as setColor.
+
+### Guards that are NOT the cause
+
+- `credentialsConfigured()` — logs `log.error` if false; Mads would see it ✗
+- `effectCatalogStale()` / `effectCatalogMissing()` — only in the `setEffect(BigDecimal)` and `setEffect(String)` paths; CT does NOT go through these guards ✗
+- `dispatchApiRequest`'s `if (!request)` guard — `buildColorTemperatureRequest` always returns a non-null map ✗
+
+### CT infoLog note
+
+`infoLog` (line 248 in setColorTemperature) is gated on `settings.txtEnable`. If `txtEnable` is false, the "color temperature → 3000K..." line never appears. `warnColorTemperatureFallback()` uses `log.warn` unconditionally but only fires **once per device lifetime** (guarded by `state.colorTemperatureFallbackWarned`). If the warn already fired in a previous test, CT would be completely silent at the log level even if it dispatches.
+
+---
+
+## Section 2 — setColor Payload Analysis
+
+### Call: `setColor(hue:68, sat:69, level:43)`
+
+Walking through `buildColorRequest(hue:68, saturation:69, level:43)`:
+
+**Step 1 — Color computation via `hubitatHueSatToArgb(68, 69)`**
+
+```
+h = (68/100) × 360 = 244.8°   (blue-indigo range)
+s = 69/100 = 0.69
+c = s = 0.69
+x = 0.69 × (1 − |((244.8/60) % 2) − 1|)
+  = 0.69 × (1 − |4.08 % 2 − 1|)
+  = 0.69 × (1 − |0.08 − 1|)
+  = 0.69 × (1 − 0.92) = 0.055
+m = 1 − 0.69 = 0.31
+
+For 240° ≤ h < 300°: rf=x=0.055, gf=0, bf=c=0.69
+R = round((0.055 + 0.31) × 255) = round(93.1) = 93
+G = round((0    + 0.31) × 255) = round(79.1) = 79
+B = round((0.69 + 0.31) × 255) = round(255)  = 255
+
+ARGB integer = ((93 & 0xFF) << 16) | ((79 & 0xFF) << 8) | (255 & 0xFF)
+             = 0x005D4FFF = 6,115,327
+```
+
+**⚠️ CRITICAL**: The function name says "ARGB" but the result is `0x00RRGGBB` — **alpha byte is 0 (transparent).** If the Gemstone API interprets the alpha byte as opacity, every color sent by this driver is fully transparent and will produce no visible output even on a 200 response.
+
+**Step 2 — Brightness** `levelToWireBrightness(43)` = `round(43 × 255 / 100)` = `round(109.65)` = **110**
+
+**Step 3 — Pattern built by `buildColorRequest`**
+
+Assuming `state.lastPattern` is populated (device was refreshed). The pattern starts from `currentOrDefaultPattern()` and then:
+
+```groovy
+pattern.id = generatePatternId()          // "hubitat-1747440441359-2"  ← NOT a UUID
+pattern.name = "Hubitat Solid Color"
+pattern.animation = DEFAULT_PATTERN_ANIMATION  // "motionless"
+pattern.colors = [6115327]                // 0x005D4FFF — alpha=0
+pattern.brightness = 110
+pattern.referencePatternId = null         // forcibly cleared
+```
+
+**Step 4 — JSON body sent to `PUT /deviceControl/play/pattern`**
+
+```json
+{
+  "pattern": {
+    "id": "hubitat-1747440441359-2",
+    "name": "Hubitat Solid Color",
+    "colors": [6115327],
+    "animation": "motionless",
+    "brightness": 110,
+    "speed": 128,
+    "direction": 0,
+    "backgroundColor": 0,
+    "referencePatternId": null
+  }
+}
+```
+
+(URL also carries `?deviceOrGroupId=<uuid>` as a query param.)
+
+### Three candidate causes for HTTP 400
+
+**Candidate A — `pattern.id` is not a UUID (highest confidence)**
+
+`generatePatternId()` returns `"hubitat-{now()}-{sequence}"` — a driver-invented string, not a UUID. The Gemstone API stores patterns by UUID. Based on Cypher's prior research ("read-modify-write required"), the API likely validates that `id` is a valid UUID (format `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) before accepting a pattern play command.
+
+**Key evidence**: `buildLevelRequest` does NOT override `pattern.id` — it preserves the UUID from `currentOrDefaultPattern()` (which comes from the last `refresh()` response). Brightness changes presumably work. setColor overrides `id` with a synthetic string → 400.
+
+**Candidate B — `colors[0] = 0x00RRGGBB` (alpha=0) — missing alpha byte**
+
+The Gemstone API uses ARGB format. If `colors[0]` must be `0xFFRRGGBB` (alpha=255 for fully opaque), then `0x005D4FFF` would be validated as "transparent/invalid" and rejected with 400. Alternatively, the device silently ignores the command.
+
+This would explain **both** commands failing (CT produces same alpha=0 from `kelvinToArgb`), even if one error is 400 and the other is silent.
+
+**Candidate C — `referencePatternId: null` violates schema**
+
+The API may require `referencePatternId` to be either a valid UUID or absent entirely. Sending `null` explicitly might fail schema validation. Evidence is weaker — effect patterns from the catalog do preserve `referencePatternId`.
+
+### has-gemstone / pygemstone reference status
+
+**`has-gemstone` is NOT available locally.** The primary reference (sslivins/pygemstone, GitHub) was used for Cypher's v0.2.0 API research but is not cloned into this repo. The `.squad/research/` directory contains only ELAN and Control4 binaries (both encrypted/non-readable).
+
+Per constraints: if has-gemstone is unavailable, recommend **capture-and-respond path** — ship diagnostic-only logging first, capture the actual 400 body, then fix (see Section 3).
+
+---
+
+## Section 3 — Recommended Fixes for Tank
+
+### Fix 1 — Surface the actual 400 body (DIAGNOSTIC — v0.4.2)
+
+**Problem**: The current 400 log at line 516 shows `Unexpected HTTP 400 from /deviceControl/play/pattern` with no body. This is because `responseBody()` calls `response.getData()`, which in Hubitat's async framework returns null for error responses. The actual API error body is in `response.getErrorData()` (the async error data accessor).
+
+**Change in `apiResponseCallback` (line ~513-524):**
+
+Replace:
+```groovy
+if (status != null && status >= 400) {
+    cleanupAfterRequestFailure(data)
+    String body = responseBody(response)
+    log.error "[Gemstone] Unexpected HTTP ${status} from ${data?.path}${body ? ": ${truncate(extractServiceMessage(body) ?: body, 240)}" : ""}"
+```
+
+With:
+```groovy
+if (status != null && status >= 400) {
+    cleanupAfterRequestFailure(data)
+    String body = responseBody(response)
+    if (!body) {
+        // For 4xx responses Hubitat puts the error body in errorData, not getData()
+        try {
+            def errData = response.getErrorData()
+            if (errData) body = safeString(errData)
+        } catch (ignored) {}
+    }
+    log.error "[Gemstone] Unexpected HTTP ${status} from ${data?.path}${body ? ": ${truncate(extractServiceMessage(body) ?: body, 480)}" : " (empty response body)"}"
+```
+
+This surfaces the actual Gemstone API error message (e.g., `{"message":"Invalid pattern id format"}`) which will immediately identify whether Candidate A, B, or C is the root cause.
+
+### Fix 2 — Add non-gated log at the silent-queue path (DIAGNOSTIC — v0.4.2)
+
+**Problem**: `executeOrQueueRequest`'s queue path (line 712-716) produces zero logs. Mads cannot tell if CT is queuing or dispatching.
+
+**Change in `executeOrQueueRequest`:**
+
+Replace:
+```groovy
+if (!hasUsableAccessToken() || (request?.requiresDevice && !state.deviceId)) {
+    queueRequest(request)
+    continueSessionSetup()
+    return
+}
+```
+
+With:
+```groovy
+if (!hasUsableAccessToken() || (request?.requiresDevice && !state.deviceId)) {
+    String reason = !hasUsableAccessToken() ? "no usable access token" : "deviceId not yet discovered"
+    log.info "[Gemstone] Queuing '${request?.requestLabel ?: request?.path}' (${reason}) — will dispatch after session setup"
+    queueRequest(request)
+    continueSessionSetup()
+    return
+}
+```
+
+This is **non-gated** (`log.info` unconditionally — not `infoLog`). Every time a command is silently queued, Mads will see it. This immediately confirms which guard is firing for CT.
+
+### Fix 3 — Add ARGB alpha byte to color generation (LIKELY PAYLOAD FIX — v0.4.2 or .3)
+
+**Problem**: `hubitatHueSatToArgb` and `kelvinToArgb` produce `0x00RRGGBB` (alpha=0). If the Gemstone API requires `0xFFRRGGBB` (fully opaque), all color commands silently produce transparent output.
+
+**Change in `hubitatHueSatToArgb` (line ~1946):**
+
+Replace return statement:
+```groovy
+return ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF)
+```
+With:
+```groovy
+return (0xFF << 24) | ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF)
+```
+
+**Change in `kelvinToArgb` (line ~1917):**
+
+Replace:
+```groovy
+return ((redValue & 0xFF) << 16) | ((greenValue & 0xFF) << 8) | (blueValue & 0xFF)
+```
+With:
+```groovy
+return (0xFF << 24) | ((redValue & 0xFF) << 16) | ((greenValue & 0xFF) << 8) | (blueValue & 0xFF)
+```
+
+**Note on Groovy int overflow**: `(0xFF << 24)` = `0xFF000000` = `-16777216` as a signed 32-bit int. The bitwise OR still produces the correct ARGB bit pattern. JSON serializes this as a negative integer, which is valid JSON. The Gemstone API (and its pygemstone reference) appears to use Java-signed-int representation for ARGB values.
+
+**Conditionality**: If the 400 body (from Fix 1) reveals a message about the `id` field instead of colors, deploy Fix 4 before this one. If the body mentions colors, prioritize Fix 3.
+
+### Fix 4 — Do NOT override `pattern.id` in color/CT builders (LIKELY PAYLOAD FIX — v0.4.2 or .3)
+
+**Problem**: `buildColorRequest` (line 651) and `buildColorTemperatureRequest` (line 669) both set `pattern.id = generatePatternId()`, producing non-UUID identifiers like `"hubitat-1747440441359-2"`. The Gemstone API likely validates pattern IDs as UUIDs.
+
+**Change in `buildColorRequest` (line 651)** — remove the id override:
+```groovy
+// REMOVE this line:
+pattern.id = generatePatternId()
+```
+
+**Change in `buildColorTemperatureRequest` (line 669)** — same:
+```groovy
+// REMOVE this line:
+pattern.id = generatePatternId()
+```
+
+`currentOrDefaultPattern()` already assigns a `generatePatternId()` fallback when `pattern.id` is missing (line 1585-1587). But that path only fires for a fresh-install default pattern. Once `refresh()` has run, `state.lastPattern` has the real API pattern with a proper UUID, and we should preserve it.
+
+**Remaining issue for fresh-install**: If `state.lastPattern` is empty (never refreshed), `currentOrDefaultPattern()` generates a synthetic ID `"hubitat-..."`. This will still 400. The fix for that case is either:
+- Require a `refresh()` before color commands work (acceptable), or
+- Generate a proper UUID: `java.util.UUID.randomUUID().toString()` — this IS allowed in the Hubitat sandbox (no system calls involved; UUID generation is pure Java)
+
+If Tank wants to generate a valid UUID fallback:
+```groovy
+// In currentOrDefaultPattern(), replace:
+id: generatePatternId(),
+// With:
+id: java.util.UUID.randomUUID().toString(),
+```
+
+And remove `generatePatternId()` calls from `buildColorRequest` and `buildColorTemperatureRequest`.
+
+### Fix 5 — Omit `referencePatternId: null` for synthetic patterns (MINOR — v0.4.2 or .3)
+
+**Problem**: `buildColorRequest` and `buildColorTemperatureRequest` explicitly set `pattern.referencePatternId = null`. If the Gemstone API schema validates that `referencePatternId` must be a non-null UUID (or absent), sending `null` causes validation failure.
+
+**Change in `buildColorRequest` (line 657) and `buildColorTemperatureRequest` (line 674):**
+
+Replace:
+```groovy
+pattern.referencePatternId = null
+```
+With:
+```groovy
+pattern.remove("referencePatternId")
+```
+
+This omits the field entirely from the JSON body instead of sending `"referencePatternId": null`.
+
+### Fix 6 — Verify `gemstoneArgbToHubitatColor` handles the alpha byte on refresh
+
+If Fix 3 is applied and colors are now stored/sent with alpha=0xFF, the reverse function `gemstoneArgbToHubitatColor` (used in `handleRefreshResponse`) must correctly strip the alpha byte when converting to hue/saturation:
+
+```groovy
+private Map gemstoneArgbToHubitatColor(Integer argb) {
+    float r = ((argb >> 16) & 0xFF) / 255.0f   // already masks alpha ✓
+    float g = ((argb >> 8)  & 0xFF) / 255.0f   // correct ✓
+    float b = (argb         & 0xFF) / 255.0f   // correct ✓
+```
+
+✅ The masking already strips the alpha byte correctly. No change needed here.
+
+### Version Bump
+
+Bump `DRIVER_VERSION` to `"0.4.2"` (and keep `USER_AGENT` literal in sync: `"Hubitat Gemstone Lights/0.4.2"`).
+
+Changelog entry:
+```
+0.4.2 — 2026-05-16 — Diagnostic logging: queue path now logs info (non-gated) when a command is
+        silently queued; 400 error handler now surfaces response.getErrorData() for the actual API
+        error message. Payload fix candidates: added 0xFF alpha byte to ARGB color generation in
+        hubitatHueSatToArgb and kelvinToArgb; removed pattern.id override in buildColorRequest and
+        buildColorTemperatureRequest (preserves real UUID from refresh); changed referencePatternId
+        from null to absent.
+```
+
+---
+
+## Summary of Action Priority for Tank
+
+| Fix | Priority | Prerequisite | Rationale |
+|-----|----------|--------------|-----------|
+| Fix 1 — Capture 400 body via errorData | **Ship in v0.4.2** | None | Zero-risk; surfaces API error message; confirms root cause |
+| Fix 2 — Log queue path non-gated | **Ship in v0.4.2** | None | Zero-risk; confirms CT silent-fail mode |
+| Fix 3 — Add 0xFF alpha to ARGB | **Ship in v0.4.2** | None | Low risk; color values with alpha=0 almost certainly wrong |
+| Fix 4 — Don't override pattern.id | **Ship in v0.4.2** | None | Low risk; preserves real UUID; eliminates likely 400 cause |
+| Fix 5 — Omit referencePatternId null | **Ship in v0.4.2** | None | Low risk; safe to omit vs send null |
+| Fix 6 — Confirm alpha reverse works | Already correct | Fix 3 | Review only; no code change needed |
+
+**Tank guidance**: Fixes 1–5 are all low-risk and directionally correct. Ship all of them in v0.4.2. If after v0.4.2 the 400 still fires, Fix 1's improved logging will give us the API's actual error message for a targeted v0.4.3 fix.
+
+---
+
+## Appendix — What We Still Don't Know (requires 400 body)
+
+Without the actual API error message from the 400 response:
+- We cannot confirm whether `id` format, alpha byte, or `referencePatternId` is the primary rejection cause
+- We cannot confirm whether CT's 400 body (if it eventually dispatches) differs from setColor's
+
+The capture-and-respond path is: ship v0.4.2 with Fix 1 → trigger setColor again → capture the log → Cypher reads the API error message → fix v0.4.3 precisely.
+
+---
+
 ## 2026-05-16 — SunStat locationId discovery failure diagnosis & fix
 
 # SunStat locationId Discovery Failure — Diagnosis & Fix

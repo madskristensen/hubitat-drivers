@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.0
+ * Version: 0.4.2
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.2 — 2026-05-16 — Diagnostic + payload fixes for setColor 400 / setColorTemperature silent-fail. Surface response.getErrorData() in 400 handler; log non-gated info when request is queued (no token or no deviceId); ARGB color generation now includes 0xFF alpha byte; setColor/setColorTemperature no longer override pattern.id (preserves real UUID from refresh); referencePatternId omitted entirely instead of sent as null.
  *   0.4.1 — 2026-05-16 — Added playEffectByName(String) as a separate (non-overloaded) command so WebCoRE's action picker exposes a String input. Internally delegates to setEffect(String).
  *   0.4.0 — 2026-05-16 — Added LightEffects, ColorTemperature, and colorMode support. Favorites now surface first in lightEffects, info logs, and favoriteEffects.
  *   0.3.0 — 2026-05-16 — Added setEffect(name) custom command, refreshEffectCatalog() helper, and effectName attribute. Effects can now be invoked by name from Hubitat rules.
@@ -27,7 +28,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.1"
+@Field static final String DRIVER_VERSION = "0.4.2"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -47,7 +48,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.1"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.2"
 
 metadata {
     definition(
@@ -513,7 +514,14 @@ def apiResponseCallback(response, data) {
     if (status != null && status >= 400) {
         cleanupAfterRequestFailure(data)
         String body = responseBody(response)
-        log.error "[Gemstone] Unexpected HTTP ${status} from ${data?.path}${body ? ": ${truncate(extractServiceMessage(body) ?: body, 240)}" : ""}"
+        if (!body) {
+            // For 4xx responses Hubitat puts the error body in errorData, not getData()
+            try {
+                def errData = response.getErrorData()
+                if (errData) body = safeString(errData)
+            } catch (ignored) {}
+        }
+        log.error "[Gemstone] Unexpected HTTP ${status} from ${data?.path}${body ? ": ${truncate(extractServiceMessage(body) ?: body, 480)}" : " (empty response body)"}"
         if (data?.action == "effectCatalogPage") {
             handleEffectCatalogRefreshFailure()
         }
@@ -649,12 +657,11 @@ private Map buildColorRequest(Map color) {
     Integer level = clampPercent(color?.level ?: safeInt(device.currentValue("level"), 100))
 
     Map pattern = currentOrDefaultPattern()
-    pattern.id = generatePatternId()
     pattern.name = "Hubitat Solid Color"
     pattern.animation = DEFAULT_PATTERN_ANIMATION
     pattern.colors = [hubitatHueSatToArgb(hue, saturation)]
     pattern.brightness = levelToWireBrightness(level)
-    pattern.referencePatternId = null
+    pattern.remove("referencePatternId")
     rememberPattern(pattern)
 
     Map request = buildPatternRequest(pattern, "set color")
@@ -666,12 +673,11 @@ private Map buildColorRequest(Map color) {
 
 private Map buildColorTemperatureRequest(Integer colorTemperature, Integer level) {
     Map pattern = currentOrDefaultPattern()
-    pattern.id = generatePatternId()
     pattern.name = buildColorTemperaturePatternName(colorTemperature)
     pattern.animation = DEFAULT_PATTERN_ANIMATION
     pattern.colors = [kelvinToArgb(colorTemperature)]
     pattern.brightness = levelToWireBrightness(level)
-    pattern.referencePatternId = null
+    pattern.remove("referencePatternId")
     rememberPattern(pattern)
     state.lastColorTemperature = colorTemperature
 
@@ -710,6 +716,8 @@ private void executeOrQueueRequest(Map request) {
     }
 
     if (!hasUsableAccessToken() || (request?.requiresDevice && !state.deviceId)) {
+        String reason = !hasUsableAccessToken() ? "no usable access token" : "deviceId not yet discovered"
+        log.info "[Gemstone] Queuing '${request?.requestLabel ?: request?.path}' (${reason}) — will dispatch after session setup"
         queueRequest(request)
         continueSessionSetup()
         return
@@ -1917,7 +1925,7 @@ private Integer kelvinToArgb(Integer colorTemperature) {
     Integer redValue = clampByte(Math.round(red) as Integer)
     Integer greenValue = clampByte(Math.round(green) as Integer)
     Integer blueValue = clampByte(Math.round(blue) as Integer)
-    return ((redValue & 0xFF) << 16) | ((greenValue & 0xFF) << 8) | (blueValue & 0xFF)
+    return (0xFF << 24) | ((redValue & 0xFF) << 16) | ((greenValue & 0xFF) << 8) | (blueValue & 0xFF)
 }
 
 private Integer clampByte(Integer value) {
@@ -1972,7 +1980,7 @@ private Integer hubitatHueSatToArgb(Integer huePercent, Integer saturationPercen
     Integer g = Math.round((gf + m) * 255.0f) as Integer
     Integer b = Math.round((bf + m) * 255.0f) as Integer
 
-    return ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF)
+    return (0xFF << 24) | ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF)
 }
 
 private Map gemstoneArgbToHubitatColor(Integer argb) {
