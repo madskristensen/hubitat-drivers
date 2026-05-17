@@ -12,7 +12,7 @@ Community Hubitat Elevation drivers by Mads Kristensen. First public release: **
 
 ## Listed in the community HPM master list
 
-Status: **Pending** — see `RELEASING.md` for the one-time submission steps.
+Status: **Submitted** — PR filed as HubitatCommunity/hubitat-packagerepositories#106.
 
 ## Drivers
 
