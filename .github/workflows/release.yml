@@ -60,7 +60,15 @@ jobs:
             fi
 
             if [ ! -f "$driver_file" ]; then
-              driver_file=$(find "$driver_dir" -maxdepth 1 -type f -name '*.groovy' | sort | head -n 1)
+              # Prefer *-parent.groovy when drivers split into parent/child (e.g., SunStat).
+              # The parent file holds the canonical changelog header; the child has its own
+              # slimmer changelog scoped to child-specific changes.
+              parent_candidate=$(find "$driver_dir" -maxdepth 1 -type f -name '*-parent.groovy' | sort | head -n 1)
+              if [ -n "$parent_candidate" ] && [ -f "$parent_candidate" ]; then
+                driver_file="$parent_candidate"
+              else
+                driver_file=$(find "$driver_dir" -maxdepth 1 -type f -name '*.groovy' | sort | head -n 1)
+              fi
             fi
 
             if [ -z "${driver_file:-}" ] || [ ! -f "$driver_file" ]; then
