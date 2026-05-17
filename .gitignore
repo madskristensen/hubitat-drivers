@@ -1,5 +1,4 @@
 # AI team coordination — internal only, never publish
-.squad/
 .copilot/
 .github/agents/
 .github/workflows/squad-*.yml

@@ -4,21 +4,23 @@ Community Hubitat Elevation drivers by Mads Kristensen. First public release: **
 
 > **Current status:** Gemstone Lights v0.4.0 is beta software, working in production, and tested by the author on a real controller.
 
+## Install via HPM (recommended)
+
+1. In Hubitat: **Apps → Hubitat Package Manager → Install → "From a URL"**
+2. Paste: `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/packageManifest.json`
+3. Follow the prompts
+
+## Listed in the community HPM master list
+
+Status: **Pending** — see `RELEASING.md` for the one-time submission steps.
+
 ## Drivers
 
 | Driver | Status | Description | Docs |
 |--------|--------|-------------|------|
 | **Gemstone Lights** | Beta | Cloud REST integration for Gemstone permanent outdoor lighting, including favorites-first LightEffects, named effects, and color-temperature fallback | [Driver README](drivers/gemstone-lights/README.md) |
 
-## Installation
-
-### Recommended: Hubitat Package Manager
-
-Paste this manifest URL into Hubitat Package Manager:
-
-- `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/packageManifest.json`
-
-### Manual install
+## Manual install
 
 1. Open your **Hubitat hub web UI**.
 2. Go to **Drivers Code**.

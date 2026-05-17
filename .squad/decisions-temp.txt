@@ -1,0 +1,27 @@
+### 2026-05-16T14:08:16-07:00: Repo folder structure for multi-driver layout
+**By:** Trinity
+**What:** Use a top-level drivers/ folder (lowercase) with one subfolder per driver, named in kebab-case. The Gemstone Lights driver lives at drivers/gemstone-lights/. Each subfolder holds only the files for that driver — no cross-driver files below drivers/. The repo root holds
+epository.json (HPM author index) once we register with HPM. The exact path for the first driver file will be drivers/gemstone-lights/gemstone-lights.groovy.
+
+Layout:
+`
+hubitat-drivers/
+├── drivers/
+│   └── gemstone-lights/
+│       ├── gemstone-lights.groovy       ← Tank drops this here
+│       ├── packageManifest.json         ← HPM manifest (per-driver)
+│       └── README.md                    ← per-driver user docs
+├── repository.json                      ← HPM author index (root, add when publishing)
+├── README.md
+├── LICENSE
+└── .gitignore
+`
+
+**Why:** lowercase/kebab-case is the safest choice for cross-platform git repos (avoids Windows/macOS case collisions) and matches how dcmeglio structures single-integration repos. The per-driver subfolder pattern (jshimota01, bptworld) is the dominant community pattern and keeps each driver fully self-contained for HPM packaging — HPM's packageManifest.json path and raw GitHub URL are stable even as the repo grows.
+**References:**
+- https://github.com/jshimota01/hubitat (per-driver subfolders, Drivers/<snake_case>/)
+- https://github.com/bptworld/Hubitat (per-driver subfolders, Drivers/<Title Case>/)
+- https://github.com/dcmeglio/hubitat-bond (flat drivers/ for single-package repos)
+- https://github.com/HubitatCommunity/hubitat-packagerepositories (HPM global index structure)
+
+---

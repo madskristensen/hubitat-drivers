@@ -1,0 +1,300 @@
+<devicedata>
+  <copyright>Cinegration Development LLC 2026</copyright>
+  <creator>Cindev</creator>
+  <manufacturer>Gemstone Lights</manufacturer>
+  <name>Gemstone Lights</name>
+  <model>Gemstone Lights</model>
+  <created>08/28/2025 12:00 PM</created>
+  <modified>03/05/2026 12:00 PM</modified>
+  <version>20260305</version>
+  <small image_source="c4z">device_sm.png</small>-
+  <large image_source="c4z">device_lg.png</large>
+  <control>lua_gen</control>
+  <controlmethod>ip</controlmethod>
+  <driver>DriverWorks</driver>
+  <proxies>
+    <proxy proxybindingid="5001" name="Gemstone Lights" image_source="c4z" small_image="device_sm.png" large_image="device_lg.png" primary="True">light_v2</proxy>
+  </proxies>
+  <config>
+    <properties>
+      <property>
+        <name>Cloud Status</name>
+        <default />
+        <type>STRING</type>
+        <readonly>true</readonly>
+      </property>
+      <property>
+        <name>Driver Status</name>
+        <default />
+        <type>STRING</type>
+        <readonly>true</readonly>
+      </property>
+      <property>
+        <name>Driver Version</name>
+        <default>Error in Lua Code</default>
+        <type>STRING</type>
+        <readonly>true</readonly>
+      </property>
+      <property>
+        <name>Driver Actions</name>
+        <type>DYNAMIC_LIST</type>
+      </property>
+      <property>
+        <name>Automatic Updates</name>
+        <type>LIST</type>
+        <items>
+          <item>Off</item>
+          <item>On</item>
+        </items>
+        <default>Off</default>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Debug Mode</name>
+        <type>LIST</type>
+        <items>
+          <item>Off</item>
+          <item>On</item>
+        </items>
+        <default>Off</default>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Debug Actions</name>
+        <default />
+        <type>DYNAMIC_LIST</type>
+      </property>
+      <property>
+        <name>Tech Reply Email</name>
+        <type>STRING</type>
+        <default />
+        <description>Enter your (installer) email address for tech support</description>
+      </property>
+      <property>
+        <name>Issue Description</name>
+        <type>STRING</type>
+        <default />
+        <description>Enter a message/description of the issue to be included with the problem you're having with the driver.</description>
+      </property>
+      <property>
+        <name>Console</name>
+        <type>STRING</type>
+        <default />
+        <password>true</password>
+        <readonly>false</readonly>
+      </property>
+
+      <property>
+        <name>--</name>
+        <type>LABEL</type>
+        <default>Gemstone Lights</default>
+      </property>
+      <property>
+        <name>Connection</name>
+        <type>STRING</type>
+        <default />
+        <readonly>true</readonly>
+      </property>
+      <property>
+        <name>Selected Pattern</name>
+        <type>STRING</type>
+        <default />
+        <readonly>true</readonly>
+      </property>
+      <property>
+        <name>Advanced Pattern Information</name>
+        <type>LABEL</type>
+        <default>Advanced Pattern Information</default>
+      </property>
+      <property>
+        <name>Selected Pattern JSON</name>
+        <type>STRING</type>
+        <default />
+        <readonly>false</readonly>
+      </property>
+      <!-- <property>
+        <name>Send Custom Pattern JSON</name>
+        <type>STRING</type>
+        <default />
+        <readonly>false</readonly>
+      </property> -->
+    </properties>
+    <commands>
+      <command>
+        <name>Select Pattern</name>
+        <description>Select PatternPARAM1 on NAME</description>
+        <sort_order>1</sort_order>
+        <params>
+          <param>
+            <name>Pattern</name>
+            <type>CUSTOM_SELECT:SelectPatternParamSelect</type>
+          </param>
+        </params>
+      </command>
+      <command>
+        <name>Set Architecture Pattern</name>
+        <description>Set Architecture Pattern calledPARAM1 for NAME</description>
+        <sort_order>2</sort_order>
+        <params>
+          <param>
+            <name>Name</name>
+            <type>STRING</type>
+          </param>
+          <param>
+            <name>Color 1</name>
+            <type>COLOR_SELECTOR</type>
+          </param>
+          <param>
+            <name>Color 1 Light Index</name>
+            <type>STRING</type>
+          </param>
+          <param>
+            <name>Color 2</name>
+            <type>COLOR_SELECTOR</type>
+          </param>
+          <param>
+            <name>Color 2 Light Index</name>
+            <type>STRING</type>
+          </param>
+          <param>
+            <name>Color 3</name>
+            <type>COLOR_SELECTOR</type>
+          </param>
+          <param>
+            <name>Color 3 Light Index</name>
+            <type>STRING</type>
+          </param>
+        </params>
+      </command>
+      <command>
+        <name>Set Pattern Speed</name>
+        <description>Set Pattern Speed toPARAM1 for NAME</description>
+        <sort_order>3</sort_order>
+        <params>
+          <param>
+            <name>Speed</name>
+            <type>RANGED_INTEGER</type>
+            <minimum>0</minimum>
+            <maximum>255</maximum>
+          </param>
+        </params>
+      </command>
+      <command>
+        <name>Send Custom Pattern JSON</name>
+        <description>Set Pattern JSON toPARAM1 for NAME</description>
+        <sort_order>4</sort_order>
+        <params>
+          <param>
+            <name>JSON</name>
+            <type>STRING</type>
+          </param>
+        </params>
+      </command>
+    </commands>
+    <script file="driver.lua" encryption="2" jit="1" />
+    <documentation file="www/documentation.html" />
+    <!-- <identify_text>Enter the IP address found on controller </identify_text> -->
+  </config>
+  <events>
+    <event>
+      <id>1</id>
+      <name>Pattern Selected</name>
+      <description>NAME pattern is selected</description>
+    </event>
+  </events>
+  <conditionals>
+  </conditionals>
+  <connections>
+    <connection>
+      <id>5001</id>
+      <connectionname>LIGHT_V2</connectionname>
+      <type>2</type>
+      <consumer>False</consumer>
+      <classes>
+        <class>
+          <classname>LIGHT_V2</classname>
+        </class>
+      </classes>
+    </connection>
+    <connection>
+      <id>6001</id>
+      <type>4</type>
+      <connectionname>Network Connection</connectionname>
+      <consumer>true</consumer>
+      <linelevel>true</linelevel>
+      <classes>
+        <class>
+          <classname>TCP</classname>
+          <ports>
+            <port>
+              <number>80</number>
+              <auto_connect>false</auto_connect>
+            </port>
+          </ports>
+        </class>
+      </classes>
+    </connection>
+
+  </connections>
+  <capabilities>
+    <!-- 3.3.0+ -->
+    <supports_target>false</supports_target>
+    <supports_color>true</supports_color>
+    <supports_color_correlated_temperature>true</supports_color_correlated_temperature>
+    <has_extras>true</has_extras>
+    <supports_default_on>false</supports_default_on>
+    <color_rate_behavior>1</color_rate_behavior>
+    <color_rate_min>25</color_rate_min>
+    <color_rate_max>86400000</color_rate_max>
+    <color_trace_tolerance>0.06</color_trace_tolerance>
+    <color_correlated_temperature_min>1800</color_correlated_temperature_min>
+    <color_correlated_temperature_max>6000</color_correlated_temperature_max>
+
+    <!-- 3.3.2+ -->
+    <brightness_on_mode_preset>false</brightness_on_mode_preset>
+    <brightness_on_mode_previous>false</brightness_on_mode_previous>
+    <brightness_rate_min>25</brightness_rate_min>
+    <brightness_rate_max>86400000</brightness_rate_max>
+    <color_on_mode_fade>false</color_on_mode_fade>
+    <color_on_mode_preset>false</color_on_mode_preset>
+    <color_on_mode_previous>true</color_on_mode_previous>
+    <supports_multichannel_scenes>false</supports_multichannel_scenes>
+    <default_brightness_rate>750</default_brightness_rate>
+    <default_color_rate>750</default_color_rate>
+
+    <!-- Brings up menu above driver properties -->
+    <set_level>true</set_level>
+    <ramp_level>false</ramp_level>
+    <has_preset>false</has_preset>
+    <dimmer>true</dimmer>
+    <level_target>false</level_target>
+    <cold_start>false</cold_start>
+    <has_fixed_ramp_rate>false</has_fixed_ramp_rate>
+    <fixed_ramp_rate>1000</fixed_ramp_rate>
+    <click_rates>false</click_rates>
+    <click_rate_min>0</click_rate_min>
+    <click_rate_max>86400000</click_rate_max>
+    <hold_rates>false</hold_rates>
+    <hold_rate_min>1000</hold_rate_min>
+    <hold_rate_max>86400000</hold_rate_max>
+    <advanced_scene_support>false</advanced_scene_support>
+    <reduced_als_support>false</reduced_als_support>
+    <load_group_support>false</load_group_support>
+    <min_max>false</min_max>
+    <on_off>true</on_off>
+    <hide_proxy_events>false</hide_proxy_events>
+    <has_button_events>false</has_button_events>
+    <buttons_are_virtual>false</buttons_are_virtual>
+    <has_leds>false</has_leds>
+    <num_buttons>0</num_buttons>
+  </capabilities>
+  <navigator_categories>
+    <category>Light</category>
+  </navigator_categories>
+  <composer_categories>
+    <category>lighting</category>
+  </composer_categories>
+  <search_types>
+    <type>Gemstone:lighting:controller</type>
+  </search_types>
+</devicedata>

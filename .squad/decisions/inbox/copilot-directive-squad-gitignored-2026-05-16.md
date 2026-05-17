@@ -1,0 +1,5 @@
+### 2026-05-17T01:47Z: User directive — `.squad/` excluded from public/committed scope
+**By:** Mads (via Copilot)
+**What:** The `.squad/` folder (team coordination state — decisions, agent histories, orchestration logs, casting registry, session logs) is **internal-only** and must be excluded from the public GitHub repo via `.gitignore`. Squad memory is for the AI team's continuity across sessions; it should never travel with the published driver. The same applies to other internal/transient artifacts: `.copilot/` (local Copilot session state), `*.pcap` files, any `.squad/research/` outputs, and similar local-only artifacts.
+**Why:** Privacy and signal-to-noise — team-coordination notes are not user-facing project content. The published repo should contain only the driver, docs, manifest, license, and contribution scaffolding.
+**Implementation guidance:** `.gitignore` should include at minimum: `.squad/`, `.copilot/`, `*.pcap`, `node_modules/`, and OS junk (`Thumbs.db`, `.DS_Store`). Keep the published repo focused on `drivers/`, `README.md`, `LICENSE`, and any top-level scaffolding necessary for HPM consumers.

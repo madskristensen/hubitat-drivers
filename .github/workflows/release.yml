@@ -1,0 +1,191 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'drivers/**/packageManifest.json'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --force --tags origin
+
+      - name: Detect pending releases
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t manifests < <(find drivers -type f -name 'packageManifest.json' | sort)
+
+          if [ "${#manifests[@]}" -eq 0 ]; then
+            echo '[]' > release-candidates.json
+            echo 'count=0' >> "$GITHUB_OUTPUT"
+            echo 'no new releases'
+            exit 0
+          fi
+
+          echo '[]' > release-candidates.json
+
+          for manifest in "${manifests[@]}"; do
+            driver_dir=$(dirname "$manifest")
+            slug=$(basename "$driver_dir")
+            version=$(jq -r '.version' "$manifest")
+            package_name=$(jq -r --arg fallback "$slug" '.packageName // .name // $fallback' "$manifest")
+            tag="${slug}-v${version}"
+            driver_file="${driver_dir}/${slug}.groovy"
+
+            if [ "$version" = 'null' ] || [ -z "$version" ]; then
+              echo "::error::Missing version in $manifest"
+              exit 1
+            fi
+
+            if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              echo "Tag ${tag} already exists; skipping"
+              continue
+            fi
+
+            if [ ! -f "$driver_file" ]; then
+              driver_file=$(find "$driver_dir" -maxdepth 1 -type f -name '*.groovy' | sort | head -n 1)
+            fi
+
+            if [ -z "${driver_file:-}" ] || [ ! -f "$driver_file" ]; then
+              echo "::error::Unable to find Groovy driver file for $manifest"
+              exit 1
+            fi
+
+          notes=$(python - "$driver_file" "$version" <<'PY'
+          import re
+          import sys
+
+          path, version = sys.argv[1:]
+          lines = open(path, encoding='utf-8').read().splitlines()
+          in_changelog = False
+          capturing = False
+          entry = []
+
+          for raw in lines:
+              stripped = raw.strip()
+              if stripped == '*/':
+                  if in_changelog:
+                      break
+                  continue
+              if stripped.startswith('/**'):
+                  continue
+              if stripped.startswith('*'):
+                  stripped = stripped[1:].lstrip()
+              if not in_changelog:
+                  if stripped == 'Changelog:':
+                      in_changelog = True
+                  continue
+              if not stripped:
+                  continue
+
+              version_match = re.match(r'^(\d+\.\d+\.\d+)\s+[—-]\s+(\d{4}-\d{2}-\d{2})\s+[—-]\s+(.*)$', stripped)
+              if version_match:
+                  if capturing:
+                      break
+                  if version_match.group(1) == version:
+                      capturing = True
+                      entry.append(f'## {version} — {version_match.group(2)}')
+                      entry.append('')
+                      entry.append(f'- {version_match.group(3)}')
+                  continue
+
+              if capturing:
+                  entry.append(stripped if stripped.startswith(('-', '*')) else f'- {stripped}')
+
+          if not entry:
+              raise SystemExit(f'No changelog entry found for version {version} in {path}')
+
+          print('\n'.join(entry))
+          PY
+          )
+
+            jq \
+              --arg manifest "$manifest" \
+              --arg driver "$driver_file" \
+              --arg slug "$slug" \
+              --arg version "$version" \
+              --arg tag "$tag" \
+              --arg name "$package_name" \
+              --arg notes "$notes" \
+              '. + [{
+                manifest: $manifest,
+                driver: $driver,
+                slug: $slug,
+                version: $version,
+                tag: $tag,
+                name: $name,
+                notes: $notes
+              }]' release-candidates.json > release-candidates.next.json
+            mv release-candidates.next.json release-candidates.json
+          done
+
+          count=$(jq 'length' release-candidates.json)
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+
+          if [ "$count" -eq 0 ]; then
+            echo 'no new releases'
+          else
+            echo 'release candidates:'
+            jq '.' release-candidates.json
+          fi
+
+      - name: Create tags and releases
+        if: steps.detect.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          while IFS= read -r candidate; do
+            tag=$(jq -r '.tag' <<< "$candidate")
+            name=$(jq -r '.name' <<< "$candidate")
+            version=$(jq -r '.version' <<< "$candidate")
+            notes=$(jq -r '.notes' <<< "$candidate")
+            title="${name} v${version}"
+            notes_file='release-notes.md'
+            target_sha=$(git rev-parse HEAD)
+
+            printf '%s\n' "$notes" > "$notes_file"
+
+            tag_object_sha=$(gh api \
+              --method POST \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${GITHUB_REPOSITORY}/git/tags" \
+              -f tag="$tag" \
+              -f message="$title" \
+              -f object="$target_sha" \
+              -f type='commit' \
+              --jq '.sha')
+
+            gh api \
+              --method POST \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${tag}" \
+              -f sha="$tag_object_sha" > /dev/null
+
+            gh release create "$tag" \
+              --title "$title" \
+              --notes-file "$notes_file"
+
+            rm -f "$notes_file"
+            echo "Created ${tag}"
+          done < <(jq -c '.[]' release-candidates.json)

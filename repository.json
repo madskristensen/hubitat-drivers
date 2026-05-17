@@ -1,0 +1,12 @@
+{
+  "author": "Mads Kristensen",
+  "gitHubUrl": "https://github.com/madskristensen",
+  "packages": [
+    {
+      "name": "Gemstone Lights",
+      "category": "Integrations",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/packageManifest.json",
+      "description": "Hubitat driver for Gemstone permanent outdoor lighting controllers. Cloud REST + LightEffects + ColorTemperature + favorites-first effect picker."
+    }
+  ]
+}

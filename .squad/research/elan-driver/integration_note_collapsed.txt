@@ -1,0 +1,843 @@
+=== PAGE 1 ===
+Integration
+Note
+Manufacturer:
+Gemstone
+Lighting
+Model
+Number(s):
+Hub2
+Controller
+Core
+Module
+Version:
+9.0
+Build
+17.0
+Rel
+Driver
+Developer:
+Cindev
+Document
+Revision
+Date:
+Feb
+11
+2026
+Overview
+&
+Supported
+Features
+This
+driver
+is
+a
+Lighting
+Controller
+driver
+that
+will
+give
+you
+access
+to
+the
+standard
+Lighting
+Interface
+and
+select
+Patterns/Scenes
+from
+a
+Nice
+Interface.
+T HE
+FOLLOWING
+OPTIONS
+ARE
+SUPPORTED
+BY
+[ THIS
+DRIVER ] :
+●
+Lighting
+Control
+(Brightness
+0-100%)
+●
+Single
+Color/RGB
+Selection
+●
+Pattern
+Selection
+(Scenes)
+●
+Customized
+Brightness
++
+Speed
+setting
+for
+all
+patterns
+●
+Custom
+Pattern
+Selection/Customization
+●
+Universal
+Function
+Triggering
+for
+Custom
+Patterns
+T HE
+FOLLOWING
+PLAYBACK
+OPTIONS
+ARE
+NOT
+SUPPORTED
+BY
+[ THIS
+DRIVER ]:
+●
+Color
+Temperature
+control
+values
+●
+Only
+one
+Gemstone
+Light
+per
+driver
+instance
+Any
+feature
+not
+specifically
+noted
+as
+supported
+should
+be
+assumed
+to
+be
+unsupported.
+=== PAGE 2 ===
+[Driver]
+Configuration
+Once
+the
+Gemstone
+Lighting
+product
+is
+working
+from
+the
+Manufacture’s
+App:
+●
+Add
+Driver
+into
+the
+Lighting
+Controllers
+section
+●
+Click
+“Import”
+at
+the
+bottom
+and
+select
+the
+Gemstone_Lighting.EDRVC
+●
+Select
+Gemstone
+Lighting
+Controller
+to
+add
+into
+the
+system
+●
+Enter
+the
+IP
+Address
+of
+the
+Controller
+○
+At
+this
+point,
+the
+driver
+will
+display
+the
+status
+code:
+GREEN
+/
+200 .
+If
+it
+does
+not
+display
+check
+your
+IP
+settings
+and
+the
+controller
+is
+connected
+to
+the
+network
+At
+this
+point,
+the
+driver
+is
+set
+up
+and
+should
+be
+able
+to
+control
+the
+lighting
+zones
+and
+execute
+the
+patterns.
+[Hardware/Tech
+Support]
+For
+installation/integration
+support
+contact
+the
+manufacturer
+directly:
+https://www.gemstonelights.com/support/elan/
+Light
+Zone
+Configuration
+The
+driver
+enables
+the
+Light
+interface
+with
+support
+for
+On/Off/Toggle,
+Dimming
+and
+RGB
+control.
+Standard
+Nice
+components
+that
+interact
+with
+these
+items
+are
+supported.
+Below
+is
+an
+example
+of
+Lighting
+Zone
+configuration
+page:
+=== PAGE 3 ===
+Light
+Scene/Pattern
+Configuration
+The
+driver
+supports
+lighting
+Scenes
+or
+“Patterns”
+as
+Gemstone
+refers
+to
+them.
+All
+Patterns
+and
+ID
+and
+many
+attributes
+describing
+how
+the
+scene
+will
+behave.
+In
+Nice/ELAN
+driver
+setup,
+a
+SCENE
+is
+defined
+as
+an
+ID,
+Brightness
+and
+Speed
+Value
+(see
+image
+below).
+When
+the
+driver
+is
+first
+installed,
+a
+common
+set
+of
+SCENES
+are
+automatically
+added
+and
+linked.
+These
+can
+then
+be
+used/deleted/changed
+according
+to
+the
+project
+needs.
+Dealers
+can
+add
+custom
+SCENES
+by
+entering
+the
+PatternId,
+Brightness
+and
+Speed
+values.
+S EE
+A PPENDIX
+AT
+THE
+END
+OF
+THIS
+DOCUMENT
+FOR
+A
+COMPLETE
+LIST
+OF
+PATTERNS
+Custom
+Pattern
+Configuration
+and
+Selection
+The
+driver
+also
+supports
+completely
+custom
+Patterns
+using
+the
+pattern
+JSON
+Object
+in
+one
+of
+five
+“Custom
+Pattern”
+properties.
+The
+Custom
+Page
+“Custom
+Patterns”
+contains
+5
+properties
+where
+a
+custom
+JSON
+object
+can
+be
+stored
+and
+then
+used
+with
+“Universal
+Functions”
+in
+Nice/ELAN
+programming.
+To
+Use
+Custom
+Patterns:
+●
+Copy
+Example
+JSON
+property
+and
+edit
+the
+needed
+fields
+●
+Paste
+the
+valid
+JSON
+object
+into
+one
+of
+the
+“Custom
+Pattern”
+Properties
+under
+the
+Custom
+Page
+“Custom
+Patterns”
+●
+Under
+“Event
+Mapper”
+section
+○
+Select
+Add
+New
+Command
+○
+Select
+“Lighting
+Device
+Controllers”
+○
+Select
+the
+Gemstone
+Lighting
+○
+Select
+specific
+Custom
+Pattern
+to
+trigger
+and
+add
+to
+Triggered
+Event.
+=== PAGE 4 ===
+{Custom
+Pattern
+Page}
+{Event
+Mapper
+->
+Execute
+Function}
+C OMMON
+M ISTAKES
+1.
+“My
+Nice
+Systems
+isn’t
+tracking
+when
+I
+change
+something
+from
+the
+Manufacture
+Lighting
+App.”
+The
+driver
+polls
+Gemstone
+Lights
+once
+every
+5
+minutes.
+Dealers
+can
+use
+the
+“Get
+Info”
+command
+button
+to
+obtain
+lighting
+data
+immediately.
+=== PAGE 5 ===
+A PPENDIX :
+P ATTERNS
+Below
+is
+a
+table
+of
+all
+the
+possible
+patterns
+and
+their
+default
+brightness
+and
+speed
+settings.
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Awareness  Healthcare  BW,  green,  blue  51b01b4a-2e2b-636c-e9c6-da8b4c6e42a0  255  128 Awareness Healthcare  BW,  green,  blue  10  734c67dd-52a4-98b9-7997-78830994e898  255  128 Awareness  Healthcare  BW,  green,  blue  2  42c1de2f-fefc-735e-272d-f35fcecfc276  255  128 Awareness  Healthcare  BW,  green,  blue  3  c15f83e5-3cd4-b3d7-5e8d-b91bd4bc18d6  255  128 Awareness  Healthcare  BW,  green,  blue  4  b9aa8ebc-46e8-a36a-53a1-aed64cc168b5  255  128 Awareness  Healthcare  BW,  green,  blue  5  9d695335-1271-be24-24ad-d7501b061674  255  128 Awareness  Healthcare  BW,  green,  blue  6  92fee963-9d76-db60-9a62-131c7aa4934f  255  128 Awareness  Healthcare  BW,  green,  blue  7  bcd78111-7fa4-8366-26cb-59cf4cb860b1  255  128 Awareness  Healthcare  BW,  green,  blue  8  e5ee34b4-548a-2d05-a234-9c6825d2071e  255  128
+=== PAGE 6 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Awareness  Healthcare  BW,  green,  blue  9  6d0516ae-5d3d-990d-9269-0049d9f49f2f  255  128 Awareness  Healthcare  WW,  pink,  purple  4c1310d8-8a26-b2ee-d7b1-0bc29f008d80  255  128 Awareness  Healthcare  WW,  pink,  purple  10  bd2e5ea3-c06c-c13b-d7ce-2c547bf93059  255  128 Awareness  Healthcare  WW,  pink,  purple  2  5ffa55ac-205b-ad92-df53-0916aee0b510  255  128 Awareness  Healthcare  WW,  pink,  purple  3  681755e7-fc2a-da69-d72e-cb55def777b8  255  128 Awareness  Healthcare  WW,  pink,  purple  4  66c0f2c2-c9e9-50a3-a887-8d3f9b21cb37  255  128 Awareness  Healthcare  WW,  pink,  purple  5  f4bc6cfc-8597-35cb-5f0d-9b4c6887d8a3  255  128 Awareness  Healthcare  WW,  pink,  purple  6  b9ca0592-c90d-55f4-f7c8-1899c1130d1a  255  128 Awareness  Healthcare  WW,  pink,  purple  7  c3176b50-eeb9-8601-df51-fdc45a123526  255  128 Awareness  Healthcare  WW,  pink,  purple  8  9139334b-4054-bb69-839a-4d83dbb099c4  255  128 Awareness  Healthcare  WW,  pink,  purple  9  58fc7c98-c87a-d4ee-94f6-3afc6fdcd9bb  255  128 Awareness  U.S.  Military  Air  Force  59fc6b16-ac7f-ce9b-56ad-0fa0a4869bb0  255  128
+=== PAGE 7 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Awareness  U.S.  Military  Air  Force  2  231ee8ef-a84b-8915-b530-ec43093128ca  255  128 Awareness  U.S.  Military  Air  National  Guard  43f9fc4f-455d-de66-5fa1-0355beda2717  255  128 Awareness  U.S.  Military  Air  National  Guard  2  4502f930-0979-8220-116e-9a44c953ad75  255  128 Awareness  U.S.  Military  Army  2a9f506e-e4f2-8b60-0a19-5295ea7f8996  255  128 Awareness  U.S.  Military  Army  2  359e3fae-7bdc-0f04-2cca-724d9a3e1ce1  255  128 Awareness  U.S.  Military  Coast  Guard  700ce466-b4e3-34d4-3955-b44bb4854d34  255  128 Awareness  U.S.  Military  Coast  Guard  2  2f76e267-5ad8-a5e2-8ff5-9dfb2e9b566d  255  128 Awareness  U.S.  Military  Marine  Corps  59a2e0a1-c438-0ab3-d0e7-0c21ee6dd764  255  128 Awareness  U.S.  Military  Marine  Corps  2  dfbe1ac6-49bb-2fb0-7765-417f3d6c1a89  255  128 Awareness  U.S.  Military  Navy  4700f813-718a-182c-9ad7-8297312c3446  255  128 Awareness  U.S.  Military  Navy  2  0b6a861c-ebd1-6d08-af62-3b310ca252f7  255  128 Awareness  U.S.  Military  Space  Force  78dd9ee3-6cb2-53de-b1c3-ac8ff145c7ac  255  128
+=== PAGE 8 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Awareness  U.S.  Military  Space  Force  2  883ed671-9aef-786f-9d3c-00c1d2e0c44a  255  128 Awareness  Police  Services  Back  the  Blue  2fee7deb-dabf-2009-5c5d-a58d44f11214  255  128 Awareness  Police  Services  Back  the  Blue  2  ccc2031f-c200-8dd7-3c1b-3c6a351d8f7c  255  128 Awareness  Police  Services  CPS  4d3ce3e2-1176-4afb-0025-cb211b76e56f  255  128 Awareness  Police  Services  CPS  2  3dcde4e2-b69a-6c4f-06c3-fc4af288c8ad  255  128 Awareness  Police  Services  Police  6fac14b1-0eb4-3c1f-175b-4be9bf00f727  255  128 Awareness  Police  Services  Police  2  550a3614-cf13-5527-c883-cf2981774c1f  255  128 Awareness  Police  Services  Police  3  3facce39-08bf-7f81-be16-1ea27f4d242e  255  128 Awareness  Police  Services  Police  4  7dd5f50a-dc13-787b-361d-d89a9c55b4cd  255  128 Awareness  Police  Services  Police  Other  dbe51ace-c53d-ae8d-725b-24c3547eb875  255  128 Awareness  Pride  Pride  a3c1cf34-469b-83ae-9acb-b7d352812a09  255  128 Awareness  Pride  Pride  2  d1f326f5-514b-2d02-ccb9-a384f0fa4715  255  128
+=== PAGE 9 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Awareness  Pride  Pride  3  b255aeb6-8ad0-1e6c-73be-095fec3dbeaa  255  128 Awareness  Pride  Pride  4  b6ec74dd-b5b3-5801-fe77-571ddb6f9933  255  128 Awareness  Pride  Pride  5  f7aded67-ddae-b5d1-52d6-dd7bd443d0c0  255  128 Awareness  Pride  Taste  the  Rainbow  e935df49-7c04-fd71-6680-d3056c83b62c  255  128 Awareness  Pride  Taste  the  Rainbow  2  c105972d-3c4b-868c-e5a8-1a71f0635852  255  128 Awareness Truth  and  Reconciliation  1.  Orange  Shirt  25167062-3c37-29b1-10db-b6812c60b8ff  255  128 Awareness Truth  and  Reconciliation  2.  Truth  23b0c2ca-0014-7bee-8935-f34800c672a9  255  128 Awareness Truth  and  Reconciliation  5.  Child  e91fda5f-feed-ac84-9423-414114ae4516  255  128 Awareness Truth  and  Reconciliation  6.  Matters  bac63388-9263-0838-8c2e-dfd79b8169d3  255  128 Awareness Truth  and  Reconciliation  Reconciliation  84fd2ff7-3688-0ae4-e2a7-11e885082e02  255  128
+=== PAGE 10 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Awareness Truth  and  Reconciliation  Every  52714311-a197-5a0f-13b7-17fa2a4503e5  255  128 Pop  Culture  Paw  Patrol  Chase  a5ad9a09-8996-aca7-ad94-3e23676569d7  255  128 Pop  Culture  Paw  Patrol  Everest  d028e12e-762d-1467-6e27-d416e18dcaf1  255  128 Pop  Culture  Paw  Patrol  Marshall  329e9195-fd6a-36e8-c989-dba5e8a1e6f9  255  128 Pop  Culture  Paw  Patrol  Rocky  8079df14-e4a3-a15d-8932-cfdccd9dc9ff  255  128 Pop  Culture  Paw  Patrol  Rubble  92afd7ae-4abe-5201-51c2-a1a99a5ac608  255  128 Pop  Culture  Paw  Patrol  Sky  22800203-3d50-ad62-9049-3c47d56b5491  255  128 Pop  Culture  Paw  Patrol  Zuma  4d592509-0bd2-720e-2648-3ad4c1dcb9ee  255  128 Pop  Culture  Disney  Anna  c70a9b0f-2968-d85a-77f3-c63141dd9eae  255  128 Pop  Culture  Disney  Ariel  910d5d68-90e6-0175-1380-fe653d2cd53f  255  128 Pop  Culture  Disney  Belle  630d255c-6718-7764-ae63-0f16986d4b94  255  128 Pop  Culture  Disney  Cinderella  a43ec3ac-fec9-370c-1ad3-f3772024431b  255  128
+=== PAGE 11 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Pop  Culture  Disney  Coco  82b78f13-9b8d-fbb5-8b83-622e6b0e0104  255  128 Pop  Culture  Disney  Dory  c40b869c-a1c7-e05e-7c4e-7be96c322ac9  255  128 Pop  Culture  Disney  Elsa  cf91f750-b3b7-186d-e663-6d2f3cfe9c1e  255  128 Pop  Culture  Disney  Jasmine  70d2259d-8035-6df1-abbd-21c1d74b679c  255  128 Pop  Culture  Disney  Lion  King  ef15f04c-6b75-9197-a8d1-3b9e2e7f055e  255  128 Pop  Culture  Disney  Merida  a0724ab3-16c1-85d1-d05a-4ace45e33b81  255  128 Pop  Culture  Disney  Mickey  Mouse  623f5fc8-bf8d-7118-d652-193fed811118  255  128 Pop  Culture  Disney  Minnie  Mouse  97b35945-9e4e-0b5e-d2fe-93f1c87084ad  255  128 Pop  Culture  Disney  Moana  6f64e546-caca-8a85-4a6e-506461ec3852  255  128 Pop  Culture  Disney  Nemo  5dd2f2c2-0dcc-02d5-bb68-c49e93a562a6  255  128 Pop  Culture  Disney  Tangled  abd137f6-1fcb-67c4-fd40-1197d43f34d2  255  128 Pop  Culture  Barbie  Barbenheimer  5cf4d5fc-2262-e189-a3a4-80ed13925a85  255  128
+=== PAGE 12 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Pop  Culture  Barbie  Barbie  and  Ken  e42f5be9-306e-ce44-6a67-556a190cf5b2  255  128 Pop  Culture  Barbie  Barbie  Girl  edcd2bf3-f0e0-eddb-c330-f1adadab6b46  255  128 Pop  Culture  Barbie  Barbie  Land  3d1862b3-3946-1d49-94ce-a7dc2de337db  255  128 Pop  Culture  Barbie  Barbie  World  79c70355-a6d9-38e1-ba02-aca053cbc80b  255  128 Pop  Culture  Barbie  Human  Emotion  978de440-0852-36e7-ea2e-ae3a747c78df  255  128 Pop  Culture  Barbie  I'm  Just  Ken  16cf3705-09a8-9d9b-dc14-c0bb0ccf2e8e  255  128 Pop  Culture  Barbie  Kenough  0bad1d5a-7f81-818c-5a00-55e1ab9b0f2e  255  128 Pop  Culture  Barbie  Live  Your  Dream  08daa83a-ee88-5a2f-5a9e-9da5bdfd5f0a  255  128 Pop  Culture  Barbie  Princess  fce686a3-8509-0573-87ec-f7ca15f6aad6  255  128 Pop  Culture  Barbie  Starry  Barbie  efe8ddc5-9221-0c8c-0ac2-06039d1c9d83  255  128 Pop  Culture  Wicked  Elphaba's  Glamo  3546b916-07a9-4157-8661-892eb5a94e10  255  128 Pop  Culture  Wicked  Elphaba's  Rebellion  2561f4bc-6d22-4f9d-877f-b01f2a1ef2e7  255  232
+=== PAGE 13 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Pop  Culture  Wicked  Emerald  Enchantment  a92d35d1-add0-4be7-a648-d12e04efcf49  255  128 Pop  Culture  Wicked  Flying  Broomlight  81f21697-739e-4267-a147-94be5f930fc0  255  128 Pop  Culture  Wicked  For  Good  Glow  8098dc7d-2e17-4da9-bd7f-598d391a624f  255  232 Pop  Culture  Wicked  Glindas  Glam  6ee396fe-19c5-4b5c-a177-82845aff2234  255  255 Pop  Culture  Wicked  Glindas  Glamo  3fd8ed45-f9d0-4722-a5d7-df4b201b5295  255  128 Pop  Culture  Wicked No  One  Mourns  the  Wicked  0d2fcd7b-3097-46a6-857a-4f6501362ee4  255  205 Pop  Culture  Wicked  Ozdust  Ballroom  5122b1c9-026d-4d26-8542-3277dd9c6acc  255  102 Pop  Culture  Wicked  Spellbound  Symphony  ba6e6eb2-ca00-4e57-84c2-5fd2c104f832  255  128 Pop  Culture  Wicked  Wicked  Whirlwind  f8d2b91c-ef6f-404b-aefa-48addb2f6156  255  255 Pop  Culture  Marvel  vs.  DC  Aquaman  64d668b8-7b85-cf88-4a05-1382b650cc55  255  128 Pop  Culture  Marvel  vs.  DC  Batman  798bd0ca-0d66-7d11-64bb-eab08f92cdf4  255  128 Pop  Culture  Marvel  vs.  DC  Captain  America  80145091-9913-9b0b-51aa-c6953018663d  255  128
+=== PAGE 14 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Pop  Culture  Marvel  vs.  DC  Captain  Marvel  69262f4c-2c55-c057-3263-13fb210f65eb  255  128 Pop  Culture  Marvel  vs.  DC  Cyborg  fb6e98ae-ce20-a943-b0b7-732303e6af06  255  128 Pop  Culture  Marvel  vs.  DC  Flash  a838c7b0-55ae-8425-6bfc-aad3303b4a06  255  128 Pop  Culture  Marvel  vs.  DC  Hulk  6b1006b3-3846-fbb2-7af8-71197dd79600  255  128 Pop  Culture  Marvel  vs.  DC  Iron  Man  20a1fdde-db31-e565-f4de-5d62f4864a83  255  128 Pop  Culture  Marvel  vs.  DC  Spiderman  0de34eb7-2e6d-6e56-e2a2-7c8815da641d  255  128 Pop  Culture  Marvel  vs.  DC  Superman  63a53078-66e4-fcb5-9571-ec014622760b  255  128 Pop  Culture  Marvel  vs.  DC  Wolverine  262f0ec0-4187-d512-6e6d-bc85796bae7f  255  128 Pop  Culture  Marvel  vs.  DC  Wonder  Woman  0039e81a-f75c-d558-18f7-e0167baf20c4  255  128 Pop  Culture  Star  Wars  C3PO  ce5ab3f5-fa8c-b84b-874c-693c237c299b  255  128 Pop  Culture  Star  Wars  Darth  Vader  574726ae-5555-bdf2-1b2e-877461fa4263  255  128 Pop  Culture  Star  Wars  Kylo  Ren  deea5bb5-8e65-a0c0-7d62-e75aa59dee44  255  128
+=== PAGE 15 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Pop  Culture  Star  Wars  Lightsaber  Blue  61ea0fb4-3077-70be-1a5c-ea1c814b3c31  255  128 Pop  Culture  Star  Wars  Lightsaber  Blue  2  e84843f5-2848-19e0-4058-47628b0ce446  255  128 Pop  Culture  Star  Wars  Lightsaber  Green  98bf84e3-7771-44d7-a926-00a636e9154f  255  128 Pop  Culture  Star  Wars  Lightsaber  Green  2  c7e44403-5230-51d1-50a0-6476cb0ef2f0  255  128 Pop  Culture  Star  Wars  Lightsaber  Indigo  116433ec-6d97-a6ee-8e2f-5f903e04ad8f  255  128 Pop  Culture  Star  Wars  Lightsaber  Indigo  2  d81e0051-3137-8e74-11f4-22525bce9ded  255  128 Pop  Culture  Star  Wars  Lightsaber  Orange  74cf61c7-99ec-2313-6b40-8cb3d8dcc8a2  255  128 Pop  Culture  Star  Wars  Lightsaber  Orange  2  2f784243-958e-b5c4-c9ba-3aa9bc5a79c1  255  128 Pop  Culture  Star  Wars  Lightsaber  Purple  78ea43ce-0361-ad95-915f-ac7a0a7ac129  255  128 Pop  Culture  Star  Wars  Lightsaber  Purple  2  9f36cf8a-7208-2eca-7037-af3f0c7d798b  255  128 Pop  Culture  Star  Wars  Lightsaber  Red  21210418-41b7-7fc0-a671-2426d443fe52  255  128 Pop  Culture  Star  Wars  Lightsaber  Red  2  7b3ad092-909c-666f-8323-1f94f780ca1b  255  128
+=== PAGE 16 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Pop  Culture  Star  Wars  Lightsaber  White  6d7ad62d-813f-d42b-17e0-6eafb7ed191a  255  128 Pop  Culture  Star  Wars  Lightsaber  White  2  822949c5-4f47-7bf0-e535-5f7c2bad0c22  255  128 Pop  Culture  Star  Wars  Lightsaber  Yellow  fef5422c-6c34-333c-f735-605b15fdeddb  255  128 Pop  Culture  Star  Wars  Lightsaber  Yellow  2  9f800827-157e-e32d-e4ff-7500ed00a5a3  255  128 Pop  Culture  Star  Wars  Luke  and  Vader  163f1b26-f1f7-6c67-2cf0-f78ad7b541e5  255  128 Pop  Culture  Star  Wars  Luke  Skywalker  1fa81181-f821-6a89-1d4d-8b5efd98eaf9  255  128 Pop  Culture  Star  Wars  Mace  Saber  8a6ca4ac-1fea-7d72-ced8-d3d57c1d2c42  255  128 Pop  Culture  Star  Wars  R2D2  8732fd06-4ddd-2d79-7b62-896647105318  255  128 Pop  Culture  Star  Wars  Rey  a62793c0-bb1f-9b97-9db1-16706a831c11  255  128 Pop  Culture  Star  Wars  Skywalker  Saber  51615e0e-a79c-aaa8-d9c7-09cd1212c84f  255  128 Pop  Culture  Star  Wars  The  Galaxy  3c739763-f545-0132-c3f1-7e5007d47cc2  255  128 Pop  Culture  Star  Wars  Yoda  Saber  065e5a03-7a7b-28f6-f5a0-338af5d11c55  255  128
+=== PAGE 17 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Pop  Culture  Taylor  Swift  Midnights  decb1f6f-4860-f22f-5c3f-681cd12dbe19  255  210 Pop  Culture  Taylor  Swift  Evermore  63e7e4f7-8c6a-2c3a-d661-2a05643a2ed1  255  214 Pop  Culture  Taylor  Swift  Folklore  024b1aca-e6db-309a-a6a5-d3f694fde4e6  255  158 Pop  Culture  Taylor  Swift  Lover  a2f4ce53-b31a-e4f5-09b2-106a1c490f0e  255  175 Pop  Culture  Taylor  Swift  Reputation  a20ee14a-70a9-968e-80ce-d554a5159e63  255  204 Pop  Culture  Taylor  Swift  1989  53370956-5880-f52d-48bb-8402c1af1e48  255  229 Pop  Culture  Taylor  Swift  Red  2a574333-158c-c6f2-208c-320647a9a21e  255  66 Pop  Culture  Taylor  Swift  Fearless  79b670f2-44cc-acd4-5d23-8e15dbbcb37d  255  224 Pop  Culture  Taylor  Swift  Taylor  Swift  40c4dd5a-d975-6874-6da7-43fe0d746c45  255  168 Pop  Culture  Taylor  Swift  Speak  Now  066c1af9-16d8-1274-02d8-db1d61d0367b  255  128 Everyday Amazing  Motionless  Aqua  Blue  490ce7a4-36e0-05a6-5563-fec30dce9bfb  255  128 Everyday Amazing  Motionless  Blue  769ea7b3-5bc0-e194-d178-e4a044452153  255  128
+=== PAGE 18 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Everyday Amazing  Motionless  Bright  1  on,  5  off  a42b1c2f-cd23-196e-3da9-c38b7f3dc826  255  128 Everyday Amazing  Motionless  Bright  2  on,  5  off  93bf8933-004a-caea-16c2-7810066e654e  255  128 Everyday Amazing  Motionless  Bright  White  2ba918fc-1729-ed1f-b0cb-ca312431731d  255  128 Everyday Amazing  Motionless  CNY  663b2499-e677-d865-5648-e784d45e10cd  255  128 Everyday Amazing  Motionless  Canada  Day  28609643-4b25-9180-8429-3d092cbc5055  255  128 Everyday Amazing  Motionless  Canada  Day  Cool  efd6f8eb-575b-77e2-8d91-c8cbe9c9a124  255  128 Everyday Amazing  Motionless  Canada  Day  Warm  98c1561d-181f-32a4-fe89-a29168925ab7  255  128 Everyday Amazing  Motionless  Christmas  1R  1G  4a95e2dd-e3a8-134c-8332-bc01592de2e6  255  128 Everyday Amazing  Motionless  Christmas  3R  3G  c2ea1d0d-bf6f-5fcd-b866-76ed573f7fb1  255  128 Everyday Amazing  Motionless  Christmas  5R  5G  431a54fb-e66f-a4cf-18ce-9d87b2b7edb9  255  128 Everyday Amazing  Motionless  Christmas  Fruit  a1fe9c97-fa08-fd4d-3c3e-66beb59d0907  255  128 Everyday Amazing  Motionless  Christmas  GB  64438222-f5e7-4ac5-1de4-35baf32ade5a  255  128
+=== PAGE 19 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Everyday Amazing  Motionless  Christmas  Glam  60f37a18-6113-60fa-f6dd-6dacd597b114  255  128 Everyday Amazing  Motionless  Christmas  Holly  bdc3a2da-762d-bd3e-ffe5-cb8982cf652a  255  128 Everyday Amazing  Motionless  Christmas  Old  5648f2a1-3c88-941f-3cc3-777be250a576  255  128 Everyday Amazing  Motionless  Christmas  Paste  d3f5d5d9-693a-e6ef-708c-f06d40906125  255  128 Everyday Amazing  Motionless  Christmas  RB  c2e88a75-b39d-e99f-3a92-3a279abbab82  255  128 Everyday Amazing  Motionless  Christmas  RGB  bce8c8fd-56f4-e7bd-d51c-62de2ed525df  255  128 Everyday Amazing  Motionless  Christmas  Warm  95e70418-0cab-6a7a-1ec9-16eb55b41fb8  255  128 Everyday Amazing  Motionless  Cinco  de  Mayo  53da7f0f-7426-840e-916b-9eaa3bd7a628  255  128 Everyday Amazing  Motionless  Cinco  de  Mayo  2  53475f46-8320-da27-afcf-d06cc40e05b2  255  128 Everyday Amazing  Motionless  Cool  1  on,  5  off  d6f332e7-784a-eb43-d911-bb95faf478fb  255  128 Everyday Amazing  Motionless  Cool  2  on,  5  off  b6d45643-b525-67ee-fe72-0114ac57fbb3  255  128 Everyday Amazing  Motionless  Cool  White  98701b4d-6362-e710-daf2-1a4f5db3c81e  255  128
+=== PAGE 20 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Everyday Amazing  Motionless  Diwali  a3a3bb0a-5eb0-bf65-1a47-5b06ccfc94cf  255  128 Everyday Amazing  Motionless  Diwali  2  cc058a21-1389-14ef-b946-a35e3de72fcd  255  128 Everyday Amazing  Motionless  Easter  5111dc9a-28d6-d1cc-5500-23eea08a21ba  255  128 Everyday Amazing  Motionless  Easter  Eggs  69bf296b-2dcd-e9ef-67ba-a100f0037cdd  255  128 Everyday Amazing  Motionless  Father's  Day  6eb3b346-fd5e-5af5-71e1-1e53fce70e00  255  128 Everyday Amazing  Motionless  Father's  Day  2  c6024bde-1600-0363-dedc-1ed0c63f2dd4  255  128 Everyday Amazing  Motionless  Green  1c8281e4-9125-8056-806b-4837a3ccd728  255  128 Everyday Amazing  Motionless  Halloween  c1dd4d91-1023-35af-ef8e-5800cb1504fa  255  128 Everyday Amazing  Motionless  Halloween  2  5a427611-7f03-3889-781a-99ee4d877d9b  255  128 Everyday Amazing  Motionless  Halloween  3  79c43674-d440-103e-57c1-660d95ae2b50  255  128 Everyday Amazing  Motionless  Hanukkah  9981bd74-bd5a-3ab2-807d-3184ad5d3e04  255  128 Everyday Amazing  Motionless  Hanukkah  2  dcd32df5-e007-2ffe-29e1-a989b29d9ea0  255  128
+=== PAGE 21 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Everyday Amazing  Motionless  Indigenous  8d90d81f-78fc-6e4f-bf1f-074280fd101c  255  128 Everyday Amazing  Motionless  Mardi  Gras  bd61d940-fd06-79f2-6c79-b061bab661b3  255  128 Everyday Amazing  Motionless  Mother's  Day  8b0ceadb-7d33-06c4-da13-580b6e0bdbb9  255  128 Everyday Amazing  Motionless  Mother's  Day  2  b57a059a-6448-73f7-c5b3-9263ed073f6e  255  128 Everyday Amazing  Motionless  Multi  Bright  74649b5d-8b3d-3fc9-bbc7-0ffe8a9c78f4  255  128 Everyday Amazing  Motionless  Multi  Bright  2  5fdfd1d1-6a55-0a33-bd68-1de7d22d4a6d  255  128 Everyday Amazing  Motionless  Multi  Bright  3  d20b5a75-a58d-8b0f-8733-38b1e48f709b  255  128 Everyday Amazing  Motionless  New  Years  54367725-69f5-4bf7-d3ce-26ec9b7947f2  255  128 Everyday Amazing  Motionless  New  Years  2  cb724b52-4fdf-3cda-5660-ca6c80bfec73  255  128 Everyday Amazing  Motionless  Orange  fc0e907c-fbd6-e1c3-e5c3-887838cd8d75  255  128 Everyday Amazing  Motionless  Pink  cccdfb66-d879-ed0c-b516-1750e6278e7a  255  128 Everyday Amazing  Motionless  Purple  1e686b1e-f34b-936a-5707-27f62ba2768d  255  128
+=== PAGE 22 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Everyday Amazing  Motionless  Rainbow  27c060b5-aedb-4a04-e5af-c18b5068f541  255  128 Everyday Amazing  Motionless  Ramadan  49e51cf2-d0f9-e2f6-6575-facca1f01661  255  128 Everyday Amazing  Motionless  Ramadan  2  4f08024a-072e-f9f7-81c2-3131fe6a17b6  255  128 Everyday Amazing  Motionless  Red  910193e8-e0c0-505a-d377-c0e2e4eb6d29  255  128 Everyday Amazing  Motionless  Remembrance  Day  79756497-e283-16b0-975e-adced7a6d3e6  255  128 Everyday Amazing  Motionless  Remembrance  Day  2  6d189dd9-ec79-b90b-2512-8fc981f580e3  255  128 Everyday Amazing  Motionless  St.  Patrick's  220c8a0e-6445-ddff-328c-c6c1bc8077b7  255  128 Everyday Amazing  Motionless  St.  Patrick's  2  369cabca-c3f8-89d8-9d54-087ba222a2b1  255  128 Everyday Amazing  Motionless  Thanksgiving  f0d999a8-a02e-80b3-c9e7-bda903741116  255  128 Everyday Amazing  Motionless  Thanksgiving  2  3fa9e6e8-90ef-a19c-5bac-a7d10e846b2b  255  128 Everyday Amazing  Motionless  Valentines  5dcc7f65-07a9-9045-d260-596b99ead4c7  255  128 Everyday Amazing  Motionless  Warm  White  f389bd40-8aa5-d909-053c-cead23715edb  255  128
+=== PAGE 23 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Everyday Amazing  Motionless  Yellow  12b2f44a-40a7-c099-8bc1-c62755d3dbb7  255  128 Everyday Architectural  BW  1  on,  2  off  BW  1d7af431-7b7e-dc6f-71ac-82904ebd81d0  255  128 Everyday Architectural  BW  1  on,  3  off  BW  bf6ab3c1-6569-218d-2a16-96b820e69932  255  128 Everyday Architectural  BW  1  on,  4  off  BW  ba7333e5-7f3c-a6c9-f11b-b9fd3d2e19dd  255  128 Everyday Architectural  BW  1  on,  5  off  BW  25f290c1-9f67-8ca4-e9c7-1315ab0da9c4  255  128 Everyday Architectural  BW  2  on,  2  off  BW  bd209c83-79c2-2f31-c3dc-3313dd0e59e0  255  128 Everyday Architectural  BW  2  on,  3  off  BW  4c897a84-b5c8-e0a5-fb63-97aca73491cd  255  128 Everyday Architectural  BW  2  on,  4  off  BW  f054b617-50f3-eb02-e280-a9e80beef26d  255  128 Everyday Architectural  BW  2  on,  5  off  BW  f7848660-6ed9-82be-d9a0-3bf88af560e0  255  128 Everyday Architectural  WW  1  on,  2  off  Warm  16766260-f930-84b5-fc42-6783f5b09245  255  128 Everyday Architectural  WW  1  on,  3  off  Warm  3f9d2faf-f5e8-e353-3ec4-b380d6d395ce  255  128 Everyday Architectural  WW  1  on,  4  off  Warm  81978df3-9e04-4159-3ed2-457149be6e36  255  128
+=== PAGE 24 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Everyday Architectural  WW  1  on,  5  off  Warm  b0835601-e88f-cadb-03d4-fae99dbfe161  255  128 Everyday Architectural  WW  2  on,  2  off  Warm  e3235651-e8c8-20cb-fc1f-e2fc051ce634  255  128 Everyday Architectural  WW  2  on,  3  off  Warm  5bd55891-0ce4-6ef2-ace5-956e9654d75c  255  128 Everyday Architectural  WW  2  on,  4  off  Warm  2e129a4a-a655-1c11-796f-e655cd686594  255  128 Everyday Architectural  WW  2  on,  5  off  Warm  c4b078a2-e9fa-c55d-d71d-2cb31a2787fd  255  128 Everyday Photo  Ready  Patterns  Bright  White  ff9ceb99-37d4-f55e-b966-2ecd48e924d7  255  128 Everyday Photo  Ready  Patterns  Bright  White  Ev  49605888-bd25-a321-4650-4ec817c0c32c  255  128 Everyday Photo  Ready  Patterns  Bright  White  Ev  2  2e63c674-1110-f4b5-0993-a48de82723c8  255  128 Everyday Photo  Ready  Patterns  Bright  White  Ev  3  3ce8d24c-683c-65d6-5999-5deff34a38ae  255  128 Everyday Photo  Ready  Patterns  Canada  Day  9c5169f3-8ef9-545d-b963-8ac27ea2854d  255  128 Everyday Photo  Ready  Patterns  Canada  Day  2  d3bbc2da-1b09-7e5b-1b5c-bc7285ad7eed  255  128 Everyday Photo  Ready  Patterns  Canada  Day  Retro  cb91f122-eaa8-23b2-e7e1-757984df8f4c  255  128
+=== PAGE 25 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Everyday Photo  Ready  Patterns  Canada  Day  Retro  2  19a89835-c53b-f1ee-758f-56cc9a559bbb  255  128 Everyday Photo  Ready  Patterns  Christmas  068a1689-42db-eeba-60ea-21c88c9bb4de  255  128 Everyday Photo  Ready  Patterns  Christmas  2  0bb16ffb-e8fa-2976-7b81-5f638e955600  255  128 Everyday Photo  Ready  Patterns  Christmas  Retro  375afec6-f83e-7897-506a-0f348cfc7804  255  128 Everyday Photo  Ready  Patterns  Cinco  De  Mayo  e0ed7126-6385-4b23-f7fe-441efcfbcf66  255  128 Everyday Photo  Ready  Patterns  Easter  296178c8-34fa-7d79-fc8b-d538036d9191  255  128 Everyday Photo  Ready  Patterns  Easter  2  0915e691-bcc7-c9ae-51e5-6882960090c2  255  128 Everyday Photo  Ready  Patterns  Easter  3  35a0c659-69d1-6097-fdd1-c3e3b59ada57  255  128 Everyday Photo  Ready  Patterns  Halloween  54ce4f5e-bc23-19b8-e3a2-88d2ac51c9e3  255  128 Everyday Photo  Ready  Patterns  Rainbow  4772afb0-de22-adcc-e408-0e5a970fcac8  255  128 Everyday Photo  Ready  Patterns  St  Patty  9c1b2f35-54c4-4a15-a2fc-85ec74382f7e  255  128 Everyday Photo  Ready  Patterns  St  Patty  Retro  bd2d75ee-0f35-7f16-d3db-3c07593d2ac0  255  128
+=== PAGE 26 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Everyday Photo  Ready  Patterns  Teal  Every  3  864eb32a-9d8e-9d08-556b-803fd07cbdd6  255  128 Everyday Photo  Ready  Patterns  True  Warm  White  29c84073-229b-e789-a4ef-13ab14050157  255  128 Everyday Photo  Ready  Patterns  True  Warm  White  2  ea0b855e-eef2-7cbe-ab21-ee98d93b87be  255  128 Everyday Photo  Ready  Patterns  True  Warm  White  3  99edebdc-d5ae-608c-9ea8-9656d701e6fc  255  128 Everyday Photo  Ready  Patterns  USA  fdebf462-2a4b-765b-f47e-c0add9a1b876  255  128 Everyday Photo  Ready  Patterns  USA  2  faa05cc3-9830-ff16-bc99-41069674fde5  255  128 Everyday Photo  Ready  Patterns  USA  Retro  aa2acaff-0acf-5f0c-30b6-3a48dceae13a  255  128 Everyday Photo  Ready  Patterns  USA  Retro  2  2ca5c0e9-1006-a3e9-8db8-33262898f8db  255  128 Everyday Photo  Ready  Patterns  Valentines  e93c39e1-6e1a-1ce9-fa8c-2fb5254a8b43  255  128 Everyday Amazing  Multi  Brightness  Glamo  BW  a8a740e5-d03c-5bf2-bd15-569826609e8a  255  128 Everyday Amazing  Multi  Brightness  Glamo  WW  49f09a50-5b12-e3ec-a0ce-831048757a23  255  128 Everyday Amazing  Multi  Brightness  Multi  Static  Warm  25e08fce-94c5-56de-9b55-232415a0e80f  255  128
+=== PAGE 27 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Everyday Amazing  Multi  Brightness  Multi  True  Warm  b57b22cd-2d2a-ce2f-ed7c-73c7bf880a61  255  128 Everyday Amazing  Multi  Brightness  Star  BW  70cb1ad3-201b-b2f0-bf38-dd1e3cc65749  255  128 Everyday Amazing  Multi  Brightness  Star  WW  d2aa1ea6-de8b-b69d-fc0a-836b85923d1e  255  128 Everyday  All  White  Colors  100%  Bright  White  52a33dd2-b02b-7daf-7552-2d185f872b39  255  128 Everyday  All  White  Colors  100%  Cool  White  d22eca5f-73db-ffd6-8fba-79119656fb00  255  128 Everyday  All  White  Colors  100%  Warm  White  8a913c4f-f2ce-37a7-84cc-760a92953997  255  128 Everyday  All  White  Colors  25  %  Cool  White  dbaeb4fd-3baa-6bcf-48c7-2006419cb83a  255  128 Everyday  All  White  Colors  25%  Bright  White  ecc795d4-c723-48be-7b22-8c5f46555201  255  128 Everyday  All  White  Colors  25%  Warm  White  44bab500-9d70-3790-1438-db5278ab4544  255  128 Everyday  All  White  Colors  50%  Bright  White  572c50ae-00f1-1c4b-c234-79a254fc4192  255  128 Everyday  All  White  Colors  50%  Cool  White  315e01ca-6ff1-f0df-3c3f-27f59192363c  255  128 Everyday  All  White  Colors  50%  Warm  White  99a5cf31-9d9e-92df-a919-da233ad5e1a6  255  128
+=== PAGE 28 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Everyday  All  White  Colors  75%  Bright  White  e09fefd9-2592-2b50-10ff-5b0a280a8024  255  128 Everyday  All  White  Colors  75%  Cool  White  0630a542-0ede-17e7-caf0-4d42820e88a7  255  128 Everyday  All  White  Colors  75%  Warm  White  b34b6c6c-22ca-3f9b-b465-e68def33162f  255  128 Other  Fireworks  Bday  Candle  b18ab593-948c-1cc1-447a-a892261da63b  255  128 Other  Fireworks  Beach  c9297be1-fe84-c201-dc6e-bfab0c057874  255  128 Other  Fireworks  CAN  7a2ee58e-2b0e-124e-35d3-b8c447c27427  255  128 Other  Fireworks  CAN  2  068395ea-b5c9-9eb6-5562-60f2034cd190  255  128 Other  Fireworks  Christmas  31a29899-9c0e-7ab9-d012-bd976d818e87  255  128 Other  Fireworks  Halloween  a1445307-1fa6-316a-9a43-3ee7228d9686  255  128 Other  Fireworks  New  Years  b47ea329-c217-bb82-1fcf-6a1daeaa181f  255  128 Other  Fireworks  Purple  and  Gold  f8012eed-5a0f-9640-63e6-826c2daf1373  255  128 Other  Fireworks  Retro  Candycane  4275a67d-b32f-a55f-071e-8b4af088f5c8  255  128
+=== PAGE 29 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  Fireworks  Starry  Nights  b6f6c629-2dea-e992-b1ad-aa65963c374f  255  128 Other  Fireworks  USA  ea7c5e6f-bc03-e390-e7e5-b8d2f9ebfcc3  255  128 Other  Fireworks  USA  2  2cd1a7a2-d9fb-c507-8dbd-ab21301ddee7  255  128 Other  Fireworks  Vintage  232f1035-d643-55b6-65d5-dc7c80d22d2c  255  128 Other  Winter  Colors  Frost  Glow  4f1d19c2-e9a0-bb2d-f9bc-07003906bcc9  255  119 Other  Winter  Colors  Arctic  Aura  dcd1e858-1cef-72aa-ae48-b2e9943f61c4  255  168 Other  Winter  Colors  Powdered  Prism  fa14695d-62db-a4b0-2c5e-e09c5be8b2e1  255  226 Other  Winter  Colors  Snowflake  Spark  d8743b53-d596-6775-3617-410ca02983ed  255  226 Other  Winter  Colors  Winter  Embrace  f311a58a-91b4-772a-336a-a1b482795b10  255  214 Other  Winter  Colors  Northern  Lights  047c0462-dba2-7b47-ac5f-411bd481a301  255  224 Other  Winter  Colors  Chill  Shimmer  d6fb75d8-9a19-3b7e-0ea7-7ae34c5a047f  255  225 Other  Winter  Colors  Winter  Whispers  70ee93b9-9764-a455-2609-519913ff87f9  255  221
+=== PAGE 30 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  ModeExpo  Double  Chase-->  8c48c6c9-954e-bedb-7a1b-da28f0a835de  255  128 Other  ModeExpo  Double  Chase-><-  b2b86aae-2577-3db4-6ee6-cf57a9bb23c6  255  128 Other  ModeExpo  Double  Chase<--  bb411181-24c7-ed1b-db68-ef9b0e8f30f9  255  128 Other  ModeExpo  Double  Chase<->  16615b8c-a214-b052-4771-a915337077ca  255  128 Other  ModeExpo  Double  Chase<><>  04f1e19a-8a5e-0e24-9117-f26d0a2d8699  255  128 Other  ModeExpo  Fade  N'  Chase->  719a3ebe-9514-6653-286f-f176c5c1a251  255  128 Other  ModeExpo  Fade  N'  Chase<-  fcf7437e-9934-afa5-9d2d-ea2841325658  255  128 Other  ModeExpo  Fade  N'  Chase<>  d7c89432-5711-2d8f-ba95-6094cb7c35e8  255  128 Other  ModeExpo  Fade  N'  Chase<><>  4db134b5-1636-124e-67a5-d1f5b4b702b8  255  128 Other  ModeExpo  Fade  N'  Chase><  0279a1c9-ff1f-d15f-738f-26eed966313e  255  128 Other  ModeExpo  Fader  86d82190-3dad-88ca-ceda-211893b80ed5  255  128 Other  ModeExpo  Full  Chase  --->  465e9372-f289-0e7a-518f-d2ab783dc758  255  128
+=== PAGE 31 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  ModeExpo  Full  Chase  <---  b1aebcbe-8ca0-1d01-00ce-b8d71e119a0a  255  128 Other  ModeExpo  Full  Chase  <-->  9c6fcd3d-c072-8c03-dbe9-75a40cacc722  255  128 Other  ModeExpo  Full  Chase--><--  33304af3-650b-ac59-e9e8-121696ecdad7  255  128 Other  ModeExpo  Full  Chase<>-<>  5bdd2582-e030-ee65-e44c-18b215aca743  255  128 Other  ModeExpo  Ghost  --->  37be3e0a-ef1c-0a53-7f3a-c6d619b240b2  255  128 Other  ModeExpo  Ghost  --->  10af2586-e479-cb09-c81d-02dffee2fe3d  255  128 Other  ModeExpo  Ghost  ---><---  707908d6-d1e3-9e5f-45c2-1b1d78717789  255  128 Other  ModeExpo  Ghost  <---  29f3a682-3a90-0219-3ea9-acfdd6ec606c  255  128 Other  ModeExpo  Ghost  <---  79249009-d758-b6bc-91ee-baa62237b766  255  128 Other  ModeExpo  Ghost  <--->  8c1e8f95-e0df-ddd8-8dc3-da4f609a7b31  255  128 Other  ModeExpo  Ghost  <>---<>  77da9d9f-5227-2df4-b49f-11616be1524d  255  128 Other  ModeExpo  Pac-Man  --->  ec6488cc-5d5d-f35f-3b7b-0f74d260c018  255  128
+=== PAGE 32 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  ModeExpo  Pac-Man  ---><---  0ceeb8e0-f5ad-cc06-763f-e220fc6c564b  255  128 Other  ModeExpo  Pac-Man  <---  6bc59e09-9939-f280-889d-d9d7f3c61b18  255  128 Other  ModeExpo  Pac-Man  <--->  ae27dd15-183f-dc08-6ede-4c9afe76f8e6  255  128 Other  ModeExpo  Pac-Man  <>---<>  7a16bbb0-94f2-8efd-82c1-b7851fd5c0d5  255  128 Other  ModeExpo  Shutter  5b035a37-bcee-5c23-02b9-17bfebb071d7  255  128 Other  ModeExpo  Single  Chase-->  3101bec1-aa62-0f10-a15f-668d6d1a9013  255  128 Other  ModeExpo  Single  Chase-><-  c4ba933f-77f8-581e-76a2-a1b7d8efb15d  255  128 Other  ModeExpo  Single  Chase<--  deccb713-8fcb-5e92-748a-0dedee9ad309  255  128 Other  ModeExpo  Single  Chase<-->  bde7b5c7-46fc-c2a9-1e8d-c2d8b579bbaa  255  128 Other  ModeExpo  Single  Chase<><>  d54190b2-cbc3-2d56-8875-4420601fbe7d  255  128 Other  ModeExpo  Starry  cf4ca4fd-35a1-af64-e24e-50b066b7899b  255  128 Other  ModeExpo  Starry  2  bf6a5838-a397-58f8-c65e-fb5839d39a37  255  128
+=== PAGE 33 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  ModeExpo  Static  3dc2ca72-0a82-5506-45d9-a6ea5515e308  255  128 Other  ModeExpo  Tetris  --->  b735efcd-cc3a-f564-0a4d-5dd0723dc6d8  255  128 Other  ModeExpo  Tetris  ---><---  a594f49f-bc28-089f-74f8-1bbefa884756  255  128 Other  ModeExpo  Tetris  <---  5bc23253-fc9b-2032-7a62-c3622b83b272  255  128 Other  ModeExpo  Tetris  <--->  fb28d614-e41b-e75a-94c9-864dcf9cc21b  255  128 Other  ModeExpo  Tetris  <>--<>  6ec7e583-b1f0-5816-abe9-582f34152095  255  128 Other  Old  Presets  Aqua  Blue  6c3894a1-fcbb-eb3e-3f10-92590db2fec6  255  128 Other  Old  Presets  Blue  fb364266-47a2-5562-d176-03d3dc9aceb7  255  128 Other  Old  Presets  Color  Wheel  4039dd01-e942-bc8e-8e3f-0c0be146b843  255  128 Other  Old  Presets  GYRPB  Fade  a6ed12ab-1d90-3100-27ea-f5e0f7aa8e93  255  128 Other  Old  Presets  Green  c4aac9b5-8e0d-3bc7-82ab-4c53c4c3c20e  255  128 Other  Old  Presets  Green  Blue  6b0f0965-c9bb-16e2-86ca-0c91622ef5d0  255  128
+=== PAGE 34 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  Old  Presets  Pink  08a33ef0-36e0-1e44-e344-474e78c86f85  255  128 Other  Old  Presets  RYGB  fade  56db2c9e-9070-f170-8fef-f2f36fc8ca9f  255  128 Other  Old  Presets  Rainbow  e501a07b-63b6-0b89-5abb-04db98c8eda9  255  128 Other  Old  Presets  Red  c245b506-7f58-63c2-9e7b-d900f51df5b7  255  128 Other  Old  Presets  Red  Blue  ef2743b0-2b85-d6d9-5e49-b69117b7c132  255  128 Other  Old  Presets  Red  Green  aa00e1e9-1f4f-bb24-9264-6fd0cbec307e  255  128 Other  Old  Presets  Red  Green  Blue  12be122f-e712-bda5-471e-a5992c31b268  255  128 Other  Old  Presets  Warm  White  a7b971ac-8b63-d085-15df-64d2a34af83a  255  128 Other  Old  Presets  White  a56df8da-660f-b6de-0458-54c634cf829f  255  128 Other  Old  Presets  YGYGR  Fade  ba0a26df-161f-c7a8-45ca-d1d78f005cdd  255  128 Other  Old  Presets  YORP  Fade  332cdeb3-e4b7-da66-3ecf-e8cd5436dcc4  255  128 Other  Old  Presets  YORPB  Fade  38bfef11-81d5-48c3-bc13-df1a5c88fd30  255  128
+=== PAGE 35 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  Old  Presets  YORYG  Fade  d03b9152-bda8-8bd1-5a5d-bb386a27f1d6  255  128 Other  Old  Presets  YWBP  Fade  da6213ab-8c65-0e37-d6a5-dd1bcb12c42a  255  128 Other  Old  Presets  Yellow  1475e5c4-d23b-8d5f-b1d7-59fa2d36f33a  255  128 Other  Sway  2on  3off  Bright  a9d87440-b85d-ad89-5d52-b42e9dd8c59f  255  128 Other  Sway  2on  3off  Warm  4d8ac872-ea22-0916-bd48-5334d222fa3a  255  128 Other  Sway  2on  5off  Bright  0fd3c8f2-7c43-d117-29c9-27d61d2c5a7e  255  128 Other  Sway  2on  5off  Warm  cc092118-ccdd-b1f0-fb5b-da2fa668848b  255  128 Other  Sway  Candycane  Sway  78d521ee-fdd8-fd60-a14b-f17db85a2ea4  255  128 Other  Sway  Christmas  Glamo  c84fb652-886b-59fd-f169-de884ad63bd6  255  128 Other  Sway  Christmas  Sway  e32a7a68-8750-ef94-82b7-e50c1bbe20c5  255  128 Other  Sway  Halloween  Sway  135ceac3-eca4-64a0-7d4f-cf34bc46e591  255  128 Other  Sway  Holly  n  Berry  12bf4641-f60c-9160-8048-446038024b7e  255  128
+=== PAGE 36 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  Sway  Northern  Lights  4e8cf501-bfbe-40c9-2c31-f819cc1d0d55  255  128 Other  Demo  Patterns  Around  8bb1703e-e0ed-7ce4-0a18-73fd75cf3f45  255  192 Other  Demo  Patterns  Chase  4ebe20fa-1f62-cb26-6a6a-375d2a0275c8  255  128 Other  Demo  Patterns  Eyeball  3f6547f8-641c-4256-8ded-d6daacc3f57f  255  219 Other  Demo  Patterns  Fade  ee6c95b8-7cca-9f34-f9b7-e245087cabac  255  128 Other  Demo  Patterns  Fireworks  5fdadab0-e109-4616-ad49-8d2dea9cfd5d  255  230 Other  Demo  Patterns  Flicker  6d4163d2-9e14-e980-73e1-b76d2a825697  255  231 Other  Demo  Patterns  Flow  b040d1cc-9837-7d6d-c3ea-821ea48b32cc  255  167 Other  Demo  Patterns  Ghost  37c34a3d-8bd6-9b8b-4684-ab09e5d511ee  255  182 Other  Demo  Patterns  Glitch  fd275579-435b-4112-9704-73daac695159  255  225 Other  Demo  Patterns  Glitter  3ff4ef62-a041-4d48-9beb-03c1b06fa45f  255  225 Other  Demo  Patterns  Gradient  96cc8027-b999-8225-5117-2e2bd1f4959c  255  128
+=== PAGE 37 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  Demo  Patterns  Gradient  Wave  798427cf-ee81-40cb-ac26-5ea581d11c32  255  128 Other  Demo  Patterns  IsoFade  93a145b7-e526-4a3c-b315-b1dbb6193eab  255  255 Other  Demo  Patterns  Marquee  8a55395a-14ba-1850-01aa-bcbf2e7696c2  255  128 Other  Demo  Patterns  Motionless  0f26d156-fc84-372c-9b66-aef9ff1a2f4f  255  128 Other  Demo  Patterns  Multipulse  bd2a2ddc-8232-9076-2ad6-96ffa3665aac  255  128 Other  Demo  Patterns  Pacman  f5c4236a-e6f3-e8d6-fae9-9b5fa3af4bc6  255  128 Other  Demo  Patterns  Pulse  f6aa8214-c02e-3afd-f6ac-2e58c25ffc3b  255  128 Other  Demo  Patterns  Pyramid  Chase  062b935f-b5b0-4977-a93c-c427d034ac42  255  195 Other  Demo  Patterns  Smooth  626172ee-4c55-4e81-9657-113b506a188a  255  47 Other  Demo  Patterns  Spotlight  40851a10-c9a0-edb1-f36e-7fcba87f4f1c  255  226 Other  Demo  Patterns  Stack  ee49bf87-566e-d57f-90aa-3553b22eb1cf  255  184 Other  Demo  Patterns  Starry  29d0447e-6e0d-92c4-8072-6d35eebdd11d  255  255
+=== PAGE 38 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  Demo  Patterns  Stretch  4dc18635-cda3-5372-98ab-48fca4775368  255  128 Other  Demo  Patterns  Sway  1c655566-a47b-4d25-b09c-8bbd97a7dd38  255  232 Other  Demo  Patterns  Tremor  45fd238b-b3b5-44fa-ade3-ddf2b28688e1  255  232 Other  Demo  Patterns  Wave  9b83277b-93ae-d9ab-f766-646660772c76  255  128 Other  New  2021  2ON  5OFF  Pulse  924815f1-38dd-b821-f02c-5e1c85d33a80  255  128 Other  New  2021  Blue  Split  88bb0bf9-0de3-b903-90b6-4bc51ead9ce9  255  128 Other  New  2021  Blue  Stretch  ea1e1f17-1580-4151-b854-1293aaebde61  255  128 Other  New  2021  Burning  992c4953-b472-c318-38f6-c8ba6be21ec5  255  128 Other  New  2021  Canada  Wave  dd881868-4931-020d-008b-7df30ef06ff4  255  128 Other  New  2021  Christmas  Pulse  1cba91f4-874d-ff85-c10b-1a6d6af2cd0c  255  128 Other  New  2021  Easter  b53dd862-94ce-8fa1-0b0d-d14e4b7bcac9  255  128 Other  New  2021  Fire  Stretch  617f8e07-ce7e-96a6-8680-26fb34379ae7  255  128
+=== PAGE 39 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  New  2021  Halloween  Pulse  8243b430-8dee-c9de-3d95-744a582d53a7  255  128 Other  New  2021  July  4  Wave  c9ee2a28-35ba-96c8-eae7-2b4cc4ed585f  255  128 Other  New  2021  Matrix  6993d815-ab45-3ee1-ed7e-02cc7fb6155d  255  128 Other  New  2021  Rainbow  2fe351ef-b03f-844c-761e-1aaa945826d1  255  128 Other  New  2021  WW  Smooth  f7618681-b3c4-3337-4797-c846bb9a5e51  255  128 Other  New  2021  Warm  White  Wave  2a49e780-0902-21ab-4ce7-dd29d3543f26  255  128 Other  Fading  Aqua  10  to  100  bbc01b69-cf0d-2117-a01a-ca92738755a0  255  128 Other  Fading  Aqua  100  to  10  0e86bd19-0703-c997-470a-0c0317311f00  255  128 Other  Fading  Blue  10  to  100  795d0a48-c3e7-c89c-3655-38a8c42a03e4  255  128 Other  Fading  Blue  100  to  10  6a15e661-100c-f861-4339-965536e4e94c  255  128 Other  Fading  Green  10  to  100  90315e84-d712-9b2f-6f00-1a7a8fff8709  255  128 Other  Fading  Green  100  to  10  3ad52905-1d69-b19a-de48-7c879f3c3c46  255  128
+=== PAGE 40 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  Fading  Orange  10  to  100  2a82ede5-385c-aa53-bf47-57734f8a98a0  255  128 Other  Fading  Orange  100  to  10  10fa6232-3ee6-067c-266e-a7f92aba855b  255  128 Other  Fading  Pink  10  to  100  c0e7c355-59de-d80b-0465-1d56d3cc15a2  255  128 Other  Fading  Pink  100  to  10  43c61111-8909-7449-c00c-cd4339edb61f  255  128 Other  Fading  Purple  10  to  100  ec0c0970-048b-7a5c-15a5-af7c82d9635b  255  128 Other  Fading  Purple  100  to  10  cded74d6-5f0f-91c8-bdba-4fde7d0bfb39  255  128 Other  Fading  Red  10  to  100  f3d27512-6b40-33cc-3354-12694f23d5c8  255  128 Other  Fading  Red  100  to  10  d95b8e40-5713-e6dc-abfe-a46f3c158535  255  128 Other  Fading  Warm  10  to  100  94a2b7cd-362d-e64a-289d-1f3967983d1b  255  128 Other  Fading  Warm  100  to  10  a847d5c3-67ac-1635-cdfb-f8bae097a5f3  255  128 Other  Fading  White  10  to  100  73b90a98-764d-9e83-9a09-0fa655ab1a2d  255  128 Other  Fading  White  100  to  10  4440bbef-e86a-c6c4-e511-b1fc897f97de  255  128
+=== PAGE 41 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  Fading  Yellow  10  to  100  549d5d02-aae6-397e-b886-ad5c384e4113  255  128 Other  Fading  Yellow  100  to  10  c034eb25-6a6c-b528-fb2e-1aaf05251230  255  128 Other  IsoFade  Christmas  03ffa64f-a17f-f83a-a8f0-dc80791383aa  255  128 Other  IsoFade  D  Shirt  92a41e84-8af8-7227-4f25-1248a262c920  255  128 Other  IsoFade  Pinky  BG  6b7153ac-956e-921c-3013-26d5082daca1  255  128 Other  IsoFade  Red  and  Green  e1d82ddd-cd64-3568-7de0-3cbef38af8b6  255  128 Other  IsoFade  WW  Glamo  f87e03c4-1f3f-acb2-80a6-1180176ba265  255  128 Other  IsoFade  Warm  White  e285c25a-b3fe-97b1-18ff-4c273c13059a  255  128 Other  IsoFade  Warm  White  2  7a128cfb-6316-149b-7267-932d5fe4529b  255  128 Other  IsoFade  Cool  White  9a328105-3e47-eacc-cd00-aee8bdab313e  255  128 Other  IsoFade  Cool  White  2  97aa81ff-212c-d1b8-fc71-923dfbe13170  255  128 Other  IsoFade  Bright  White  e8310b49-1ce3-5f50-b13c-6f54142317b3  255  128
+=== PAGE 42 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  IsoFade  Bright  White  2  7f2a42d4-e559-6f9d-f1e7-d046ca8c6b85  255  128 Other  IsoFade  Red  8cd737eb-12f5-201d-d900-731674725625  255  128 Other  IsoFade  Red  2  d9943f36-1df0-09f2-1e9b-2d53331ae251  255  128 Other  IsoFade  Orange  960a6e35-6b06-b082-ebc2-5f9d9ba1cc77  255  128 Other  IsoFade  Orange  2  09889447-55f0-3099-07e9-e947af062400  255  128 Other  IsoFade  Yellow  7bb69980-761e-7095-0af2-68845e712867  255  128 Other  IsoFade  Yellow  2  8c66c518-6c4f-acbf-6cf6-0484e30aefc7  255  128 Other  IsoFade  Green  1fdffb32-cdd0-c21f-b1f7-858ef46864ae  255  128 Other  IsoFade  Green  2  783408b1-173d-52ff-7b97-8e7ab755d4ba  255  128 Other  IsoFade  Aqua  Blue  f5084c7a-3176-0fb5-18ac-582372e0798f  255  128 Other  IsoFade  Aqua  Blue  2  f638a746-8433-fb8f-b015-e0db9ec16723  255  128 Other  IsoFade  Blue  7a2fb54b-feeb-f584-4668-996b4113c4dc  255  128
+=== PAGE 43 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  IsoFade  Blue  2  ff402d25-40f2-dfd4-7e66-d2f292c5a633  255  128 Other  IsoFade  Purple  f9484bb4-b765-7508-b7c9-194754c4171d  255  128 Other  IsoFade  Purple  2  207f2278-1ac2-df6c-7f74-f1e83bd31408  255  128 Other  IsoFade  Pink  dc159f9c-c79a-ca63-e78c-a824b5ae7b9b  255  128 Other  IsoFade  Pink  2  5e64f5dd-d927-0842-b5bf-91be8b62172b  255  128 Other  IsoFade  Rainbow  bb335cf7-6ac6-f282-7ddc-14f12aa69dc1  255  128 Other  IsoFade  Mediterranean  55943050-ffb4-ed44-10ff-8f9ee463c6e3  255  128 Other  IsoFade  Ocean  f490d168-ad4a-011e-025a-377a43bed21b  255  128 Other  IsoFade  Flame  557c1002-d477-40d3-a514-dea179a77039  255  128 Other  IsoFade  Northern  Lights  5a777c3d-d888-8a1a-e34f-5d7150ac4a06  255  128 Other  IsoFade  Greens  2ccb25ce-83de-a1da-86c0-3304631429ec  255  128 Other Taste  The  Rainbow  Colour  Wheel  2d1e73ba-e58a-204f-dff4-4ef86390bc71  255  128
+=== PAGE 44 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other Taste  The  Rainbow  Rainbow  ee832b98-eb0a-06b4-5fc7-4130b62342cf  255  128 Other Taste  The  Rainbow  Rainbow  2  704fcdc9-0d53-f41a-f5c7-7454fe54a138  255  128 Other Taste  The  Rainbow  Rainbow  Morph  9fd50f9f-f000-03d3-be71-2e1a65d3d5c1  255  128 Other Taste  The  Rainbow  Taste  the  Rainbow  1b597775-79f0-fd44-dd4e-c388c0e4074d  255  128 Other  Summer  Time  Beachside  3efdf55f-a936-96fc-6092-b150bbdd01b3  255  128 Other  Summer  Time  Blue  Sky  dd6a19e7-1786-faa6-4c9f-872249fec705  255  128 Other  Summer  Time  Campfire  db3ca51a-1666-9c4c-3446-66cf93201674  255  128 Other  Summer  Time  Fresh  Air  bbd07280-44be-7994-3372-c5da0ba59766  255  128 Other  Summer  Time  Garden  809651dc-970a-11b2-d6ab-41ddaf9ea8ca  255  128 Other  Summer  Time  Nightsky  cc61d874-6759-969e-e4a8-2da68a9486a3  255  128 Other  Summer  Time  Summertide  15919310-17ee-322b-e7ab-80c9ac5f8061  255  128 Other  Summer  Time  Picnic  194bdcf8-6f7c-aa37-9d1d-0565bf8c492d  255  128
+=== PAGE 45 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Other  Fall  Colors  Fall  Sunset  48b04202-c093-a393-a475-80e4598c0f12  255  226 Other  Fall  Colors  Falling  Leaves  8f8331a4-4ec4-8969-4a37-3cb7a1a8da52  255  175 Other  Fall  Colors  Touch  of  Fall  70ccff29-0cf8-fac4-9703-5e8e094df9cd  255  128 Other  Fall  Colors  Windy  Leaves  d0b31d98-0b12-0215-b323-842567f6540b  255  214 Other  Fall  Colors  Autumnal  Glow  3c03b4ac-ecbf-48c1-e58a-9694a3a2c7b2  255  226 Other  Fall  Colors  Welcome  Fall  90b02436-1260-1d70-f192-dfc401bb51e6  255  226 Other  Fall  Colors  Fall  Twinkle  8562b47f-5488-6537-d2d3-8d4d82fcab85  255  214 Other  Fall  Colors  Autumn  Radiance  fbbab61a-7e4a-805a-8ea6-632ea3dfe9df  255  224 Other  Fall  Colors  Autumn  Cascade  b2607c00-59f8-e5b1-51e9-ab9aecb80751  255  224 Other  Fall  Colors  Pumpkin  Patch  9c0761a6-9608-cf9e-f7f0-db348fcd561c  255  226 Other  Fall  Colors  Harvest  Haunt  42f8878f-7a12-805a-cf43-83c388497ddd  255  226 Holidays  Halloween  Black  Cat  f2f847d7-293c-478f-53c0-c983594fe34c  255  128
+=== PAGE 46 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Halloween  Blood  Moon  9b50eeb7-7de3-9c46-a13e-19f488ed8e3e  255  128 Holidays  Halloween  Brock  Halloween  0e50fa75-e7cf-2ee2-8391-ade52765442a  255  128 Holidays  Halloween  Burning  Inferno  5d9d27b4-3ef4-4ea2-842f-f7c8f8bdd791  254  128 Holidays  Halloween  Cauldron  6d3f6c7f-a510-1fe2-55f9-3e4aecf7bcdf  255  128 Holidays  Halloween  Ghost  4daeec2c-fefc-477a-9464-6e11489fa3b6  255  128 Holidays  Halloween  Glitch  bac8862f-0db4-6e27-cf5f-9d9ae8a968b1  255  128 Holidays  Halloween  Grave  Yard  154f2fd2-b44a-f39b-6f5a-c0de17c346e3  255  128 Holidays  Halloween  Green  Goblin  81cfd28a-f4d5-1586-1ff6-c30446ace84f  255  128 Holidays  Halloween  Grim  Reaper  fea5cf72-85b2-31fc-4747-0d3e77ea5bd6  255  128 Holidays  Halloween  Halloween  Boooo  c6703ae8-fd91-1ccf-fddb-652dff23e330  255  128 Holidays  Halloween  Halloween  Glamo  81e6c8fc-0492-622a-7400-6472240f1125  255  128 Holidays  Halloween  Halloween  Jump  b66bee7a-1d8d-9589-d2f6-cbf90f1f87c6  255  128
+=== PAGE 47 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Halloween  Halloween  Scary  75995489-8a49-218f-4ab3-8e5888b7cdfe  255  128 Holidays  Halloween  Halloween  Worry  1d60d3ee-1865-ad82-9ab2-d1e30a277bfd  255  128 Holidays  Halloween  Howl  at  the  Moon  f5aa50dc-063d-def3-6fc5-d487f3e894b4  255  128 Holidays  Halloween  Jack  O  lantern  8bf34765-ed9a-bb47-df7e-e5ad577716f7  255  128 Holidays  Halloween  Mad  Scientist  2d98e0d3-ae9b-7f1c-a527-c182fb6b3583  255  128 Holidays  Halloween  Orange  Ghosts  f262b4c4-3686-cd0c-c999-09b49bf5b654  255  128 Holidays  Halloween  Paranormal  f91c2048-b1cc-4cc6-a8fa-504b17477567  255  128 Holidays  Halloween  Purlple  Nights  fee5e31e-490a-c65d-acd2-1b4a64804013  255  128 Holidays  Halloween  Purple  Ghosts  07c87c30-17a0-37b7-5a18-c3dd4b0df4c3  255  128 Holidays  Halloween  Red  Hollows  7b70c71d-2a2a-89a5-cbca-9c83a04c3cf2  255  128 Holidays  Halloween  Short  Circuit  5648e175-9d8c-b83f-2872-1df713e4769d  255  128 Holidays  Halloween  Spooky  Pumpkin  2c3ee9e8-7c33-db84-e734-b3c795d445d6  255  128
+=== PAGE 48 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Halloween  Stormy  Night  511bef80-1766-879d-beb0-7b824d820de1  255  128 Holidays  Halloween  Traditional  9ef242aa-2b11-175e-843a-1d233636dd6d  255  128 Holidays  Halloween  Vampire  9722c1ca-dfbf-95cb-5fa7-592f26aa376e  255  128 Holidays  Halloween  Witches  Brew  02164462-ae3c-2a6a-075a-0de762679aec  255  128 Holidays  Halloween  Witches  Flight  4a895ced-7067-f528-626e-04b89d71c157  255  128 Holidays  Halloween  Witches  Glamo  b9014a1d-060a-3677-63ee-dfe96336ef04  255  128 Holidays  Halloween  Bubbling  Swamp  4d2dbd71-4746-1ffd-b15a-98be61071ad5  255  204 Holidays  Halloween  Burning  Nights  073caabc-d199-421b-e742-9898caf5cb41  255  229 Holidays  Halloween  Lightning  80fc3bc2-8fc1-10b3-e3ae-c8efed3eea62  255  254 Holidays  Halloween  Alien  Invasion  09f0270b-b302-70e0-cf79-5ae1cd6d5c73  255  226 Holidays  Halloween  Halloween  Party  2e79c88a-329a-daa4-0466-6123c1132166  255  229 Holidays  Halloween  Purple  Panic  a9c18518-5c6f-6399-4086-205302e8ad63  255  229
+=== PAGE 49 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Halloween  Moon  Ghost  fb0db8d7-adf1-7065-c2f4-c354936b633a  255  229 Holidays  Halloween  Spooky  Bats  dcce91bc-7137-e562-3bae-1bc0922af50d  255  244 Holidays  Halloween  Glitchy  Goblins  bf6bfcd2-158d-270a-eccc-a379a1601818  255  237 Holidays  Halloween  Glittery  Glass  3e36d9cb-47f5-25f7-f997-4875dc172332  255  214 Holidays  Halloween  Bloody  Moon  1aeb6ef3-3df0-4260-9573-523d29119220  255  234 Holidays  Halloween  Halloween  Buzz  fc3ad262-91cd-e667-8079-1b17c7998f41  255  226 Holidays  Halloween  Spooky  Surge  eab5f4e1-91c9-b48c-9091-e41856d93524  255  204 Holidays  Halloween  Glamoween  5458aab7-9e04-742a-17ec-22c134352139  255  226 Holidays  Halloween  Haunted  House  d1ba8711-621a-4ff8-698f-1355b9940fd1  255  254 Holidays  Halloween  Creepy  Doll  72ded007-e6fe-a888-a343-9bc7b5d06f50  255  209 Holidays  Halloween  Soft  Hueoween  39c2fc52-f589-c3ae-86b7-a486aac0f790  255  226 Holidays  Halloween  Batty  d62714f9-c2c2-4479-9531-c633a81697a4  255  255
+=== PAGE 50 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Halloween  Beetlegeist  7decce47-9d66-4c48-bd67-c75e08cc1f39  255  179 Holidays  Halloween  Candy  Corn  cda44b99-b2c8-4c7d-a61b-911bafb3533d  255  140 Holidays  Halloween  Carnevil  46431075-89d5-4104-b165-22b692ceaef7  255  128 Holidays  Halloween  Classic  Surge  6d2e0b08-e940-429a-bc1a-950ca550961b  255  204 Holidays  Halloween  Creature  Eyes  a185b589-1031-4d1d-8b4c-953713ce91d3  255  231 Holidays  Halloween  Cursed  Cauldron  17e69edb-8bcb-4624-be04-007dfb4be93b  255  192 Holidays  Halloween  Devilish  6861982e-5715-494d-9904-8d5bd40af815  255  128 Holidays  Halloween  Eye  See  You  19826e67-0147-4119-a2cf-744722a466fd  255  227 Holidays  Halloween  Eye'm  Watching  2e2a5ec9-9c30-46d1-9fa4-d11ee8a3ca57  255  227 Holidays  Halloween  Frankenstein  d709ce24-a3d6-4f3a-a896-fc299d7e58ac  255  138 Holidays  Halloween  Frankenstein's  Eye  f18cd915-546e-4c8a-a91a-92004bcb161c  255  195 Holidays  Halloween  Glitterween  300d67d5-9736-4b9f-bbe0-8113cc1d4454  255  236
+=== PAGE 51 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Halloween  Happy  Halloween  2040298b-90c4-4ee0-8252-40008757d645  255  128 Holidays  Halloween  Haunting  Hues  9bdd9405-4fcc-40d0-88ce-318e9c6079ef  255  171 Holidays  Halloween  Lightning  2  d6b49483-3ab0-4f6b-8dff-e9540f335759  255  200 Holidays  Halloween  Power  Surge  0e6b3a34-73dc-4260-a6d4-f011f21fd70e  255  190 Holidays  Halloween  Pumpkin  Patches  865551fb-5a1f-45b5-bfb6-fc4fc8569fdc  255  128 Holidays  Halloween  Pumpkin  Pyramid  25246007-f1a1-4069-a3ea-8af2b5bd9343  255  130 Holidays  Halloween  Red  Eyes  bd7adfba-981e-441d-9247-6d899764a584  255  227 Holidays  Halloween  Sparkleween  f8b014a0-3b3f-480c-a1de-d30fb88636fa  255  197 Holidays  Halloween  Spooky  Season  89bb34d0-39a6-42b6-af4c-549594d0d44c  255  201 Holidays  Halloween  Spooky  Sparkle  57f24717-ca02-46cd-abb7-097e1aab48ed  255  255 Holidays  Halloween  Terminate  ebfc00e6-d8fc-4ab4-96c4-b1860470f9e1  255  227 Holidays  Halloween  Triple  Hex  65cbd7ea-cfcf-4120-8842-64fbffdef4fe  255  128
+=== PAGE 52 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Halloween  Twinkleween  2aa70454-eef4-4f21-a839-dd74d370eaf7  255  197 Holidays Christmas  Movies  A  Christmas  Carol  2  2d8c96fa-83da-4059-9972-20884512fcc8  255  122 Holidays Christmas  Movies  A  Christmas  Carol  2ee7ea35-0910-4398-b3d1-38f75e808544  255  122 Holidays Christmas  Movies  A  Christmas  Story  2  8b4121af-9a2d-42fe-90e2-9db432252a97  255  117 Holidays Christmas  Movies  A  Christmas  Story  227e06ae-339e-4d90-a9dc-88b2edb099b5  255  117 Holidays Christmas  Movies  Bad  Santa  2  898f408c-b46f-445c-869e-9b688aa7117d  255  215 Holidays Christmas  Movies  Bad  Santa  42ac1971-7b10-4c67-9965-d77e662be472  255  215 Holidays Christmas  Movies Charlie  Brown  Christmas  2  857bb16d-0b53-4b7a-bc5b-1fa28bf1986f  255  165 Holidays Christmas  Movies  Charlie  Brown  Christmas  762bd472-303f-45e0-bfa1-bbef529d2ede  255  165 Holidays Christmas  Movies  Deck  the  Halls  2  f3e10f40-4600-414b-aeba-bcb2bf1c2184  255  128 Holidays Christmas  Movies  Deck  the  Halls  5a14d29c-5d79-439c-b6d9-c6fb4c55998a  255  204 Holidays Christmas  Movies  Die  Hard  76e477c6-9a19-407a-abe4-0ac744603c6d  255  213
+=== PAGE 53 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays Christmas  Movies  Die  Hard  2  8a2cebc6-49e4-4496-bafb-d480fa2cb9d9  255  213 Holidays Christmas  Movies  Elf  2  74c911a1-8f33-48af-931c-6744f114822b  255  204 Holidays Christmas  Movies  Elf  3702447b-5c2e-412a-b0e2-c4a4666da674  255  231 Holidays Christmas  Movies  Four  Christmases  2  5ab704a1-83d1-4c84-a32b-6f95558ba74d  255  128 Holidays Christmas  Movies  Four  Christmases  cd303810-aae1-4dd9-b12c-73d70defcedb  255  193 Holidays Christmas  Movies  Frosty  the  Snowman  2  1c10d727-90ff-4590-a671-9cb84484a024  255  128 Holidays Christmas  Movies  Frosty  the  Snowman  24619191-6a4a-455c-ab98-982c2cd1ddd0  255  128 Holidays Christmas  Movies  Gremlins  2  2ccbd67f-b3b2-4f05-9db4-8c6049966875  255  166 Holidays Christmas  Movies  Gremlins  3c465d11-bff9-4a79-923d-a90a59968bde  255  202 Holidays Christmas  Movies  Home  Alone  2  252d848c-c66c-43c6-a1e6-09abb39af286  255  149 Holidays Christmas  Movies  Home  Alone  52830717-adc2-4b35-9382-ba489e4c9622  255  149 Holidays Christmas  Movies  Its  a  Wonderful  Life  2  f06e2218-25d0-4dc2-ba97-df9f6cf12384  255  106
+=== PAGE 54 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays Christmas  Movies  Its  a  Wonderful  Life  ba0882a8-2a18-46e7-a241-3180f339066c  255  106 Holidays Christmas  Movies  Jingle  All  the  Way  2  6e7ce338-007a-461a-9624-902c83e496fc  255  128 Holidays Christmas  Movies  Jingle  All  the  Way  56c60dca-fa85-47b3-9410-fbc77c423ec3  255  128 Holidays Christmas  Movies  Miracle  on  34th  Street  2  8688b84a-717a-4956-9a7d-d1cb034cf115  255  106 Holidays Christmas  Movies  Miracle  on  34th  Street  b6052fc9-fba4-45d4-bc9d-367bcc8c8294  255  106 Holidays Christmas  Movies  Muppet  Christmas  Carol  2  75ee065a-a225-4887-9e4e-746ef9f347e4  255  138 Holidays Christmas  Movies  Muppet  Christmas  Carol  0657bd2e-73d6-4904-8917-e58faced1101  255  138 Holidays Christmas  Movies National  Lampoons  Christmas  2  7baf90a6-190d-433e-8866-3fb3da1d2534  255  255 Holidays Christmas  Movies National  Lampoons  Christmas  a43ebed7-c6c8-492d-b1ea-902603c5ebc7  255  255 Holidays Christmas  Movies Nightmare  Before  Christmas  2  0b6bb6f7-caf2-404d-9904-be94738c145c  255  128 Holidays Christmas  Movies Nightmare  Before  Christmas  d5e07e61-57c8-4288-9f8a-08de56eb84e7  255  128 Holidays Christmas  Movies Olive  the  Other  Reindeer  2  aafc9bbb-aaf8-4327-b6f5-2c3eca8aae25  255  139
+=== PAGE 55 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays Christmas  Movies  Olive  the  Other  Reindeer  b87095c5-91bc-49c0-af86-cecdc8c28faf  255  139 Holidays Christmas  Movies  Polar  Express  2  90ef2fa5-95f7-4686-b4dd-5294ee413798  255  128 Holidays Christmas  Movies  Polar  Express  8c1c12b7-72e1-4a2d-b0dc-181247b320ae  255  128 Holidays Christmas  Movies  Rudolph  2  7c97ba60-cda6-4ce6-a6a2-9764889c220c  255  165 Holidays Christmas  Movies  Rudolph  b33d2ea6-6654-4902-b076-38294ebfa46c  255  165 Holidays Christmas  Movies  Scrooged  1e2552d5-dbb6-4938-ae40-593918192669  255  162 Holidays Christmas  Movies  Scrooged  2  36b6f9ed-7ef7-443d-aac4-a2fc2bba72a0  255  162 Holidays Christmas  Movies  The  Family  Stone  2  c849aef4-986f-4b82-872c-3889c392a1aa  255  199 Holidays Christmas  Movies  The  Family  Stone  fcddc2d9-7d1c-4944-aee2-4931232e3790  255  231 Holidays Christmas  Movies  The  Grinch  2  acb9c78c-e01f-48cc-ba69-ab71b212943d  255  128 Holidays Christmas  Movies  The  Grinch  406eddc6-a05a-4afc-bea9-45729173b483  255  128 Holidays Christmas  Movies  The  Holiday  2  f2382300-c425-4f58-92b9-190674c687a2  255  224
+=== PAGE 56 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays Christmas  Movies  The  Holiday  b296cae9-2ac2-4496-9c42-2f94aa1e10f9  255  224 Holidays Christmas  Movies  White  Christmas  2  651ffb2c-ed9e-4bbb-90a1-7ab37e194a82  255  242 Holidays Christmas  Movies  White  Christmas  04019251-62f3-4a2c-8305-6244d8f574ab  255  242 Holidays  Happy  Holidays  Blue  Christmas  5ae0be67-e0e2-00f2-da64-7381cb95a906  255  128 Holidays  Happy  Holidays  Champagne  Toast  b0ab1a56-c7e0-8a7a-77c4-16b6679a018a  255  128 Holidays  Happy  Holidays  Christmas  Plaid  18614a60-261b-9326-44bd-ac44bbc7b0d6  255  128 Holidays  Happy  Holidays  Classic  Twinkle  a0f468fe-87d5-cd96-945b-141fe4691d32  255  128 Holidays  Happy  Holidays  Festive  Xmas  41c9ecda-d4d4-2a82-1368-5f7076c4703a  255  128 Holidays  Happy  Holidays  Gum  Drop  Fade  8c5e64c5-a279-522a-0e91-ec6fbc5c10c7  255  128 Holidays  Happy  Holidays  Hanukkah  f8057bc3-1dba-0e19-955a-93cdf63f4226  255  128 Holidays  Happy  Holidays  Hanukkah  2  35850226-9118-60c2-c5eb-a3b2f3750fc4  255  128 Holidays  Happy  Holidays  Happy  Christmas  58aff45e-46d0-2562-f8d1-87c9921c12f4  255  128
+=== PAGE 57 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Happy  Holidays  Happy  New  Year  d402e8f0-3338-d204-a3d8-640afef8858b  255  128 Holidays  Happy  Holidays  Holly  Berry  eb64e0dd-72a0-361f-6aa5-3fac25d36894  255  128 Holidays  Happy  Holidays  Mint  Swirl  eb1b8c5e-ebb9-ca16-8124-d2616e8c3c54  255  128 Holidays  Happy  Holidays  Modern  Xmas  1a092eea-2d20-44f9-e39f-113c5973630f  255  128 Holidays  Happy  Holidays  Northern  Star  eec32dde-fe64-e514-95db-7953521a964d  255  128 Holidays  Happy  Holidays  Nutcracker  0efa7cd3-6c8d-f2fb-7b84-b9d4176627a0  255  128 Holidays  Happy  Holidays  Poinsettia  89240435-9b0c-698b-161b-f0a399ff4845  255  128 Holidays  Happy  Holidays  Santa  Inspired  894f3dcb-426c-7668-9533-093a52c3bdde  255  128 Holidays  Happy  Holidays  Snow  Glow  9186b106-feb0-f9fd-19a5-cd8bcea72f98  255  128 Holidays  Happy  Holidays  Sparkling  Cider  778c512d-3995-a805-b31b-bbd325653316  255  128 Holidays  Happy  Holidays  Starry  Skies  2bdac623-1c16-d785-00b6-d2d693b24986  255  128 Holidays  Happy  Holidays  Traditional  c34a73ff-d22e-8339-fe98-05662cf718db  255  128
+=== PAGE 58 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Happy  Holidays  Trimming  Tree  eb6e0707-b977-71d2-68ed-6693a1b4142a  255  128 Holidays  Happy  Holidays  Winter  White  6d0f5bb1-15e9-c550-6519-3652fa399c70  255  128 Holidays  Happy  Holidays  Amethyst  Spark  cbf732be-04b0-de95-5562-8b27dc7f35ee  255  221 Holidays  Happy  Holidays  Blue  Christmas  bcea3f1a-aba1-81fe-ac8c-f68cdfddb217  255  153 Holidays  Happy  Holidays  Candy  Cane  Lane  59422d6a-59b1-6ee1-18b1-c6bfe9fa030c  255  216 Holidays  Happy  Holidays  Pretty  Paper  fedc8ff8-18d8-2041-ec16-381200cca46e  255  198 Holidays  Happy  Holidays  Shimmer  Cider  09fdc17a-836a-3b64-385a-2c93c6d15728  255  226 Holidays  Happy  Holidays  Silver  Bells  5e11ec64-d91a-5148-ee20-a126d7c25b3f  255  229 Holidays  Happy  Holidays  Sleigh  Bells  3d966643-b571-feb4-2ddf-aea0be06409b  255  226 Holidays  Happy  Holidays  Rudolph  8e4d3e45-8a9d-04df-6168-bdf1f3a590f0  255  173 Holidays  Happy  Holidays  Tropic  Holiday  c8df3bde-0bbd-bb7d-95e9-624b501cd959  255  226 Holidays  Happy  Holidays  Balsam  eff68b17-2c42-006c-d3c9-3ff139fa5dfa  255  204
+=== PAGE 59 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Happy  Holidays  Holly  Berry  2  5291c4f3-1666-8af8-67d7-a4ea86cd4ee0  255  188 Holidays  Happy  Holidays  Snow  Drifts  3920b3ac-0ca0-f925-0b67-2cd04b223b31  255  226 Holidays  Happy  Holidays  Classic  688bd232-882a-a25d-a321-b1e36a946e94  255  226 Holidays  Happy  Holidays  Christmas  Run  978210ee-524d-0728-c55b-36642bc89d3c  255  226 Holidays  Happy  Holidays  Pink  Christmas  dc124541-e646-9048-aee9-df02002960a4  255  196 Holidays  Happy  Holidays  Ruby  707565b0-2208-d6fb-3d08-10fd60742fc1  255  226 Holidays  Happy  Holidays  Traditional  Hue  0fba9662-19a0-df55-36de-0f0a37975fa0  255  226 Holidays  Happy  Holidays  Sparkly  Snow  be64cb37-43ba-7619-c502-685969ff7a1b  255  226 Holidays  Happy  Holidays  Christmas  Star  78bfa455-4f14-bdac-e5ca-608e60bf0a0a  255  226 Holidays  Happy  Holidays  Pulse  Christmas  28f44c56-257e-bbc6-6258-fb1b7fc1d16d  255  226 Holidays  Happy  Holidays  WW  Christmas  d9a8a3eb-7660-1554-5567-ab12ab34b37d  255  226 Holidays  Happy  Holidays  Christmas  Ghost  2abd2c5a-6141-a239-2601-63ba88db1390  255  242
+=== PAGE 60 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Happy  Holidays  1970's  Holiday  b6cf6bb4-6bb6-5b69-3bed-8ee9a9be12ce  255  224 Holidays  Happy  Holidays  Holiday  Stripes  49ba8318-db54-2617-842e-a18497ad96c0  255  252 Holidays  Happy  Holidays  Color  Christmas  be57a382-d9f9-9f83-328c-0ff07bd80bc3  255  226 Holidays  Happy  Holidays  Hanukkah  0d0bcda7-5b7e-2329-7f36-f587d804764a  255  168 Holidays  Happy  Holidays  Hanukkah  2  ca71a7cc-ab3a-45bf-5554-746e7de63039  255  226 Holidays  Happy  Holidays  Sparkly  Stars  0989cf0a-7882-991a-11a6-643ac10909a1  255  219 Holidays  Happy  Holidays  Fireworks  fecf7be1-0182-460e-9a76-7a6e18c0c5ad  255  226 Holidays  Happy  Holidays  Warming  Whites  01fbcbe7-947f-1cff-7265-563150448980  255  226 Holidays  Happy  Holidays  Cooling  Whites  666ca6ef-e3ec-24cb-af03-50affda614a2  255  237 Holidays  Happy  Holidays  Snowball  Fight  c0211510-3e4a-7a56-ecb7-564518451077  255  237 Holidays  Happy  Holidays  Ginger  House  a07cccc9-a49e-952f-c5f3-eefd713958b0  255  128 Holidays  Happy  Holidays  Spice  Drops  01238efe-27f5-9026-7741-727b5a6bcdf7  255  128
+=== PAGE 61 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays Remembrance  Day  Remembrance  Day  44981fd9-a412-2467-7168-c51d7a304593  255  128 Holidays Remembrance  Day  Remembrance  Day  2  4d12f04c-3b4c-fffa-4444-8e632b25aa58  255  128 Holidays Remembrance  Day  Remembrance  Day  3  c414640b-14f2-9815-eb36-d5819e364c18  255  128 Holidays  Cinco  de  Mayo  Cinco  de  Mayo  40318d71-3d8c-97f4-d674-7d5b9ccb3b31  255  128 Holidays  Cinco  de  Mayo  Cinco  de  Mayo  2  15d3a6be-c4be-5706-299f-b9aa438ba238  255  128 Holidays  Cinco  de  Mayo  Cinco  de  Mayo  3  1e69e1d0-8a01-ce7a-d694-bafeaddb096d  255  128 Holidays  Cinco  de  Mayo  Cinco  de  Mayo  4  586db945-bc8f-6129-c383-df07c887fe7a  255  128 Holidays  Cinco  de  Mayo  Cinco  de  Mayo  5  a66eb203-07fd-40c1-9373-a2821445d919  255  128 Holidays  Mardi  Gras  Beads  d17321c1-5cb4-488f-6c51-254d27b5f81a  255  128 Holidays  Mardi  Gras  Chasing  Beads  dd1866ae-29f9-94a2-b93a-7614a55735ad  255  128 Holidays  Mardi  Gras  Fat  Tuesday  1308ccc6-1cf9-7b0e-b34a-4a86a656e144  255  128 Holidays  Mardi  Gras  Mardi  Gras  f666fac9-3f02-a818-f69a-aa1ef45f7231  255  128
+=== PAGE 62 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Mardi  Gras  Parade  4e0abd42-414d-7356-573a-0d0a22a746c4  255  128 Holidays  Canada  Day  All  Red  2white  0b6be7b3-7350-f48e-bf30-77a7b2eef865  255  128 Holidays  Canada  Day  Canada  2W2R  d04de9b7-a39a-edf9-ec3f-bae7663e246f  255  128 Holidays  Canada  Day  Canada  2W3R  83665681-ce11-1559-1444-e3347ca0a6f2  255  128 Holidays  Canada  Day  Canada  3W2R  27a2eb4a-e2d0-4ab2-fa2e-ba536a553d58  255  128 Holidays  Canada  Day  Canada  5  and  5  a067d804-09d5-4cb1-fcfd-d0f96ee57666  255  128 Holidays  Canada  Day  Canada  Day  3W3R  3b7cbe70-6ca2-cfc0-3e28-97bc84447c48  255  128 Holidays  Canada  Day  Canada  Pacman  4879a38e-5962-78bc-ed8d-9a528813d923  255  128 Holidays  Canada  Day  Canada  RWBright  fcc2c0dd-76a0-8003-2a23-f9d39ff2b280  255  128 Holidays  Canada  Day  Red  2  to  5  wh  a4d455fc-5c3e-5d25-0a16-759806944727  255  128 Holidays  Canada  Day  Red  to  Warm  7e03b03e-fadb-5ddb-ef30-cf1085bc251e  255  128 Holidays  Mother's  Day  Mom  1  570a97bf-67a3-1fa9-a50c-41db1ddf882e  255  128
+=== PAGE 63 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Mother's  Day  Mom  2  95df4ca4-1d13-8354-fe5e-f21a88bc0c8c  255  128 Holidays  Mother's  Day  Mom  3  2c1596f1-0c73-9ffc-18eb-762fc6bdf450  255  128 Holidays  Mother's  Day  Mom  4  2b684545-0688-cf47-5d86-2c6fa0fd8def  255  128 Holidays  Valentine's  Day  Be  Mine  bab54102-18dc-69ee-07e4-d0b158a23054  255  128 Holidays  Valentine's  Day  Blushing  7ba0485c-482d-1670-64fb-d7c82ab478a2  255  128 Holidays  Valentine's  Day  Chasing  Love  db277c9f-06e1-6566-657b-22bf4214b353  255  128 Holidays  Valentine's  Day  Classic  V-Day  0dfc23e5-69cb-4d49-4246-75e0e4f8f014  255  128 Holidays  Valentine's  Day  Heartbeat  36369ea8-d010-7e12-9a45-aba057705007  255  128 Holidays  Valentine's  Day  Heartthrob  b1065f3c-10dd-c8fa-4802-c18a91610da0  255  128 Holidays  Valentine's  Day  Lovesick  18354a11-c7bc-5ea8-a572-127f633fec22  255  128 Holidays  Valentine's  Day  Pink  Shimmer  f546b092-512b-45a0-83ff-ca954a364ab3  255  128 Holidays  Valentine's  Day  Pretty  in  Pink  f1855ad9-1585-598d-e914-23fda2547f51  255  128
+=== PAGE 64 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Valentine's  Day  Purple  Love  562735f0-98f7-14a4-b9c7-dcb0bb2f270a  127  128 Holidays  Valentine's  Day  Red  Hot  c50b3d50-a470-649e-751d-6499b193564b  255  128 Holidays  Valentine's  Day  Valentines  9e4a9db7-e830-3fa1-af75-443ed96c6464  255  128 Holidays  Valentine's  Day  Valentines  2  1a073b76-d3e3-4e55-a266-c9c37326ae34  255  128 Holidays  Valentine's  Day  Valentines  Pink  65735eb1-bd4a-af5e-59ee-08574b4d1c5f  255  128 Holidays  Valentine's  Day  Valentines  Star  fede2d6b-488e-1005-f5b3-b4a5779b087a  255  128 Holidays  Valentine's  Day  Candy  Sprinkle  93544357-e071-313a-93df-025275eb06b4  255  226 Holidays  Valentine's  Day  Cupid's  Cache  e7b3533f-762b-cdc3-1f61-d3f9a34cc86a  255  226 Holidays  Valentine's  Day  Fluttery  51c21655-90d6-0407-2a4f-2c789b5d0056  255  226 Holidays  Valentine's  Day  Lavender  Hazy  312a7d5e-7895-9b98-fd84-40b1539491e2  255  224 Holidays  Valentine's  Day  Blushing  a205f193-3328-de40-0236-490cc91202b2  255  216 Holidays  Valentine's  Day  Love  Wave  0d566fa0-bb75-df26-dc82-a2dd61c693f5  255  224
+=== PAGE 65 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Valentine's  Day  Pastel  Hearts  7b6e5fe8-947f-8027-962c-4e2358b1ff6d  255  224 Holidays  Valentine's  Day  Red  Fade  a442a7da-43f4-c693-3296-d97e64ca710b  255  226 Holidays  Valentine's  Day  Marquee  of  Love  2bf9a5f7-994d-05ec-7d3d-a27c411a0e00  255  226 Holidays  Valentine's  Day  Pretty  in  Pink  6693c49a-8a04-a9f0-a300-c75a3fa4063d  255  226 Holidays  Valentine's  Day  Fizzy  Love  2eba158e-59ff-496c-df88-45d0676b0b2a  255  211 Holidays  Valentine's  Day  Lovesick  54cb65ff-8c24-366e-76dc-f0b17259cbe0  255  226 Holidays Chinese  New  Year  1.  Happy  New  Year  1331a5ca-7f54-697b-44d1-b89a4be79a06  255  128 Holidays Chinese  New  Year  2.  Happy  and  Prosperous  c0bf5a1f-7ef6-8f09-ede6-3e4dd9da02ac  255  128 Holidays Chinese  New  Year  3.  Successful  Career  7161be87-9a96-1823-7e38-4e20cf0b3900  255  128 Holidays Chinese  New  Year  4.  Smooth  Sailing  97275ae9-e8fd-1dde-615b-21153072abe0  255  128 Holidays Chinese  New  Year  5.  In  Good  Health  f30e3867-a6be-885a-604d-4d16ce5dde7f  255  128 Holidays  Diwali  Bhai  Dooj  e5a52965-9cfe-b557-fa26-d1a5b241afd9  255  128
+=== PAGE 66 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Diwali  Choti  Diwali  ddea74cb-2aad-12f1-a1d2-0aa8c454c707  255  128 Holidays  Diwali  Day  1  -  Dhanteras  e288d80f-26d9-e926-2046-cd2fcb0fba0b  255  128 Holidays  Diwali  Day  2  -  Kali  Chaudas  1bb56f8d-d4bb-2b61-4257-bccd462e6ac3  255  128 Holidays  Diwali  Day  3  -  Diwali  88510779-f517-d55b-6e92-f6c38d26d82e  255  128 Holidays  Diwali  Day  4  -  Govardhan  Puja  4d141dc5-39d7-8706-50d0-211130f74884  255  128 Holidays  Diwali  Day  5  -  Bhai  Dooj  a8b24d6b-e355-9238-b13d-1d63dc39c231  255  128 Holidays  Diwali  Dhanteras  c4e55c8f-3d2e-6662-daad-257ad1135fb8  255  128 Holidays  Diwali  Diwali  065942df-cc13-eab3-d814-24d2d4b6526f  255  128 Holidays  Diwali  Diwali  Fireworks  c7078c10-9510-40a0-b490-496e4c725f53  255  224 Holidays  Diwali  Festival  Lights  bbb94cc7-560a-3cbc-3250-fc6de314fec1  255  128 Holidays  Diwali  Golden  Diya  8c3711e2-66cc-d1a7-3192-f4bed26214e5  255  128 Holidays  Diwali  Golden  Diya  2  9baa07f4-9cde-4d96-909e-cf1e332c5949  255  231
+=== PAGE 67 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Diwali  Govardhan  Puja  9d9af0ce-3bfa-1405-cdca-c7022445c331  255  215 Holidays  Diwali  Govardhan  Puja  2  e070af9d-0d4b-4af9-bb0f-1ee5c27bb6c2  255  215 Holidays  Diwali  Happy  Diwali  3cca2f51-459b-5f49-4ceb-7056183b87c7  255  128 Holidays  Diwali  Happy  Diwali  2  589eb8f8-fbf0-4ea5-b3cf-3aeec5c23183  255  89 Holidays  Diwali  Krishna  Blue  f1f1af0d-bb02-fbac-56d5-0e1c89be18b0  255  128 Holidays  Diwali  Krishna  Blue  2  22cb69a5-defe-4be8-9270-b988c7fcb3e3  255  211 Holidays  Diwali  Onam  Pookalam  0673d04d-44d2-cb65-22b2-e7bc35c41131  255  128 Holidays  Easter  Double  Easter  5c4cc735-ee3c-388b-c5ee-815624cddc48  255  128 Holidays  Easter  Easter  480b502a-f86a-a2ea-12e6-843741d5471f  255  128 Holidays  Easter  Easter  Bunny  5be0ecaf-87e0-3feb-5432-477ea9da0281  255  128 Holidays  Easter  Easter  Eggs  e8f42800-4788-e991-4b9f-bb12e401a163  255  128 Holidays  Easter  Green  to  Pink  9cc64790-38e9-abb0-144b-9632e615a3c8  255  128
+=== PAGE 68 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Easter  Multi  Easter  f79f1fa8-1a89-4b47-f0ab-0232ef4d6d86  255  128 Holidays  Easter  Pinks  5007cacd-fa83-5229-fc22-3453e54111c4  255  128 Holidays  Easter  Purple  Burst  51d531c4-e840-8baf-a30e-4aed27b07c5b  255  128 Holidays Halloween  Movies  Batman  f42a335c-c050-ae10-4746-67d561f71634  255  128 Holidays Halloween  Movies  Batman  and  Joker  521b9d46-42ce-2229-4676-c3d92d991b60  255  128 Holidays Halloween  Movies  Beetlejuice  3f687153-d86e-95cf-a2e5-bd1fa4ac62d4  255  128 Holidays Halloween  Movies  Casper  c7a3d251-5038-fefe-65b3-a164d75bd57b  255  128 Holidays Halloween  Movies  Friday  the  13th  061165ac-f95a-d54e-147f-688db1c024fb  255  128 Holidays Halloween  Movies  Ghost  Busters  322c6af0-a555-d452-0256-8fc095e47551  255  128 Holidays Halloween  Movies  Halloweentown  8715a5d3-cc01-a1dd-3480-5484bcf04beb  255  128 Holidays Halloween  Movies  IT  068b705e-e5f0-70e0-e861-12a681c26050  255  128 Holidays Halloween  Movies  Nightmare  on  Elm  Street  44ffd0df-2b81-363a-34c8-3897f418d01d  255  128
+=== PAGE 69 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays Halloween  Movies  Scream  c739e186-9790-e791-b672-867a861e3667  255  128 Holidays Halloween  Movies  Teen  Wolf  094aa6de-c2e2-79bf-b1c1-545dd15a1231  255  128 Holidays Halloween  Movies  The  Shining  cfb113cf-2da6-ef6c-b1cf-f3f8d8572ad0  255  128 Holidays  Thanksgiving  Thanksgiving  4cdc1931-5c61-1b40-0cb7-66e06664070f  255  128 Holidays  Thanksgiving  Thanksgiving  2  b9026b51-0765-9420-4c03-58923d198eb1  255  128 Holidays  Thanksgiving  Thanksgiving  3  20b04c1b-08fd-99c8-e7d7-ffb014a74f0a  255  128 Holidays  Juneteenth  Juneteenth  96b84431-3e7d-d91b-895e-5cc8c6c02692  255  224 Holidays  Juneteenth  Unity  7ed74d94-f61d-9a96-f628-47d9ed8c69b0  255  119 Holidays  Juneteenth  Equality  d23be1d7-08e8-0614-9b33-aac3ba5d2e91  255  229 Holidays  Juneteenth  Libertation  aea54d17-d749-675a-f8a6-023a9a83de67  255  96 Holidays  Juneteenth  Freedom  Day  59661843-2cd3-f2a2-5c72-aa038d7d6552  255  229 Holidays  Juneteenth  Resilience  867d1464-c1f6-8b2e-1dfd-cbd0222743d3  255  128
+=== PAGE 70 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Christmas  Blue  Frost  f58f7039-e9a5-2c08-ec49-1ed28206a6d7  255  128 Holidays  Christmas  Blue  Shine  80304153-be3f-4fce-86b3-c51cea9c7df2  255  128 Holidays  Christmas  Bold  Peppermint  8c3c73d8-1c7f-9121-f5c5-d5b74db40ab0  255  128 Holidays  Christmas  Butterscotch  Candy  d1c4523b-fec3-dc77-5c33-cc34c857c1d3  255  128 Holidays  Christmas  Candycane  46beff11-1797-8105-0430-d250a7cc3868  255  128 Holidays  Christmas  Christmas  Fruit  fe68b9dc-046a-605b-2586-b4882544fe4d  255  128 Holidays  Christmas  Christmas  Glamo  913e7333-0043-fdd6-0469-47491af9ff41  255  128 Holidays  Christmas  Christmas  Star  ac05ca11-19dc-b34d-1759-4eb738c7102e  255  128 Holidays  Christmas  CoCoa  and  Marshmallow  55f3fa93-a648-7183-a158-35b26140fdcd  255  128 Holidays  Christmas  Elf  e8234aba-47a3-bb0f-4dd0-8f4b8ed5fd42  255  128 Holidays  Christmas  Green  Pacman  943618c6-552d-4c63-eb1a-d61597bacffc  255  128 Holidays  Christmas  Holly  and  Berry  Jingle  966ae7f7-d3a7-1ac9-6013-fa08bcc08b0b  255  128
+=== PAGE 71 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Christmas  Holly  Twinkle  49e29df4-d469-534c-e430-270f303a0b3c  255  128 Holidays  Christmas  Holly  n  berry  1de53d2e-1c7a-1e38-3727-d2ad6236dba3  255  128 Holidays  Christmas  Old  School  643202dd-a8f3-ad53-eef9-2ae35b3ba83f  255  128 Holidays  Christmas  Pistachio  Munch  e97f479b-0b59-540c-ba31-4be728a0fad1  255  128 Holidays  Christmas  Poinsettia  5023dbef-27e7-ccd8-2cba-1248886d4362  255  128 Holidays  Christmas  Purple  Burst  9b24a16f-5700-2b71-7692-18258544549e  255  128 Holidays  Christmas  Red  Green  ae4067f9-22c9-f62f-c222-1798c3549d53  255  128 Holidays  Christmas  Red  Green  White  a390e384-67cb-671b-8801-fdb91ee6fd0e  255  128 Holidays  Christmas  Reds  2cd932e6-638c-6b4f-0ef2-16e0dbc61cdc  255  128 Holidays  Christmas  Retro  Candycane  a260585a-27cc-8643-3690-4e73a3da9a4c  255  128 Holidays  Christmas  Rudolph's  Nose  ecfa3edb-6c40-034c-0f4a-3772fedcfc58  255  128 Holidays  Christmas  Santa's  Hat  5375f90e-2f4f-f30a-9476-717734226529  255  128
+=== PAGE 72 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Christmas  Shooting  Star  919c2025-1887-398a-4337-24ee6775ea32  255  128 Holidays  Christmas  Stars  Align  a3685ff4-53f8-9aa6-fb1f-c74741b74eed  255  128 Holidays  Christmas  Sugar  Plums  394a5bc6-b341-d2ff-f761-3be3ea3d8ba9  255  128 Holidays  Christmas The  Grinch  Steals  Christmas  66f1cd45-a544-4dab-6661-dd6ab68c5b48  255  128 Holidays  Christmas  Toffee  Sparkle  a801dcb4-fce6-54ad-769f-19b07073adfb  255  128 Holidays  Christmas  Traditional  3ead3da1-bf7b-a8c4-6f83-5eb291a36127  255  128 Holidays  Christmas  Traditional  Christmas  8b52d5af-b242-23f7-434c-ce2bd52428f0  255  128 Holidays  Christmas  Tropical  Candycane  2455247f-11d8-a91f-4c6c-1a6a9e709bdb  255  128 Holidays  Christmas  Vintage  6cdb4566-c4c3-6ebd-8a3f-ca983e236f66  255  128 Holidays  Christmas  Warm  White  Twinkle  f2ce4183-edbd-48e8-d124-a791380c81f8  255  128 Holidays  Christmas  White  Twinkle  f06a8d32-d38e-a2f7-3dfe-a74d7bd25d4b  255  128 Holidays  Christmas  Yummy  Gum  Drops  e05f1feb-4748-4362-efcb-26cccf5bb01f  255  128
+=== PAGE 73 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays Christmas  Advent  Christmas  67480489-8c3e-7363-73c6-05e74abba6d0  255  128 Holidays Christmas  Advent  Day  1  25997769-5507-56a5-fee4-fb1a5481f21d  255  128 Holidays Christmas  Advent  Day  10  7a2fc56f-41e4-71e8-435a-40ef941fc792  255  128 Holidays Christmas  Advent  Day  11  d8c8b205-5a66-e75b-b145-93ec45d21845  255  128 Holidays Christmas  Advent  Day  12  ef1043e9-585c-8a9f-1f07-ec63935a4eec  255  128 Holidays Christmas  Advent  Day  13  8f3ea29c-b40c-4f5c-45ed-520cf661bb25  255  128 Holidays Christmas  Advent  Day  14  bafa431e-0f3d-76a0-948a-769e00b3bc2b  255  128 Holidays Christmas  Advent  Day  15  6e48451c-8b27-8999-8c6d-2dff3c153d43  255  128 Holidays Christmas  Advent  Day  16  671d47bc-ac29-7cba-1d11-bceec7dfc9e6  255  128 Holidays Christmas  Advent  Day  17  fa64133e-cb73-15d3-3f54-adebe4e544a9  255  128 Holidays Christmas  Advent  Day  18  dd7d3de6-808e-c9ec-307a-2350c0cf9f35  255  128 Holidays Christmas  Advent  Day  19  e0c184fa-2888-22ec-53ab-c856a9069dd5  255  128
+=== PAGE 74 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays Christmas  Advent  Day  2  1cd515b7-b26f-8d43-1c10-788c7ec9f105  255  128 Holidays Christmas  Advent  Day  20  4cb473f6-ae76-2af6-f4ec-619f4526f6e3  255  128 Holidays Christmas  Advent  Day  21  411926e8-d2ab-f2f2-8a19-e53d6f1b7f98  255  128 Holidays Christmas  Advent  Day  22  b1307b30-c912-45be-8238-4ae6159f7053  255  128 Holidays Christmas  Advent  Day  23  c1f09636-b626-b578-6c51-a54cc91f9f53  255  128 Holidays Christmas  Advent  Day  24  1b0b0ad5-038e-a367-1554-67b97b7f6335  255  128 Holidays Christmas  Advent  Day  3  6279a0e1-96a4-d8d8-2e20-d1435dd15386  255  128 Holidays Christmas  Advent  Day  4  4fd8a51c-1676-89ad-d998-c9ea9d9c2f51  255  128 Holidays Christmas  Advent  Day  5  d1a2931f-9992-036a-99af-f7b1f3120b89  254  128 Holidays Christmas  Advent  Day  6  28340f7e-0764-5501-d514-c27de4fa3916  255  128 Holidays Christmas  Advent  Day  7  fc293df5-3063-65ad-a605-03ddda615df7  255  128 Holidays Christmas  Advent  Day  8  077d162a-8915-1420-2812-0f6808905d83  255  128
+=== PAGE 75 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays Christmas  Advent  Day  9  86f074c9-dfeb-2950-b3c1-5b384a773acc  255  128 Holidays Saint  Patrick's  Day  Emerald  Isle  d579eae5-a36b-bf68-b0e0-15897b912c7d  255  128 Holidays Saint  Patrick's  Day  End  of  Rainbow  5e7a13d4-f230-e538-f0cc-307a4e9d0b24  255  128 Holidays Saint  Patrick's  Day  Fighting  Irish  3688f565-2450-7f7f-04d9-4cda907e7e9e  255  128 Holidays Saint  Patrick's  Day  Irish  Glamo  ff23fd62-4858-d181-c04f-354438353b30  255  128 Holidays Saint  Patrick's  Day  Little  Leprechan  722d1622-fa6b-9362-724f-2a7bc4f56374  255  128 Holidays Saint  Patrick's  Day  Lucky  Day  d7b55e2f-168c-51a2-dffd-ce12926a27b7  255  128 Holidays Saint  Patrick's  Day  Pot  of  Gold  2894ebc4-81db-0fcb-614b-17aa5f879bef  255  128 Holidays  Hanukkah  Day  1  667bea9d-c898-1994-2507-fca9bc57a2a2  255  250 Holidays  Hanukkah  Day  1  -  Motionless  8f4eb08c-2da2-44e3-b40d-8637ecc207a1  255  214 Holidays  Hanukkah  Day  2  728d673a-0cab-879a-51b6-6ea99df6b975  255  170 Holidays  Hanukkah  Day  2  -  Motionless  cc787dbe-4a72-4141-b22d-9b1cb2bcf76e  255  170
+=== PAGE 76 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Holidays  Hanukkah  Day  3  e7d76d3d-4c8f-0f66-efcf-5ab9b46e0511  255  255 Holidays  Hanukkah  Day  3  -  Motionless  476dac53-0687-45a1-886d-2df93b691d9a  255  241 Holidays  Hanukkah  Day  4  5998f62a-ebe6-3e87-0d37-61c5cdc7c8e3  255  255 Holidays  Hanukkah  Day  4  -  Motionless  ec166a13-7254-4f75-8fd1-155fd888f223  255  53 Holidays  Hanukkah  Day  5  79e0c9e6-558f-aa47-67ea-ec6618f48e6f  255  255 Holidays  Hanukkah  Day  5  -  Motionless  87281a92-a75f-4b84-9470-cbf7e1e8219a  255  221 Holidays  Hanukkah  Day  6  a086d39c-e7ec-6432-47d2-2734cbcb2d8a  255  255 Holidays  Hanukkah  Day  6  -  Motionless  99fd052e-5b53-4c81-b762-70a1f7332667  255  204 Holidays  Hanukkah  Day  7  35f4f220-b150-24f8-54c8-908da273b603  255  255 Holidays  Hanukkah  Day  7  -  Motionless  23dead5e-a9fe-4115-8caf-4bd7818da85a  255  219 Holidays  Hanukkah  Day  8  d93536d0-3489-0c82-404e-ee8fe770299a  255  221 Holidays  Hanukkah  Day  8  -  Motionless  3947e7b6-a8ff-4571-8a63-57f4d42d2a9c  255  128
+=== PAGE 77 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Countries  Ukraine  Strong  Ukraine  13fa46bd-83a0-5a18-3da9-32b73dd4ff55  255  128 Countries  Ukraine  Strong  Ukraine  2  52402228-10a3-8fb5-8f53-8a94d2da02c7  255  128 Countries  Ukraine  Strong  Ukraine  3  9ebd226f-03be-c1ac-7d8b-8b24d61566d2  255  128 Countries  Ukraine  Strong  Ukraine  4  5893c2d7-bbc7-6bf8-73f6-f3d6b620c404  255  128 Countries  Ukraine  Strong  Ukraine  5  58fdd2ba-e510-bce8-3bf8-93c6834b53b7  255  128 Countries  Ukraine  Strong  Ukraine  6  9b26f1f3-964b-ab50-cc3b-1afe058da884  255  128 Countries  Ukraine  Strong  Ukraine  7  7cdd596d-bde4-2e21-eb48-fc6ab406fcec  255  128 Countries  Ukraine  Strong  Ukraine  8  873a6b85-89cc-683c-a64e-1735879592a4  255  128 Countries  Ukraine  Strong  Ukraine  9  3a5b4a11-2aa2-2c7b-eb4c-086fbef0f162  255  128 Countries  USA  4th  Day  of  July  5884facb-8ab1-329e-0af0-5dbde52e9ed7  255  128 Countries  USA  4th  of  July  639c40b0-aebf-4dcf-a71a-c5c3cb5231c1  255  128 Countries  USA  Happy  4th  218196dd-2549-99e6-4bd3-f02d5e952477  255  128
+=== PAGE 78 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Countries  USA  Happy  4th  2  bd5fd444-3d8c-5d1d-8a7f-bf26fc89dad9  255  128 Countries  USA  July  4th  f916eaaf-c654-2109-cac2-51d89e314ecb  255  128 Countries  USA  RWB  ColourWheel  5a435ca8-0027-a612-6bc3-5f7729df44f0  255  128 Countries  USA  USA  3657b852-9c06-6c1b-b1cf-f4e9d210b4d7  255  128 Countries  USA  USA  Hurray  a8666d18-a831-fafe-01a7-cbd8b7b80d81  255  128 Countries  USA  USA  Vintage  995bad0b-647d-f3a8-edd5-8227a0eba2b5  255  128 Countries  USA  USA  Vintage  2  40e260a7-053f-9860-be8b-c401dc24e1ff  255  128 Countries  Olympics  2022  Canada  6965836c-9eb4-4245-812b-caf5079c7af2  255  128 Countries  Olympics  2022  Canada  2  f4c183ab-946e-cfdd-a72d-4db224b60448  255  128 Countries  Olympics  2022  France  f5a37fc9-9714-98fa-0ce3-9f7bfdeaa9ca  255  128 Countries  Olympics  2022  France  2  3af8e7ad-3c4d-cd25-75e1-92e44a1109b4  255  128 Countries  Olympics  2022  Germany  3bd32e16-c7a2-9215-5cd3-ebc1f75eec77  255  128
+=== PAGE 79 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Countries  Olympics  2022  Germany  2  51dca02f-9a35-0ae6-5f9e-e9be9cba1e17  255  128 Countries  Olympics  2022  Italy  71ee7a83-7430-7069-e9bb-723563e73b24  255  128 Countries  Olympics  2022  Italy  2  7c2a1202-8f1a-4d18-0321-ad3426212bac  255  128 Countries  Olympics  2022  Netherlands  1be647bf-04da-b86d-816f-2c811654d3d6  255  128 Countries  Olympics  2022  Netherlands  2  04bb91d4-1981-2485-76b9-ee2e5cd7adb9  255  128 Countries  Olympics  2022  Norway  a51deb6b-33a9-ec90-fa03-93904e32cbf3  255  128 Countries  Olympics  2022  Norway  2  fe81aa7d-1fe7-fb52-373f-beae270d1fc8  255  128 Countries  Olympics  2022  South  Korea  af28ea62-29ca-47c6-7576-2b412f26a574  255  128 Countries  Olympics  2022  South  Korea  2  23cde092-1225-ba28-8024-06cc857be88d  255  128 Countries  Olympics  2022  Sweden  139bb8be-2230-6e46-8cfa-c9d83c6f1022  255  128 Countries  Olympics  2022  Sweden  2  a065a008-123e-fa71-1866-e0f1ea44ddbc  255  128 Countries  Olympics  2022  Switzerland  e048419e-dc71-7b37-ce8e-536eb43c6fff  255  128
+=== PAGE 80 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Countries  Olympics  2022  Switzerland  2  97a02dd4-74ef-ba95-9f0b-f35d872f456f  255  128 Countries  Olympics  2022  United  States  fc1c4b94-28f1-783e-2746-44de77f2edda  255  128 Countries  Olympics  2022  United  States  2  22dda8fd-9c47-3ce5-9aa6-3a9c901ba7ea  255  128 Sports  CFL  BC  Lions  bb0900fd-4ce1-7257-796c-5bbccd266ef1  255  128 Sports  CFL  BC  Lions  2  4b15f713-1f8d-7ef7-6a51-04bf585fa600  255  128 Sports  CFL  Calgary  Stampeders  fd68d315-c686-618b-0414-767cc1b4d608  255  128 Sports  CFL  Calgary  Stampeders  2  67b7e84a-9dec-8f0a-c391-4c9fbbe66939  255  128 Sports  CFL  Edmonton  Elks  129e6964-607e-099d-eaae-bb600963ddd4  255  128 Sports  CFL  Edmonton  Elks  2  828c7852-61b6-9dfb-2624-9cb09187be94  255  128 Sports  CFL  Hamilton  Tigercats  c5e92558-319c-1b28-831b-8b40c7fe9450  255  128 Sports  CFL  Hamilton  Tigercats  2  51c07c30-5a83-de4c-7395-ede64ea32add  255  128 Sports  CFL  Montreal  Alouettes  0a47308d-9fd2-ed27-dce5-1ef326aec57d  255  128
+=== PAGE 81 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  CFL  Montreal  Alouettes  2  9bd93f65-249e-9da6-836e-e06fdeca97d3  255  128 Sports  CFL  Ottawa  Redblacks  3bdd4660-189d-3f4c-192e-95efe158629e  255  128 Sports  CFL  Ottawa  Redblacks  2  a6e78a65-b26a-a620-3fe8-6cd4e0dba30c  255  128 Sports  CFL Saskatchewan  Roughriders  498c2b9d-0702-b776-b8b2-3327466afa34  255  128 Sports  CFL Saskatchewan  Roughriders  2  2adb2b20-e043-7240-9942-14aa19a216b9  255  128 Sports  CFL  Toronto  Argonauts  3d3b5e6f-c43e-9e9a-e0b9-b754bf2ee0f9  255  128 Sports  CFL  Toronto  Argonauts  2  43e31825-0ed4-3f3f-2c8a-173398494c7b  255  128 Sports  CFL  Winnipeg  Blue  Bombers  2c7fd391-bbf2-11c1-a869-054f8e65b1a7  255  128 Sports  CFL  Winnipeg  Blue  Bombers  2  f76b90e7-46ec-10ba-4282-c7da3f949cda  255  128 Sports  F1  Checkered  Flag  05dfc80e-f08e-ddbe-16bc-a02b60b905ba  255  145 Sports  F1  Red  Bull  b237529e-6b04-6120-a857-0b324b24942c  255  224 Sports  F1  Fighting  Bull  8377c81b-d7f5-11bc-904f-23623844271c  255  224
+=== PAGE 82 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  F1  Mercedes  e9ff31e5-8c1a-2cc2-3ccf-e531cffa2d12  255  226 Sports  F1  Silver  Arrows  f938dc7d-90a1-bce0-60a6-fb83aded6cf6  255  209 Sports  F1  Ferrari  ae5c6fc0-9c91-10e3-5544-9f659d0bcb17  255  221 Sports  F1  McLaren  6448a56b-2f94-dcd0-1aa5-2120165052e3  255  226 Sports  F1  Team  Papaya  6b9b7b92-df2f-2beb-8dd6-535706d4e842  255  214 Sports  F1  Aston  Martin  8ecf9df6-3a2a-0c2a-0136-69511eba2030  255  226 Sports  F1  Aston  Martin  2  c42ba884-7b0e-4c13-f985-63ab4720a726  255  175 Sports  F1  Alpine  736e4874-78e8-161e-b1a2-be72a59175c0  255  224 Sports  F1  Alpine  2  f2c1c9b0-8e05-9401-b97b-d4710baeb161  255  221 Sports  F1  Williams  6f6aea58-9ad1-d12c-8097-708ebf9e403b  255  224 Sports  F1  Frank  Williams  143c39c1-3a5d-7d04-a041-c1980b594292  255  224 Sports  F1  AlphaTauri  8eadc9e2-313f-44a9-7a8f-291bd266c854  255  226
+=== PAGE 83 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  F1  AlphaTauri  2  587a9c8b-6764-2c8d-5afd-de3912ac6f15  255  224 Sports  F1  Alfa  Romeo  3b317d62-c3e8-1398-8ea6-22df155b0614  255  224 Sports  F1  Alfa  Romeo  2  eddca9d1-64e9-b207-0d62-530e408e61d3  255  214 Sports  F1  Haas  b3e6bd70-da52-0e07-a36c-1d3f78ee94ef  255  226 Sports  F1  Haas  2  8c6bfb41-9a50-4f76-faef-29ef8f451759  255  224 Sports  F1  Prancing  Horses  8dbfd35c-4ef2-6f33-8ac1-1eceaa3b3abc  255  128 Sports  NHL  Anaheim  Ducks  f1aa68a6-71be-5e6e-d492-b18e3d427e63  255  128 Sports  NHL  Anaheim  Ducks  2  0de2a9bb-6301-9f1c-6ba9-0dfc2b760655  255  128 Sports  NHL  Arizona  Coyotes  0d583f43-ad7b-ccf5-4465-ebd31bd07ee9  255  128 Sports  NHL  Arizona  Coyotes  2  960a3125-cc7d-2b78-ef6e-74d65c9a9abe  255  128 Sports  NHL  Boston  Bruins  df1ad85e-200b-1d3c-0ab5-a1234114ee6e  255  128 Sports  NHL  Boston  Bruins  2  1cc8dcf4-4f93-1385-b556-d7db77623926  255  128
+=== PAGE 84 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NHL  Buffalo  Sabres  14f72abf-aabd-8570-2a54-78e08be04826  255  128 Sports  NHL  Buffalo  Sabres  2  67658243-8375-02c0-7ca0-e71d9bb01289  255  128 Sports  NHL  Calgary  Flames  79c0b54f-3de6-bf8f-1240-50cb6bf2bb51  255  128 Sports  NHL  Calgary  Flames  2  1a6d2bdc-0917-86f4-d9ed-cb709e17192b  255  128 Sports  NHL  Carolina  Hurricanes  e34c273e-8e08-383b-f197-7fe3e2687eea  255  128 Sports  NHL  Carolina  Hurricanes  2  0523f3ba-cfc3-bb30-d385-02e30ec50014  255  128 Sports  NHL  Chicago  Blackhawks  24ace71b-13c4-a08f-79db-fa2635c66092  255  128 Sports  NHL  Chicago  Blackhawks  2  1f841c9d-ae92-c1d9-c404-725ff84b274b  255  128 Sports  NHL  Colorado  Avalanche  918d9351-95d0-dcfe-e9f1-38b87e13e2a4  255  128 Sports  NHL  Colorado  Avalanche  2  8f98c0e8-7c36-edbb-d133-3c6b31322bb1  255  128 Sports  NHL  Columbus  Blue  Jackets  e1fc85de-16f4-026f-2c8f-909090d969a9  255  128 Sports  NHL  Columbus  Blue  Jackets  2  b262b198-7eec-a33e-5c28-5e7970c0a0dd  255  128
+=== PAGE 85 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NHL  Dallas  Stars  44ab4d57-d0fd-9db1-8f30-7be5dfd57da7  255  128 Sports  NHL  Dallas  Stars  2  7afcd142-8ea6-44bc-6038-36b61c2d3a61  255  128 Sports  NHL  Detroit  Red  Wings  ad767612-6553-4430-54de-e8f55c92ca2b  255  128 Sports  NHL  Detroit  Red  Wings  2  c0500b9a-1297-7229-38aa-6d54c86c3c2e  255  128 Sports  NHL  Edmonton  Oilers  5eca44ad-1fd0-435a-6dd1-4b820a2ec2d3  255  128 Sports  NHL  Edmonton  Oilers  2  accfdd20-0ee0-a88e-24f4-ac77e5af6e57  255  128 Sports  NHL  Florida  Panthers  14f72abf-aabd-8570-2a54-78e08be01ab9  255  128 Sports  NHL  Florida  Panthers  2  67658243-8375-02c0-7ca0-e71d9bb002fd  255  128 Sports  NHL  Los  Angeles  Kings  711ca426-9ea8-88a6-4fe9-22b0b25469e1  255  128 Sports  NHL  Los  Angeles  Kings  2  4dc9b635-0b3a-ff1a-2f53-0d7eaffd03f1  255  128 Sports  NHL  Minnesota  Wild  a8d66010-0936-3db3-1564-ad6126616fea  255  128 Sports  NHL  Minnesota  Wild  2  a664ce50-085c-891b-d36a-142a07624c92  255  128
+=== PAGE 86 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NHL  Montreal  Canadians  945eb46d-15e0-7b4f-3d15-82a4049a8f1f  255  128 Sports  NHL  Montreal  Canadians  2  dea52c77-9847-2648-1dc1-17f3b3d044ff  255  128 Sports  NHL  Nashville  Predators  30d29854-2307-6b65-6629-cd84a32b13b4  255  128 Sports  NHL  Nashville  Predators  2  a5d48bb8-23ff-e7ac-cf91-a861f3731740  255  128 Sports  NHL  New  Jersey  Devils  cc4e4e69-6837-44c5-f3c7-97f10de7a19b  255  128 Sports  NHL  New  Jersey  Devils  2  2f20b76c-6765-1548-6f62-c63d8a7a7737  255  128 Sports  NHL  New  York  Islanders  4c761a7d-da7a-38dd-1579-f1262829e157  255  128 Sports  NHL  New  York  Islanders  2  c35d2dca-0cd9-a201-7ed3-b7b513cb7ed9  255  128 Sports  NHL  New  York  Rangers  c06bb0bb-05c2-0549-1aa6-cb1667b8554e  255  128 Sports  NHL  New  York  Rangers  2  964b492a-0de6-6edc-e5c4-67b60a158c9d  255  128 Sports  NHL  Ottawa  Senators  170be955-3c91-a300-c000-1493215df653  255  128 Sports  NHL  Philadelphia  Flyers  ba8d78ef-d596-7d86-ce23-e7c983daabcd  255  128
+=== PAGE 87 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NHL  Philadelphia  Flyers  2  fc85ec9e-ec11-9611-2542-3074d575078a  255  128 Sports  NHL  Pittsburgh  Penguins  e881fbea-42dd-c580-dcf7-661b48f510bf  255  128 Sports  NHL  Pittsburgh  Penguins  2  e06ecaec-dd54-c62c-613d-614cf5f0e841  255  128 Sports  NHL  San  Jose  Sharks  938196ea-ce91-a53f-2bbf-3137c6ff3433  255  128 Sports  NHL  San  Jose  Sharks  2  dee1dc83-bbff-b7fd-d615-a45518fcb5d8  255  128 Sports  NHL  Seattle  Kraken  a52311b2-10e1-f5d0-a697-1aa67c5ed675  255  128 Sports  NHL  Seattle  Kraken  2  2c37b2cc-0ee5-6ded-51bf-cadf970d1cda  255  128 Sports  NHL  St.  Louis  Blues  066de39b-2531-4c77-be7a-79307211627a  255  128 Sports  NHL  St.  Louis  Blues  2  5495197b-30d1-8669-b386-7ecccc03d511  255  128 Sports  NHL  Tampa  Bay  Lightning  817df359-7095-1723-177a-2dd10656581c  255  128 Sports  NHL  Tampa  Bay  Lightning  2  5d340968-4657-40b3-983b-fecb623b263a  255  128 Sports  NHL  Toronto  Maple  Leafs  bd191921-2403-e20c-05c9-e37c045b0281  255  128
+=== PAGE 88 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NHL  Toronto  Maple  Leafs  2  eff855e2-076e-ee36-a9a9-622b8e4f8012  255  128 Sports  NHL  Vancouver  Canucks  ae3c107d-a8e6-f8d1-1620-25ba62e8a21e  255  128 Sports  NHL  Vancouver  Canucks  2  4b9722ab-006e-e7fd-577c-2cefafc03fd7  255  128 Sports  NHL  Vegas  Golden  Knights  f4919d18-ec49-d859-97af-dc34e3bc769c  255  128 Sports  NHL  Vegas  Golden  Knights  2  8cd0a40c-35b3-13d0-af10-0c4e5021709b  255  128 Sports  NHL  Edmonton  Oilers  Vintage  809b9129-50b3-ec04-342f-09d43d205d5e  255  128 Sports  NHL  Washington  Capitals  c835a39b-b666-a827-4b95-2d37cd7bbeb6  255  128 Sports  NHL  Washington  Capitals  2  511143ad-c0b0-9a6c-b935-d49346f4cda9  255  128 Sports  NHL  Winnipeg  Jets  fee81d47-d908-0b52-5a0f-1e72064ae06b  255  128 Sports  NHL  Winnipeg  Jets  2  8e0496e2-5ad4-dc6c-dc8f-5773cb967171  255  128 Sports  NHL  Utah  Hockey  Club  55b8fc86-6c26-413d-9a75-37acc533d285  255  128 Sports  NHL  Utah  Hockey  Club  2  f57a4271-decc-400d-ab29-5ab9b9d75090  255  128
+=== PAGE 89 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NFL  Arizona  Cardinals  16218b0a-ab8a-5e8f-23cf-61da000aace2  255  128 Sports  NFL  Arizona  Cardinals  2  ca115004-8992-4788-af49-84eb51d7c850  255  128 Sports  NFL  Arizona  Cardinals  3  1a35a7fb-f143-42b4-af3f-d383e6fa92c9  255  128 Sports  NFL  Atlanta  Falcons  29602ccc-96d6-bc12-a8d2-f418b650d527  255  128 Sports  NFL  Atlanta  Falcons  2  2bddc49b-a390-4e8b-22a6-4ca428be3098  255  128 Sports  NFL  Atlanta  Falcons  3  5858d0f8-c1a1-40f2-b744-029c94f66b89  255  128 Sports  NFL  Baltimore  Ravens  5869669f-8ef8-80e1-ce65-b1830207cdeb  255  128 Sports  NFL  Baltimore  Ravens  2  e069547f-852e-f03c-95ff-c4ba5b3e3d94  255  128 Sports  NFL  Baltimore  Ravens  3  46f62d26-f5ac-495f-baf2-f996aa93773d  255  128 Sports  NFL  Buffalo  Bills  9409ad2e-e10b-6142-9c3c-2fb8642f0ff3  255  128 Sports  NFL  Buffalo  Bills  2  dca85d46-f483-af81-f3f0-c3e6f3bebb21  255  128 Sports  NFL  Buffalo  Bills  3  c32b629a-209b-4360-a0e3-e36da4c84d2a  255  128
+=== PAGE 90 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NFL  Carolina  Panthers  eaca006e-a008-5a05-36aa-523c34954042  255  128 Sports  NFL  Carolina  Panthers  2  879de30b-d932-726d-6378-5b564c177a4d  255  128 Sports  NFL  Carolina  Panthers  3  a765a857-4a6c-4a8e-9699-a7a941b0d052  255  128 Sports  NFL  Chicago  Bears  682b981b-2bd6-1d2b-389a-85455260594f  255  128 Sports  NFL  Chicago  Bears  2  3cbb719a-b980-c1b4-d976-d2b8f23098c2  255  128 Sports  NFL  Chicago  Bears  3  ea583967-d1be-49c1-8929-32b52744d125  255  128 Sports  NFL  Cincinnati  Bengals  c4463bff-41ab-c6d0-b905-1b69a92d5e49  255  128 Sports  NFL  Cincinnati  Bengals  2  bb702c0c-5688-383a-4a4a-80fb403e3a27  255  128 Sports  NFL  Cincinnati  Bengals  3  1f530d05-6ccf-4320-be3c-05a27bb22f02  255  128 Sports  NFL  Cleveland  Browns  95fc00ec-00ed-d420-c685-409059e452e7  255  128 Sports  NFL  Cleveland  Browns  2  99d3a0d7-3743-9589-9934-fd4f2edfdf61  255  128 Sports  NFL  Cleveland  Browns  3  04678d1c-fe15-48d3-a8c8-bcad12679e8f  255  128
+=== PAGE 91 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NFL  Dallas  Cowboys  6d1028b4-8559-32f4-9125-f4ef442677f9  255  128 Sports  NFL  Dallas  Cowboys  2  cf1828b7-077e-cc3b-6d71-52357811101d  255  128 Sports  NFL  Dallas  Cowboys  3  2126dc3b-525b-4019-83c4-d9bd4501c5a6  255  128 Sports  NFL  Denver  Broncos  5516dcd0-6149-70c2-d4b3-7fc4ca6af302  255  128 Sports  NFL  Denver  Broncos  2  b9f572c7-40ff-caa3-4df5-79ad3d087ede  255  128 Sports  NFL  Denver  Broncos  3  3d92c22b-ee0a-4430-8f33-3e503ce7b154  255  128 Sports  NFL  Detroit  Lions  5ed1a702-2114-8482-27de-6ab5eebc836a  255  128 Sports  NFL  Detroit  Lions  2  9d2a1289-6c83-6a47-40f3-f46663c7863a  255  128 Sports  NFL  Detroit  Lions  3  caba4668-735a-4843-a66e-ea78f37442ae  255  128 Sports  NFL  Green  Bay  Packers  a8bb6659-446e-19ff-6b85-e2722ff40e95  255  128 Sports  NFL  Green  Bay  Packers  2  e79758bf-d269-30cc-2a35-67d6e6b49bb9  255  128 Sports  NFL  Green  Bay  Packers  3  9d333714-0147-413f-b623-2c69fc9b50e8  255  128
+=== PAGE 92 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NFL  Houston  Texans  faa56942-366f-2bf9-eaf0-0f8d2787115b  255  128 Sports  NFL  Houston  Texans  2  5894fb46-5279-ddde-9390-833ae38c704a  255  128 Sports  NFL  Houston  Texans  3  28c9774a-9d07-4444-b6c5-e245b2fe672e  255  128 Sports  NFL  Indianapolis  Colts  3fcbed56-b055-8168-d4f1-54f5a36554dc  255  128 Sports  NFL  Indianapolis  Colts  2  b81e9c1b-e739-8346-9a3f-98bfe2268670  255  128 Sports  NFL  Indianapolis  Colts  3  4de5ef4b-fb3d-4ade-9ee3-faff7c9fc220  255  128 Sports  NFL  Jacksonville  Jaguars  782f9b84-7581-d019-60da-fe049f8a7afd  255  128 Sports  NFL  Jacksonville  Jaguars  2  97a1bc79-1aa1-4e9b-a82c-e5ec58c629a9  255  128 Sports  NFL  Jacksonville  Jaguars  3  dc275233-ebff-496d-916a-2fbce0058b59  255  128 Sports  NFL  Kansas  City  Chiefs  e1f4ec08-c703-d0fb-9f4a-28be92e6c15e  255  128 Sports  NFL  Kansas  City  Chiefs  2  cd449a42-4e0b-3df2-d888-96e5b9fb3c48  255  128 Sports  NFL  Kansas  City  Chiefs  3  1a4a6a62-5a26-4ba4-88e7-2a20ffcff384  255  128
+=== PAGE 93 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NFL  Las  Vegas  Raiders  d73aae8a-948d-47f1-4a32-63185ec36040  255  128 Sports  NFL  Las  Vegas  Raiders  2  31df1ca2-c4c7-67bb-4a03-c44c6ada5f63  255  128 Sports  NFL  Las  Vegas  Raiders  3  1b434c56-3b1a-4415-a529-a72ef01327df  255  128 Sports  NFL  Los  Angeles  Chargers  728132a9-87a3-f842-0768-ce2d89c53adf  255  128 Sports  NFL  Los  Angeles  Chargers  2  286a4d95-16d2-e310-d05b-de101bf6d96c  255  128 Sports  NFL  Los  Angeles  Chargers  3  b53df144-d7b3-4611-8f72-9b77d97930d6  255  128 Sports  NFL  Los  Angeles  Rams  cd19db50-e612-3227-7e35-22a9c37569a4  255  128 Sports  NFL  Los  Angeles  Rams  2  646bb37a-3a93-13d9-18df-a3c74fbe123c  255  128 Sports  NFL  Los  Angeles  Rams  3  b8e9eb55-b3cd-43b9-a926-2b4f8f591b4f  255  128 Sports  NFL  Miami  Dolphins  d61bbc06-6698-038a-7490-ae453ac1ee0b  255  128 Sports  NFL  Miami  Dolphins  2  02a604e1-3812-e1b3-d9f5-cad6e6b7b35a  255  128 Sports  NFL  Miami  Dolphins  3  6f14b064-13d1-4f88-8b76-303483ba3369  255  128
+=== PAGE 94 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NFL  Minnesota  Vikings  d8c3ecca-a80e-2a91-a324-59149bd0e1e5  255  128 Sports  NFL  Minnesota  Vikings  2  f701d26e-ecfc-57b1-7246-e9ea3cb4108b  255  128 Sports  NFL  Minnesota  Vikings  3  ef935996-a850-4e3d-aac6-1b63e497adf0  255  128 Sports  NFL  New  England  Patriots  253bfe8f-5377-7b07-5fa7-e61eba5d07a2  255  128 Sports  NFL  New  England  Patriots  2  088b9be1-9017-3cf7-3144-fe381a32f261  255  128 Sports  NFL  New  England  Patriots  3  bc3aa1e3-f6cf-4093-b5ee-f550867b1d48  255  128 Sports  NFL  New  Orlean  Saints  2  58f72fb2-cc5c-a6b4-abe2-1c5f096ae02d  255  128 Sports  NFL  New  Orleans  Saints  485659d0-d78a-95fa-0854-25db7fdec0fc  255  128 Sports  NFL  New  Orleans  Saints  3  d6a9d181-63f0-4479-a56b-bb34f430a0e1  255  128 Sports  NFL  New  York  Giants  ede4eb96-40a5-4c59-4baa-1dede1149a8b  255  128 Sports  NFL  New  York  Giants  2  6565bf3c-4adf-ce99-63b4-ec8eb9112ae2  255  128 Sports  NFL  New  York  Giants  3  51f8ecf3-2ea6-488d-b0e9-9c5656e98bfb  255  128
+=== PAGE 95 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NFL  New  York  Jets  b258c7d1-f93e-0a55-d2c3-2fbdd0811b88  255  128 Sports  NFL  New  York  Jets  2  b52addf9-77b2-4dcc-44f0-8bb5bf37878d  255  128 Sports  NFL  New  York  Jets  3  3ad175e2-0d09-444c-9804-c6bfc08c3e6d  255  128 Sports  NFL  Philadelphia  Eagles  4b045acc-895a-944a-6a29-bcd0175bd948  255  128 Sports  NFL  Philadelphia  Eagles  2  0de3d582-7ce1-9650-943c-d7d1820c0edb  255  128 Sports  NFL  Philadelphia  Eagles  3  a74360bf-3aeb-4200-8bd8-20f6e4c335f0  255  128 Sports  NFL  Pittsburgh  Steelers  5a29d745-a82e-1665-c97f-a4c17ba522fb  255  128 Sports  NFL  Pittsburgh  Steelers  2  76d2a534-487a-d21b-57ab-62524c693956  255  128 Sports  NFL  Pittsburgh  Steelers  3  3f68a167-1b04-459b-9175-4289c0b50064  255  128 Sports  NFL  San  Francisco  49ers  4e812fa0-713f-deca-2b78-e808a0608415  255  128 Sports  NFL  San  Francisco  49ers  2  ae72bca2-86b9-a918-e74e-686e352bb89b  255  128 Sports  NFL  San  Francisco  49ers  3  3b830d2a-3456-4987-b809-45caec5369cb  255  128
+=== PAGE 96 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NFL  Seattle  Seahawks  f0845ecd-e5fc-d6f9-7ccc-d102c207b669  255  128 Sports  NFL  Seattle  Seahawks  2  4a5bfc83-5e94-db45-34fc-f7c2e8a745bb  255  128 Sports  NFL  Seattle  Seahawks  3  851f1485-8b37-46be-8c94-c2c36231eee9  255  128 Sports  NFL  Tampa  Bay  Buccaneers  554a257e-584d-53e3-76a6-103103ef73d6  255  128 Sports  NFL  Tampa  Bay  Buccaneers  2  54576f7d-92bc-3ea5-23ea-7f01b8be3f34  255  128 Sports  NFL  Tampa  Bay  Buccaneers  3  fe36752f-3175-4793-ae81-98c85fc7d01d  255  128 Sports  NFL  Tennessee  Titans  49dd8af6-6521-f314-d1d8-3cd1b41a6d18  255  128 Sports  NFL  Tennessee  Titans  2  2ba93108-ed91-c96d-0dc0-b0b5aa8d0de0  255  128 Sports  NFL  Tennessee  Titans  3  0828dc62-2357-469c-aea0-8080e135ee8d  255  128 Sports  NFL  Washington  Commanders  88fca53f-4b32-4a05-6f14-d79303ab1bd8  255  128 Sports  NFL Washington  Commanders  2  6388e6dd-55d4-29b5-6645-00f4850ef7e1  255  128 Sports  NFL Washington  Commanders  3  26c32a95-914b-47bd-9945-a47bd633e851  255  128
+=== PAGE 97 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  FIFA  World  Cup  Argentina  7e5770d8-6e3e-b1b7-e728-e3f960974026  255  128 Sports  FIFA  World  Cup  Argentina  2  751cfd0b-4c3c-185f-01e8-856a359cdacd  255  128 Sports  FIFA  World  Cup  Australia  3e1ee3d0-083d-349c-c020-381913377b25  255  128 Sports  FIFA  World  Cup  Australia  2  7232ec4b-f252-894a-b627-76d80fdeb9a8  255  128 Sports  FIFA  World  Cup  Belgium  e57dc138-00ec-073d-dd0c-ba42f993f926  255  128 Sports  FIFA  World  Cup  Belgium  2  cab76e73-19e9-461d-ac98-3f84f4fa24b2  255  128 Sports  FIFA  World  Cup  Brazil  76172fa2-7f64-1bdb-4d78-bffae148fb19  255  128 Sports  FIFA  World  Cup  Brazil  2  8c7698f5-b95e-2f71-c810-a6740d1329ab  255  128 Sports  FIFA  World  Cup  Cameroon  eea83072-52b9-c431-3e7a-4922f0c19d83  255  128 Sports  FIFA  World  Cup  Cameroon  2  e2f7c9d2-e487-c548-d75f-e24ab4e3da5e  255  128 Sports  FIFA  World  Cup  Canada  2cf64bd8-9ac2-fdbe-cb84-631137fc185f  255  128 Sports  FIFA  World  Cup  Canada  2  52156f95-0f16-5f9f-cab6-5c0884f31fd3  255  128
+=== PAGE 98 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  FIFA  World  Cup  Costa  Rica  4d0575e6-9661-81cb-1ee8-05b90ea5625f  255  128 Sports  FIFA  World  Cup  Costa  Rica  2  4b817b85-7a1e-a90f-bc97-c364a3dce9c3  255  128 Sports  FIFA  World  Cup  Croatia  93265342-36c2-f825-7453-90fe03cdd219  255  128 Sports  FIFA  World  Cup  Croatia  2  a049867f-8d88-c193-7f6d-01ca08273577  255  128 Sports  FIFA  World  Cup  Denmark  3044a8bb-c109-fa69-966b-673f1a1ae8c4  255  128 Sports  FIFA  World  Cup  Denmark  2  3fcfc96d-991b-5826-4d70-d7fe7446eddd  255  128 Sports  FIFA  World  Cup  Ecuador  9de45282-0f42-3047-bc10-c92cc378806b  255  128 Sports  FIFA  World  Cup  Ecuador  2  7ec184aa-9957-3de0-371f-c66c0fe9f2e3  255  128 Sports  FIFA  World  Cup  England  275dc183-5c15-1e74-026b-d5b4546b58aa  255  128 Sports  FIFA  World  Cup  England  2  007674e3-f091-391a-3967-046ea7de7c89  255  128 Sports  FIFA  World  Cup  France  40a32948-91d9-f592-b93e-b1c4b41c5bf7  255  128 Sports  FIFA  World  Cup  France  2  b4a41f4e-259b-d0bc-1fb3-20c981746980  255  128
+=== PAGE 99 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  FIFA  World  Cup  Germany  425b939d-dc31-450f-f992-196e000744fd  255  128 Sports  FIFA  World  Cup  Germany  2  90920f26-b05f-7184-7192-d644f905ae86  255  128 Sports  FIFA  World  Cup  Ghana  657de962-fe0e-1209-43ab-8fe478f7a62f  255  128 Sports  FIFA  World  Cup  Ghana  2  422b65b9-3390-3ad4-423a-d779507683cc  255  128 Sports  FIFA  World  Cup  Iran  f12e78ac-5011-19c5-ad64-a57ec3da2a9c  255  128 Sports  FIFA  World  Cup  Iran  2  fac1073b-f02b-4d01-ecfb-fb19fef2c03f  255  128 Sports  FIFA  World  Cup  Japan  b31ae532-2079-0d94-e570-ebf92208e2ba  255  128 Sports  FIFA  World  Cup  Japan  2  ac09f07d-6b4b-ae9f-1b9e-a7fb327cf930  255  128 Sports  FIFA  World  Cup  Mexico  72013d10-d0b6-372a-5fc3-2ae3ab424f28  255  128 Sports  FIFA  World  Cup  Morocco  157f38a7-ee66-ce31-da5d-33bf6fb3783e  255  128 Sports  FIFA  World  Cup  Morocco  2  cf970d2a-0aa9-48c2-bed1-9c32d5158c2e  255  128 Sports  FIFA  World  Cup  Netherlands  76c35699-3cdb-ebcb-ab48-907b349f9c84  255  128
+=== PAGE 100 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  FIFA  World  Cup  Netherlands  2  05f4da66-c67d-69fb-4785-3ad36e16d172  255  128 Sports  FIFA  World  Cup  Poland  60604abd-9d82-7856-1181-bb7d5e03cc4e  255  128 Sports  FIFA  World  Cup  Poland  2  104b876f-5b41-919d-5135-ae7fdfa128db  255  128 Sports  FIFA  World  Cup  Portugal  851788c9-2a52-c8d8-32c7-7bc2567687f8  255  128 Sports  FIFA  World  Cup  Portugal  2  d60aab01-455d-ded9-d8e4-bb70b5081c90  255  128 Sports  FIFA  World  Cup  Qatar  46e3b523-654e-cf9b-ec67-639199c06915  255  128 Sports  FIFA  World  Cup  Qatar  2  0fd0cd1f-66c5-7584-98a1-a3e28f2f9106  255  128 Sports  FIFA  World  Cup  Saudi  Arabia  3075a61e-8d81-5b51-eac6-657731153aad  255  128 Sports  FIFA  World  Cup  Saudi  Arabia  2  61bf411e-a8b0-b49d-aafd-2962eba7b5dd  255  128 Sports  FIFA  World  Cup  Senegal  0f1b641f-25ab-f99b-e642-f7dda9bd017c  255  128 Sports  FIFA  World  Cup  Senegal  2  4262e35b-1cdb-6360-df8e-fa6b3778b09d  255  128 Sports  FIFA  World  Cup  Serbia  979fab18-1d10-7533-7223-1c69dcf067cb  255  128
+=== PAGE 101 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  FIFA  World  Cup  Serbia  2  56495592-2009-f131-d07e-81cb7a88a934  255  128 Sports  FIFA  World  Cup  South  Korea  f853757f-fb1b-c7c8-b84e-453cae6b40cf  255  128 Sports  FIFA  World  Cup  South  Korea  2  8b0a3e81-f13f-77b0-6f9f-a346c09d444e  255  128 Sports  FIFA  World  Cup  Spain  f7bc2b7a-9323-2de2-6a5e-185ab50a25cf  255  128 Sports  FIFA  World  Cup  Spain  2  49d31bca-0a45-622b-7744-f9c743c3a9bb  255  128 Sports  FIFA  World  Cup  Switzerland  8e384b52-6a69-ea7c-44d7-8e035eea29f9  255  128 Sports  FIFA  World  Cup  Switzerland  2  63762c04-36c0-dd12-c383-6373dc55427a  255  128 Sports  FIFA  World  Cup  Tunisia  b7d90520-f8b5-b84c-4896-60e7cd3612c5  255  128 Sports  FIFA  World  Cup  Tunisia  2  e5eead18-c5d2-fed2-c62b-2a6a1d6a8407  255  128 Sports  FIFA  World  Cup  USA  b54e495e-317e-ba7a-753d-d57a789bf124  255  128 Sports  FIFA  World  Cup  USA  2  2da3d287-1aee-5f84-1914-0b0fa653d00f  255  128 Sports  FIFA  World  Cup  Uruguay  a56038d0-5d0b-cee1-9a8c-224ed67355d4  255  128
+=== PAGE 102 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  FIFA  World  Cup  Uruguay  2  825f6321-b0c2-32a9-7a8d-78740c8fb43c  255  128 Sports  FIFA  World  Cup  Wales  69696c3c-af11-fdee-6980-6d0e1f20b214  255  128 Sports  FIFA  World  Cup  Wales  2  e70978f1-697c-dc2f-24a6-e29a0099ea24  255  128 Sports  FIFA  World  Cup  Mexico  2  e338116c-dcf3-f7ad-339a-59aaa4b0a0b0  255  128 Sports  College  Teams  Alaska  1d3f61d0-cdc6-e26e-b827-17f16c088f6d  255  192 Sports  College  Teams  UCF  Knights  36d72ba8-20c4-49c5-2f98-5d96f0e5d374  255  192 Sports  College  Teams  Bearcats  1c4ff9f4-f06a-a4ef-216e-44756fbe5682  255  192 Sports  College  Teams  ECU  Pirates  fc3700fe-4eea-001b-4c23-32798b5f673c  255  192 Sports  College  Teams  Memphis  Tigers  29c03133-c0dd-b9ca-dbb7-7564cfdf477f  255  192 Sports  College  Teams  Navy  Midshipmen  442a5412-2934-4b57-fdcc-ea2fd84d30fb  255  192 Sports  College  Teams  South  Florida  04fb47f2-a318-fcbf-0b7b-c163c2a8f5e3  255  192 Sports  College  Teams  Temple  Owls  012dcc20-2657-027e-c290-c003d7008a12  255  192
+=== PAGE 103 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Tulane  41414379-7a28-9872-35cf-f4e27698082f  255  192 Sports  College  Teams  Tulsa  f8777d80-16ff-4759-1254-e1bbc2986693  255  192 Sports  College  Teams  Wichita  State  32a4a5c1-3a02-f780-ee42-6818db798e6c  255  192 Sports  College  Teams  Razorbacks  522567f4-5c4f-bfab-6ced-80cecba82327  255  192 Sports  College  Teams  Boston  College  cedabfd5-9988-f557-15a4-78800addfa34  255  192 Sports  College  Teams  NC  State  d84cb3d5-9b75-914b-0f73-ca18a1bd23ce  255  192 Sports  College  Teams  Wake  Forest  b0003b5c-b9e9-bb8c-e179-fe45128ad271  255  192 Sports  College  Teams  Brown  Bears  36ad9b6e-9eee-9be7-d53d-102dd7f6512f  255  192 Sports  College  Teams  Columbia  Lions  b1feea08-073c-e804-503c-561e2a134f8a  255  192 Sports  College  Teams  Cornell  Big  Red  4da51c13-8515-4615-6d05-b8d61c9cb5aa  255  192 Sports  College  Teams  Dartmouth  dddf1ea2-595b-d5f4-25ad-01f22ab67af5  255  192 Sports  College  Teams  Harvard  Crimson  7bae83d4-1d6b-6156-b53e-8f27445fc297  255  192
+=== PAGE 104 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Penn  Quakers  f0c53627-0b7e-8245-d4d1-35883d6f1714  255  192 Sports  College  Teams  Princeton  059a1af2-c4ff-4820-c2c6-56343a824694  255  192 Sports  College  Teams  Yale  Bulldogs  3e7e09c8-9135-8586-6e24-adc4734feae2  255  192 Sports  College  Teams  Illinois  4f3ddb1f-d347-9ffc-4d33-ae349470a236  255  192 Sports  College  Teams  Golden  Gophers  81ab32aa-90da-811e-c7aa-5b401be74199  255  192 Sports  College  Teams  Wisconsin  b223a1f9-2b65-8ce6-ef36-dfb31f820780  255  192 Sports  College  Teams  Kansas  State  5f8ef8b0-ba72-3108-0b50-58c097cac1db  255  192 Sports  College  Teams  U  of  California  bddfbdc1-57d0-97a5-6766-023e696d090d  255  192 Sports  College  Teams  U  of  Colorado  bf18394c-baa7-c6f5-e133-67a9597e4653  255  192 Sports  College  Teams  Oregon  State  ac0d856c-0273-cc8b-ad94-3eb09a7bf5a8  255  192 Sports  College  Teams  Army  503c8a7c-7325-ff98-ecdd-bf0717f90de8  255  192 Sports  College  Teams  Boston  U  2fa84c5a-5e69-39fa-1670-5029c38d5304  255  192
+=== PAGE 105 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Bucknell  Bison  df9f2932-1026-a909-d571-c6e50d0adf2d  255  192 Sports  College  Teams  Colgate  Raiders  b54b4d66-7bc5-0dd3-de79-56b06bda0f04  255  192 Sports  College  Teams  Holy  Cross  29719198-ec73-7a02-3d14-6c2f9eeed951  255  192 Sports  College  Teams  Lafayette  c2dc4e05-7581-c734-cbbb-23017660ef62  255  192 Sports  College  Teams  Lehigh  ac057e46-8f67-7dd4-9f3d-db7827f6442a  255  192 Sports  College  Teams  Loyola  e5d4f8c9-640e-6e2a-9914-8427b854fe5c  255  192 Sports  College  Teams  American  Eagles  b6faafae-cb8b-772a-f552-d9da64c40bf8  255  192 Sports  College  Teams  Butler  Bulldogs  dd3c4ec8-dc59-c3ed-33fb-3d0fd53e8f2b  255  192 Sports  College  Teams  DePaul  adc699d5-c316-ee55-fb48-dee85c275e02  255  192 Sports  College  Teams  Georgetown  bc45a6ba-8929-d64d-796b-f86228cb0bec  255  192 Sports  College  Teams  Marquette  2df12e65-a43d-6638-3de0-0825eb828547  255  192 Sports  College  Teams  Providence  53f81866-0e80-ef74-0da8-3524eee1f9a8  255  192
+=== PAGE 106 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Seton  Hall  98d5149f-93a5-88fe-a817-73e9c1e0f0e1  255  192 Sports  College  Teams  St.  John's  dc5f3de6-2a10-1384-19a3-53a103519af6  255  192 Sports  College  Teams  Xavier  99030a1e-def0-27aa-60c9-7a307a648c42  255  192 Sports  College  Teams  UNLV  Rebels  bcc4cbe9-feb8-366d-2701-84601e78d940  255  192 Sports  College  Teams  U  of  Montana  2652a52f-842f-8df0-f6b7-c8539c845856  255  192 Sports  College  Teams  E.  Washington  128aca92-4080-e402-b8f1-064ccd3cbaca  255  192 Sports  College  Teams  Idaho  Vandals  6d17fa21-161d-dd33-7dcf-9bd0be51f324  255  192 Sports  College  Teams  Idaho  State  18c6b8f9-0633-4b28-8bc3-ee51c6718123  255  192 Sports  College  Teams  Montana  State  8b607ea5-349a-afaf-28f6-32075f59f634  255  192 Sports  College  Teams  North.  Arizona  36cad184-ff82-ae76-5144-7238e2563f3e  255  192 Sports  College  Teams  North.  Colorado  4eb80bd9-53e3-0eae-2dd6-1d8761fcc8ee  255  192 Sports  College  Teams  Portland  State  10c7633d-4764-f5dc-cbda-fdaed95bf611  255  192
+=== PAGE 107 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Sacramento  37c14b7f-4a00-b40e-e2ed-ce85319bff41  255  192 Sports  College  Teams  Southern  Utah  34fd3959-c133-ed53-34f9-27b4ecb33ca2  255  192 Sports  College  Teams  Weber  State  1b347238-8a26-a8fd-055a-68aef7669a49  255  192 Sports  College  Teams  Davidson  23c8f5f0-0723-d4ea-8fab-b93a40f7bc4c  255  192 Sports  College  Teams  Dayton  Flyers  2433aef1-0ed9-4dc1-ed4f-64b51bc1967c  255  192 Sports  College  Teams  Duquesne  Dukes  bf2c3003-489d-f1b1-4c8d-c68bb7af7a21  255  192 Sports  College  Teams  Fordham  Rams  3f61bbf1-e4ad-cb0a-d4af-678fec4b9b16  255  192 Sports  College  Teams  George  Mason  daa655fa-5741-7ca6-a605-734b43c08a70  255  192 Sports  College  Teams  George  Wash.  84d3d812-311d-e5fd-4232-0aa7450ce1c3  255  192 Sports  College  Teams  La  Salle  1d4ebb96-7862-d98c-e40e-913428f71033  255  192 Sports  College  Teams  UMass  Minutemen  b8e6895c-d465-8f90-fcdf-4978472d2d02  255  192 Sports  College  Teams  Rhode  Island  8fc36ec6-56dd-ca07-a0ea-dab5c45f8c6b  255  192
+=== PAGE 108 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Richmond  3d855c4e-ca58-e73d-c5ae-8279dc951889  255  192 Sports  College  Teams  St.  Bonaventure  242347bd-a842-4202-ec5b-59670ebb3790  255  192 Sports  College  Teams  Saint  Joseph's  b07888a3-5e84-7a70-d120-4af0fd54304d  255  192 Sports  College  Teams  Saint  Louis  c3a0b60a-ca96-732f-9088-0c4ee080658c  255  192 Sports  College  Teams  VCU  Rams  168bc248-80cb-545f-42c6-f6ccfc575022  255  192 Sports  College  Teams  Abilene  Christian  Wildcats  8ad0c7c4-1425-d816-f34c-3feefdb69d1c  255  128 Sports  College  Teams Abilene  Christian  Wildcats  2  34fbdde9-fe58-a57f-721c-ba3ae3ade689  255  128 Sports  College  Teams  Alabama  Crimson  Tide  2315ad62-6893-26c8-8493-6f6c7ed645f9  255  128 Sports  College  Teams  Alabama  Crimson  Tide  2  b9660c79-ac66-8ce2-3866-fb239e06bc52  255  128 Sports  College  Teams  Arizona  State  Sun  Devils  d2328424-48d5-e93d-2d42-05553d2aae88  255  128 Sports  College  Teams Arizona  State  Sun  Devils  2  6fc1b3f8-be21-7d92-79ec-db9513300718  255  128 Sports  College  Teams  Arizona  Wildcats  d9088e6b-7d52-a541-0de3-c12653cb61bc  255  128
+=== PAGE 109 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Arizona  Wildcats  2  389ac419-8b75-0b1a-b772-015127d61e1f  255  128 Sports  College  Teams  Auburn  Tigers  e3271f0b-4bea-0103-1bc5-f726e30c186f  255  128 Sports  College  Teams  Auburn  Tigers  2  3d2cd590-0424-2e85-249f-fb5a89f498a0  255  128 Sports  College  Teams  BYU  Cougars  d0b203a2-4768-1f35-f9ea-f636c89a1766  255  128 Sports  College  Teams  BYU  Cougars  2  f4e71058-6ae1-0a15-b840-3f92ef54c84d  255  128 Sports  College  Teams  Baylor  Bears  ab04236e-2e4f-402e-732f-8d0cb651b701  255  128 Sports  College  Teams  Baylor  Bears  2  08d9a454-c0f3-c94b-a1ca-f66bb406e81b  255  128 Sports  College  Teams  Clemson  Tigers  05461fa9-49f5-7bad-1085-64a6a9b32d3e  255  128 Sports  College  Teams  Clemson  Tigers  2  3d6a78c7-8e16-3f63-e236-e08b4b356820  255  128 Sports  College  Teams  Creighton  Bluejays  dce5d8a1-dccd-2a1e-05db-4325a866a6f3  255  128 Sports  College  Teams  Creighton  Bluejays  2  12fd2511-c658-fcec-a25b-655a4004e9e3  255  128 Sports  College  Teams  Drake  Bulldogs  afae3a02-289c-31ff-8a1e-e1286aea7900  255  128
+=== PAGE 110 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Drake  Bulldogs  2  1b12d47f-500e-9093-acfc-9b8fa62647cd  255  128 Sports  College  Teams  Duke  Blue  Devils  126e9b4e-0cc1-4fcb-2100-4842e2a8a449  255  128 Sports  College  Teams  Duke  Blue  Devils  2  ea3c4212-95ba-fb3d-f41c-b7b289788f85  255  128 Sports  College  Teams  Florida  Gators  d513abb0-08e3-d30d-3ff4-7db0054f045f  255  128 Sports  College  Teams  Florida  Gators  2  97a98c0b-72bd-743f-6dcb-821ee3d63474  255  128 Sports  College  Teams  Georgia  Bulldogs  6774f526-a167-44e3-cf73-e688296135c7  255  128 Sports  College  Teams  Georgia  Bulldogs  2  67ce7df6-5919-19b7-e5de-c741969553fb  255  128 Sports  College  Teams  Georgia  Tech  YJ  03380ad9-adcd-933b-7b09-0bbefc2f003f  255  128 Sports  College  Teams  Georgia  Tech  YJ  2  2651d046-0c91-47e6-c80b-58d8f352e87e  255  128 Sports  College  Teams  Gonzaga  Bulldogs  8af918f7-ec5b-344b-d71c-f3dee8f3755b  255  128 Sports  College  Teams  Gonzaga  Bulldogs  2  d3440d2e-e713-9afb-f912-747ee55901f6  255  128 Sports  College  Teams  Houston  Cougars  af0348c7-05a6-77b2-ee85-0edb58c408ba  255  128
+=== PAGE 111 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Houston  Cougars  2  4b761dab-95b0-35c8-db62-1c7c5c3c23cf  255  128 Sports  College  Teams  Iowa  Hawkeyes  22b3e69f-cedd-6a5f-38ed-4dcb96d624b4  255  128 Sports  College  Teams  Iowa  Hawkeyes  2  b8a3d3f7-0995-453c-076c-56def0dc4d31  255  128 Sports  College  Teams  Kansas  Jayhawks  61bac1d8-bb1e-bdf0-f1f0-5d313274f49f  255  128 Sports  College  Teams  Kansas  Jayhawks  2  2675c127-0dae-70f2-386e-8b49ca72656f  255  128 Sports  College  Teams  Kentucky  Wildcats  acf0caf6-0a58-b53e-08c9-926755c625c0  255  128 Sports  College  Teams  Kentucky  Wildcats  2  0645ef41-d0ec-567e-ec87-fd5675c2ba11  255  128 Sports  College  Teams  LSU  Tigers  b5c414f3-34d8-df04-699b-209a5d8b945e  255  128 Sports  College  Teams  LSU  Tigers  2  8ef50ae2-1ee5-204d-c964-945fba68dea7  255  128 Sports  College  Teams  Liberty  Flames  75ec7ee7-7906-0df4-8157-5077f339bb0a  255  128 Sports  College  Teams  Liberty  Flames  2  8b40a474-12d7-ffe7-a5b8-75592dd33e4a  255  128 Sports  College  Teams  Louisville  Cardinals  ab80ba8a-4eef-5926-ea7d-e00627b0b117  255  128
+=== PAGE 112 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Louisville  Cardinals  2  3a7ed3c3-f37b-6404-4db1-2879e44f0870  255  128 Sports  College  Teams  Loyola  Chicago  ed4cf7a0-adea-5887-45f4-2411c1fb99f1  255  128 Sports  College  Teams  Loyola  Chicago  2  d4f6c74b-3178-0f2d-f058-ccd9abbf64ee  255  128 Sports  College  Teams  Maryland  Terrapins  2  467d4a08-b59e-2843-4617-5a68c37992fc  255  128 Sports  College  Teams  Maryland  Terrapins  2  ec7f8d7c-73f7-b8a1-1545-431b4f6fa858  255  128 Sports  College  Teams  Miami  Hurricanes  7c5efabf-2510-8b20-e8cb-d8b97f2f4d98  255  128 Sports  College  Teams  Miami  Hurricanes  2  d30c98f0-6d40-70ae-e3c4-04c9b52febc7  255  128 Sports  College  Teams  Michigan  State  Spartans  02b62137-503e-1d6d-ab10-c6569b9d9954  255  128 Sports  College  Teams  Michigan  State  Spartans  2  50af2c4b-635f-09a9-b7b7-7b9029570257  255  128 Sports  College  Teams  Michigan  Wolverines  02a6b7cf-0544-5a11-1cc9-1fefd3cb9e2a  255  128 Sports  College  Teams  Michigan  Wolverines  2  ae296528-f00d-c863-9338-acb2db2d5e5c  255  128 Sports  College  Teams  Mississippi  State  054eee13-f03c-ed83-50bf-8c9de92c6d4a  255  128
+=== PAGE 113 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Mississippi  State  2  a524d83b-4a9c-1980-de10-c1d987430c5c  255  128 Sports  College  Teams  Missouri  Tigers  f51ae1ba-18be-a078-fad6-07ebdfec97ee  255  128 Sports  College  Teams  Missouri  Tigers  2  9a874152-3a69-8f50-66b7-69d620810cea  255  128 Sports  College  Teams  ND  Fighting  Irish  33b27517-3a2d-3bd8-5d21-69b40f160811  255  128 Sports  College  Teams  ND  Fighting  Irish  2  df55da64-6ac4-3340-d7ca-d37a8c5bcf52  255  128 Sports  College  Teams  Northwestern  Wild  Cats  5ecea9fb-7b5a-1700-380a-4393e367ca07  255  128 Sports  College  Teams  Northwestern  Wild  Cats  2  6077b7f9-cbf1-f7ec-7543-d8be5bada680  255  128 Sports  College  Teams  Ohio  Bobcats  bf69b9ff-5ac4-1845-c7dc-c83a4df7641d  255  128 Sports  College  Teams  Ohio  Bobcats  2  a7f6c832-e821-d502-2195-0a889a4a5bc3  255  128 Sports  College  Teams  Ohio  St.  Buckeyes  aa9614ee-6165-9e26-cdd2-931fef90cf99  255  128 Sports  College  Teams  Ohio  St.  Buckeyes  2  8b6465e4-3f22-c2e3-a0b3-8a6099856fdd  255  128 Sports  College  Teams  Oklahoma  Sooners  124744d5-94bd-b8cc-132c-1e991001d0cc  255  128
+=== PAGE 114 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Oklahoma  Sooners  2  101c650f-896e-7343-9cbb-c2c36cf2a11b  255  128 Sports  College  Teams  Oklahoma  State  Cowboys  b9b25595-1676-0f40-129e-e8a8f560f9cf  255  128 Sports  College  Teams Oklahoma  State  Cowboys  2  ee025fb7-4048-6fa2-285c-cd3aafdd50e8  255  128 Sports  College  Teams  Ole  Miss  Rebels  038b1e70-bbaf-97c7-3434-3ef3b8568bc6  255  128 Sports  College  Teams  Ole  Miss  Rebels  2  4aa118f4-f0cd-71f3-2d56-d7e6ff1da232  255  128 Sports  College  Teams Oral  Roberts  Golden  Eagles  1fbeb276-b4e5-c413-cd4b-aed099322ea8  255  128 Sports  College  Teams Oral  Roberts  Golden  Eagles  2  58404e82-548d-36a4-ed01-67c8c8e1d3af  255  128 Sports  College  Teams  Oregon  Ducks  e0f5196d-c624-67a6-aa1c-c9a37eaaf8e6  255  128 Sports  College  Teams  Oregon  Ducks  2  564360f0-0fe0-1a9b-ea1c-b10c47bebff3  255  128 Sports  College  Teams  Penn  State  Nittany  f920c1b2-89be-b32c-42df-67197d3ab24b  255  128 Sports  College  Teams  Penn  State  Nittany  2  14e774f5-5e5e-5a8a-1dd4-3a28c9f4fa0e  255  128 Sports  College  Teams  Pittsburgh  Panthers  de0d0fb4-d4fd-f303-5cbf-c0ed7d0ad910  255  128
+=== PAGE 115 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Pittsburgh  Panthers  2  ccf86e04-4b6b-2e02-95a6-7f717407e0d0  255  128 Sports  College  Teams  Purdue  Boilmakers  2353f1ad-9681-d669-7f68-4f2281e9d45b  255  128 Sports  College  Teams  Purdue  Boilmakers  2  92e5cad9-cb56-4312-c0ae-e17f294e3062  255  128 Sports  College  Teams  Rutger  Scarlet  Knights  ba2847e4-5a08-1443-7f16-c21156651ed1  255  128 Sports  College  Teams  Rutger  Scarlet  Knights  2  989d58fc-96bd-20c8-0480-169fa0b6688a  255  128 Sports  College  Teams  SMU  Mustangs  5836b430-6681-979a-74d0-68f7df09b2bf  255  128 Sports  College  Teams  SMU  Mustangs  2  38f57d58-290e-0d57-41be-3a9eeecbbdd7  255  128 Sports  College  Teams  San  Diego  Aztecs  3fd44084-aa80-dcd3-cfc8-a550143898c5  255  128 Sports  College  Teams  San  Diego  Aztecs  2  db372ea8-ab43-9e5c-be2d-d1fb2635d2ec  255  128 Sports  College  Teams  San  Jose  State  Spartans  fcc31371-a659-bba4-46de-1be64c9babb4  255  128 Sports  College  Teams San  Jose  State  Spartans  2  865f1bce-4cdc-1fe4-b674-ed6265045949  255  128 Sports  College  Teams South  Carolina  Gamecocks  8c3580dc-13f7-4763-e815-c81e55ea2aef  255  128
+=== PAGE 116 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams South  Carolina  Gamecocks  2  cfbe5e90-7f10-8f75-41c4-5199bff919cb  255  128 Sports  College  Teams  Stanford  Cardinals  a0b047ad-ce25-8e62-7ce1-6af3f9b199a7  255  128 Sports  College  Teams  Stanford  Cardinals  2  3e1e42da-c7fd-4db5-3c28-db771ce77b61  255  128 Sports  College  Teams  Syracuse  Orange  7f30bd4e-0dd2-1cf9-a2b6-1d2440612b8f  255  128 Sports  College  Teams  Syracuse  Orange  2  0899c39d-44c8-d2fc-2918-2703a4c25107  255  128 Sports  College  Teams  TCU  Horned  Frogs  71ad4a5b-bdc9-4486-f321-097b81f5b76b  255  128 Sports  College  Teams  TCU  Horned  Frogs  2  1efa22bd-5b0c-f121-d5b5-ab69e649bf08  255  128 Sports  College  Teams  Tennessee  Volunteers  ef42cf6b-5581-77c1-785f-075f8eeed089  255  128 Sports  College  Teams  Tennessee  Volunteers  2  ac513b26-612f-f5a5-e370-62d3d77e67df  255  128 Sports  College  Teams  Texas  A  and  M  Aggies  7084b74b-1879-f6d2-f8d2-d1be1c5c3ffd  255  128 Sports  College  Teams  Texas  A  and  M  Aggies  2  516567a6-bc60-48ab-6844-77b5646bf14d  255  128 Sports  College  Teams  Texas  Longhorns  4a0f41c6-34b9-6b90-90ab-315116090a99  255  128
+=== PAGE 117 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Texas  Longhorns  2  af582427-549e-bff7-5869-6f6e5ec1a804  255  128 Sports  College  Teams  Texas  State  Bobcats  d243680d-6dee-316c-87a1-164739f9e322  255  128 Sports  College  Teams  Texas  State  Bobcats  2  25f3d510-c68c-b0ca-e47e-a429af77d60f  255  128 Sports  College  Teams  Texas  Tech  Red  Raiders  08074c96-20e9-b38c-821d-b57a0b114b80  255  128 Sports  College  Teams  Texas  Tech  Red  Raiders  2  6af9d759-3b16-a211-9b3b-1b01e272688e  255  128 Sports  College  Teams  UCLA  Bruins  9770af24-7c08-0ba9-ccca-dc06a12009bf  255  128 Sports  College  Teams  UCLA  Bruins  2  a97e03fe-a05e-09d0-1fd4-0886c870f99f  255  128 Sports  College  Teams  UConn  Huskies  d7db3bd7-9c3c-a022-d7de-333d76a42e49  255  128 Sports  College  Teams  UConn  Huskies  2  5998fb7d-5faa-b41a-78db-85aa1e83cd46  255  128 Sports  College  Teams  UNC  Tar  Heels  32be0da7-9098-6e60-f14e-cdf4bf96374c  255  128 Sports  College  Teams  UNC  Tar  Heels  2  8b2726e5-3733-1926-a079-b42d8b896375  255  128 Sports  College  Teams  USC  Trojans  fe1812ea-1ed2-941f-5cbf-d9e700c33556  255  128
+=== PAGE 118 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  USC  Trojans  2  a8647bf5-65e5-5e27-d175-f2655b81c830  255  128 Sports  College  Teams  Utah  Utes  2ba80f76-37a9-1b5a-7886-c5b11d8125b3  255  128 Sports  College  Teams  Utah  Utes  2  294b41c5-ff83-0816-1496-cb069911ff7f  255  128 Sports  College  Teams  Vanderbilt  Commodores  72cac8ed-e947-545d-804f-e80955a69628  255  128 Sports  College  Teams  Vanderbilt  Commodores  2  a066b740-54df-737b-4dc8-e11a2d6820c7  255  128 Sports  College  Teams  Villanova  Wildcats  321aff86-4363-fb4d-365c-4f68601247a8  255  128 Sports  College  Teams  Villanova  Wildcats  2  2b01923b-e652-2240-7b41-47b2f3edb3ac  255  128 Sports  College  Teams  Virginia  Cavaliers  51488bef-f0b0-f84a-b1be-53ed3dccf64a  255  128 Sports  College  Teams  Virginia  Cavaliers  2  77760196-fa01-9d61-6911-d667e2462832  255  128 Sports  College  Teams  Virginia  Tech  Hokies  16ddd7e4-6b0f-f80c-6ae3-f6a7e18f76d5  255  128 Sports  College  Teams  Virginia  Tech  Hokies  2  4279d510-24bf-12ff-b227-e50fbf90c800  255  128 Sports  College  Teams  Washington  Huskies  48e025e2-1516-e949-5778-7902c97c197f  255  128
+=== PAGE 119 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Washington  Huskies  2  f4f3f816-6f50-7d96-4df4-b517a250cded  255  128 Sports  College  Teams Washington  State  Cougars  53466d6a-f5c1-e78e-8cf8-8211883cb5f5  255  128 Sports  College  Teams Washington  State  Cougars  2  e222a8cc-acbb-7cbe-dbab-0a8619fa1ce0  255  128 Sports  College  Teams West  Virginia  Mountaineers  6c08a4e1-8a76-9b6e-284a-9c2dac11301f  255  128 Sports  College  Teams West  Virginia  Mountaineers  2  e080c7c4-63fa-5139-e163-591da490f622  255  128 Sports  College  Teams  Nebraska  CornHuskers  95580d55-2c5d-479f-b6f5-36aea1842afb  255  128 Sports  College  Teams  Nebraska  CornHuskers  2  443b372f-a3ce-4233-aa23-2d0e55d180f7  255  128 Sports  College  Teams  Florida  State  Seminoles  f59ea25a-d19d-4cb8-b391-31ae99befac5  255  128 Sports  College  Teams  Florida  State  Seminoles  2  836a8565-9057-430f-9252-50beb1b35ab6  255  128 Sports  College  Teams  Iowa  State  Cyclones  5122cdf9-32cb-43b1-b6ab-ac6c1527a7e8  255  128 Sports  College  Teams  Iowa  State  Cyclones  2  0112e973-913d-4a1f-bcf5-440a3217b948  255  128 Sports  College  Teams  Indiana  Hoosiers  149060eb-91f0-4c21-9c99-e50b3961da65  255  128
+=== PAGE 120 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  College  Teams  Indiana  Hoosiers  2  063d94aa-d554-434e-9d86-07384829e284  255  128 Sports  College  Teams  Boise  State  Broncos  0d0ca5bc-004d-4d45-a8f9-909d7ae19828  255  128 Sports  College  Teams  Boise  State  Broncos  2  5c552cd2-7be6-48ed-8f48-feee6f4cc7ff  255  128 Sports  NBA  Atlanta  Hawks  e70d226c-79b1-5423-1d29-3b5d44aa752c  255  128 Sports  NBA  Atlanta  Hawks  2  68a547f6-ec5b-4a45-f9ba-aefd55e8255e  255  128 Sports  NBA  Boston  Celtics  33a34af8-91cb-806a-5b92-918f79efa449  255  128 Sports  NBA  Boston  Celtics  2  918d58f1-c09e-8bc4-321b-332d520ecd22  255  128 Sports  NBA  Brooklyn  Nets  6ecce49e-3d57-f562-87aa-960f8f9d52d0  255  128 Sports  NBA  Brooklyn  Nets  2  a6955ef2-a8ec-87d7-4e14-f991da30907b  255  128 Sports  NBA  Charlotte  Hornets  5369749f-f6af-4c0e-7026-0f529af1b611  255  128 Sports  NBA  Charlotte  Hornets  2  bf2e84f2-0c5e-3ee1-2eb5-d42562e517c0  255  128 Sports  NBA  Chicago  Bulls  2819d170-0ce0-dfbe-3159-5677ba6b4451  255  128
+=== PAGE 121 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NBA  Chicago  Bulls  2  85d69a69-7ed9-391e-aa49-aa3b90279171  255  128 Sports  NBA  Cleveland  Cavaliers  9d6a19bb-3723-cf06-3f4c-5850d8c20847  255  128 Sports  NBA  Cleveland  Cavaliers  2  8a8fdad1-104d-7dd1-751c-3fae64050219  255  128 Sports  NBA  Dallas  Mavericks  8c581ba3-ca92-18c5-df08-7c45a94c1207  255  128 Sports  NBA  Dallas  Mavericks  2  90475514-6366-708d-7dea-a35f3f57aa79  255  128 Sports  NBA  Denver  Nuggets  87a9ef4d-350a-e037-e4b2-299cca864b85  255  128 Sports  NBA  Denver  Nuggets  2  40a40f14-4238-ab51-d0f8-91c6ce43a8c5  255  128 Sports  NBA  Detroit  Pistons  b6855811-4af2-39c8-d836-f76d2b2d4331  255  128 Sports  NBA  Detroit  Pistons  2  771e473b-c745-4cb6-a800-b7792e0f4613  255  128 Sports  NBA  Golden  State  Warriors  01c27b29-ce07-6899-2e5e-31de88ce0cc0  255  128 Sports  NBA  Golden  State  Warriors  2  541498c6-118c-86f5-fa6f-ffe023f37f90  255  128 Sports  NBA  Houston  Rockets  e1b8024a-9d10-14b2-dd87-31f66ee839b9  255  128
+=== PAGE 122 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NBA  Houston  Rockets  2  18b15ee0-0476-c2e9-9428-f878c3ea62b0  255  128 Sports  NBA  Indiana  Pacers  15fbcee3-355a-1341-844f-c2c6ec754d09  255  128 Sports  NBA  Indiana  Pacers  2  77c22af4-497e-3333-fdce-e44dbcb75ac8  255  128 Sports  NBA  LA  Clippers  4bda788e-3dcb-8148-b75e-3aab71dd89e9  255  128 Sports  NBA  LA  Clippers  2  3590f574-355e-8ab7-3db1-ea7cbfed98d7  255  128 Sports  NBA  LA  Lakers  1ccd8ef9-87d5-8bb4-a1ef-4c0543dc7232  255  128 Sports  NBA  LA  Lakers  2  54763e3b-f102-17b0-0d46-eb37e07df5ac  255  128 Sports  NBA  Memphis  Grizzlies  3b533d1d-0b46-d75d-93e5-c478f3dd4e08  255  128 Sports  NBA  Memphis  Grizzlies  2  db0b6419-8595-ab94-f4b6-0945ebf37c34  255  128 Sports  NBA  Miami  Heat  68d7385f-a8ef-1a23-7afc-08741dee250b  255  128 Sports  NBA  Miami  Heat  2  c324f490-e45b-a019-3476-d600fb9f0102  255  128 Sports  NBA  Milwaukee  Bucks  1f7f369f-60c5-507a-3c88-5f0f6ee40650  255  128
+=== PAGE 123 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NBA  Milwaukee  Bucks  2  9ba04921-c2a8-2d0e-a101-2d98576220e8  255  128 Sports  NBA  Minnesota  Timberwolves  59056060-d950-6270-0f5b-405aff5ee1df  255  128 Sports  NBA Minnesota  Timberwolves  2  535c7fb7-c217-4b4a-789a-e41087e0985b  255  128 Sports  NBA  New  Orleans  Pelicans  bbcb013c-3217-5b96-fcf8-61e1ae32d206  255  128 Sports  NBA  New  Orleans  Pelicans  2  a4e0fecb-ab2b-c074-3d6e-af1ca5400838  255  128 Sports  NBA  New  York  Knicks  af14c8c4-3a27-932f-ae85-80af329ba330  255  128 Sports  NBA  New  York  Knicks  2  c3252be5-dc34-9099-0597-5358e20db338  255  128 Sports  NBA  Oklahoma  City  Thunder  cfba6252-bdd9-43c8-59f5-28b4e91b94bc  255  128 Sports  NBA  Oklahoma  City  Thunder  2  292455b3-8605-5061-506f-37dbb1eeefe5  255  128 Sports  NBA  Orlando  Magic  3a8f3511-eeee-8899-b8c8-288b89ce29be  255  128 Sports  NBA  Orlando  Magic  2  a7f32e42-b644-5664-148a-5d743752457f  255  128 Sports  NBA  Philadelphia  76ers  4f9de142-6223-49af-addd-b02f175f7570  255  128
+=== PAGE 124 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NBA  Philadelphia  76ers  2  974cd8b1-2481-1a9d-88a3-8181d4f88f95  255  128 Sports  NBA  Phoenix  Suns  b8ff9631-60ba-43aa-0333-b2f2d8d94b00  255  128 Sports  NBA  Phoenix  Suns  2  26265f17-519c-4ea4-17c7-f072347d14ee  255  128 Sports  NBA  Portland  Trailblazers  92304472-73c4-8d4f-88a0-6f3d665de8d8  255  128 Sports  NBA  Portland  Trailblazers  2  1cdeca9f-4b90-8f39-1158-086997c6d5bd  255  128 Sports  NBA  Sacramento  Kings  271f8c0c-dc63-f608-ce4e-053ffea68ade  255  128 Sports  NBA  Sacramento  Kings  2  86459788-1bc7-8351-15b5-d0b5f6464bc4  255  128 Sports  NBA  San  Antonio  Spurs  34967e62-76c0-ec44-8fd4-202cf6a04dcc  255  128 Sports  NBA  San  Antonio  Spurs  2  2ab519d2-dc82-1c0e-1114-bf7719e710c0  255  128 Sports  NBA  Toronto  Raptors  28f9c5f6-b5d4-9936-bc00-09422ba67a92  255  128 Sports  NBA  Toronto  Raptors  2  424cf3ef-85fc-cbfd-739e-2bf3d2149e36  255  128 Sports  NBA  Utah  Jazz  e7758976-e9ef-09ca-22f3-e46f3ebae2b2  255  128
+=== PAGE 125 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  NBA  Utah  Jazz  2  a3e52273-885f-e271-8356-fb27699f1ba0  255  128 Sports  NBA  Washington  Wizards  0cfc489b-2339-8654-183a-3599e658146a  255  128 Sports  NBA  Washington  Wizards  2  c339873e-7371-d4d8-c53c-fc1fcfd10cd6  255  128 Sports  MLB  Arizona  Diamondbacks  a8f4e434-a64a-4f97-eb50-f2191c5ced96  255  128 Sports  MLB  Arizona  Diamondbacks  2  4510533f-522c-c834-af95-fb5d602a629b  255  128 Sports  MLB  Atlanta  Braves  7a77bc65-6452-7439-947f-609e04939711  255  128 Sports  MLB  Atlanta  Braves  2  11e41b4f-b9ed-f839-1810-969dec901dad  255  128 Sports  MLB  Baltimore  Oriols  a16f481f-ccf4-ce94-3bf1-bf5a4ace88c9  255  128 Sports  MLB  Baltimore  Oriols  2  8d2cd85d-d2d6-44ba-147e-e1a33806511e  255  128 Sports  MLB  Boston  Red  Soxs  8abe793f-0ffa-00fb-dfa6-f7b1ed74a131  255  128 Sports  MLB  Boston  Red  Soxs  2  44213ed3-726d-0a29-f75a-7a70ffffdfd0  255  128 Sports  MLB  Chicago  White  Soxs  cd0e582c-56dc-2ca0-ecc8-bd0cad9b2398  255  128
+=== PAGE 126 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  MLB  Chicago  White  Soxs  2  f8cb0816-3e05-218d-c93f-fe1c3f3c676b  255  128 Sports  MLB  Cincinnati  Reds  d174b83c-5997-a96b-3df2-349622ef5294  255  128 Sports  MLB  Cincinnati  Reds  2  e405cea5-efd7-4ae7-d495-cca8f6d4a22e  255  128 Sports  MLB  Cleveland  Indians  d6fec893-09d3-393c-a50f-09f46787dcd9  255  128 Sports  MLB  Cleveland  Indians  2  8cc410b2-a9a2-99f1-a71c-42f0fccb8386  255  128 Sports  MLB  Colorado  Rockies  3b1dd0ea-fef0-cd56-6b9d-da04324080ba  255  128 Sports  MLB  Colorado  Rockies  2  5427cf19-6609-b968-d967-43d2211d04c2  255  128 Sports  MLB  Detroit  Tigers  c194822d-e973-6d14-3f6c-0609bfed1eac  255  128 Sports  MLB  Detroit  Tigers  2  cf8d0cb3-8099-c63c-5395-87e30ba81204  255  128 Sports  MLB  Houston  Astros  f3007a30-c188-b2b6-e1ac-404e1be0acec  255  128 Sports  MLB  Houston  Astros  2  27db191f-c240-40e5-f7fc-d2ee95888644  255  128 Sports  MLB  Kansas  City  Royals  5bafd1cd-fad6-4fe4-ac76-f85bd0b7c25e  255  128
+=== PAGE 127 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  MLB  Kansas  City  Royals  2  cc405290-659a-ba40-faaa-15327fbf8cff  255  128 Sports  MLB  Los  Angeles  Angels  08936efb-8f86-5a03-15c0-5cbf72df40d1  255  128 Sports  MLB  Los  Angeles  Angels  2  bb845cee-0ee1-fa82-b90d-dd988e1abcfc  255  128 Sports  MLB  Los  Angeles  Dodgers  30bb4201-fe16-28c6-7708-c6249792b110  255  128 Sports  MLB  Los  Angeles  Dodgers  2  ace929e4-ef33-00cb-11bc-31c5766eed93  255  128 Sports  MLB  Miami  Marlins  884d629d-d598-8e72-e51a-78124801549c  255  128 Sports  MLB  Miami  Marlins  2  9c9489cb-e29c-fafa-8e8e-f2a3a9b772d2  255  128 Sports  MLB  Milwaukee  Brewers  787ead74-9ef2-ca87-019b-069f528ea36f  255  128 Sports  MLB  Milwaukee  Brewers  2  e4d7ce03-6b27-122d-91a3-3a0e9998b9cd  255  128 Sports  MLB  Minnesota  Twins  efa044ad-1ee7-d2cf-ce93-9d2dc51b3c23  255  128 Sports  MLB  Minnesota  Twins  2  25210a61-509a-75b4-6da8-d4930b6e2c1c  255  128 Sports  MLB  New  York  Mets  78614d20-e059-53d8-c459-0771799a73b1  255  128
+=== PAGE 128 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  MLB  New  York  Mets  2  1e1c5fbf-fa17-2a5a-0ab3-26ff6f62be36  255  128 Sports  MLB  New  York  Yankees  40420647-2677-d4e8-00f1-52929b9f4e1b  255  128 Sports  MLB  New  York  Yankees  2  0b6b357d-109a-788d-4f87-01b8be963847  255  128 Sports  MLB  Oakland  Athletics  b94b1af3-b521-aa17-4c6f-c6b60d8d178a  255  128 Sports  MLB  Oakland  Athletics  2  747362be-b85c-36e7-3b4f-a6145646f26d  255  128 Sports  MLB  Philadelphia  Phillies  e263093a-accd-e3a3-e172-f53f2b5ae35c  255  128 Sports  MLB  Philadelphia  Phillies  2  a12a6385-f744-2c26-bda4-97914b5809dd  255  128 Sports  MLB  Pittsburg  Pirates  efa67e99-d649-b452-9f0b-3fa4f79500bc  255  128 Sports  MLB  Pittsburg  Pirates  2  807ea030-5b5d-9694-a892-d997edf971af  255  128 Sports  MLB  Sam  Francisco  Giants  16f66d71-457b-4b3b-4e9c-6def0a858fef  255  128 Sports  MLB  San  Diego  Padres  72855e2c-9311-8f00-f5bc-d5363096555b  255  128 Sports  MLB  San  Diego  Padres  2  e73c2b9a-b0e6-3361-5b69-1dc76d5f0688  255  128
+=== PAGE 129 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  MLB  San  Francisco  Giants  2  4a36119b-f5e8-576c-14a3-ce59082c8b39  255  128 Sports  MLB  Seattle  Mariners  1fce6345-1c7e-d2d9-3266-1112b7a4a213  255  128 Sports  MLB  Seattle  Mariners  2  5eb3e303-0b91-d239-c2b3-1e466f148254  255  128 Sports  MLB  St.  Louis  Cardinals  4e450ac1-3eb1-b903-ac4b-22b19b4d3ac1  255  128 Sports  MLB  St.  Louis  Cardinals  2  e736d5fd-5c1a-d01e-62c2-e776750ff0f0  255  128 Sports  MLB  Tampa  Bay  Rays  556713be-e581-e5d9-9890-df7efa66404e  255  128 Sports  MLB  Tampa  Bay  Rays  2  19ade1d0-a967-9590-4704-08960487658b  255  128 Sports  MLB  Texas  Rangers  87dff0ac-d54a-df5d-024b-8fc526241005  255  128 Sports  MLB  Texas  Rangers  2  fe97ad1f-fb8b-d0e6-ad4d-4af413ffd027  255  128 Sports  MLB  Toronto  Blue  Jays  c8c13822-afd2-8f3e-a843-0fa7416b2a6b  255  128 Sports  MLB  Toronto  Blue  Jays  2  688850a8-5023-69bf-976e-3023b4604383  255  128 Sports  MLB  Washington  Nationals  93e7ff1b-642a-7573-068a-7675cce0915a  255  128
+=== PAGE 130 ===
+Category  Sub  Category  Pattern  Name  Pattern  Id  Brightness  Speed Sports  MLB  Washington  Nationals  2  ba3c1f7d-714f-2100-5a50-71de87bcc4f5  255  128 Sports  MLB  Chicago  Cubs  bd3218d6-6318-4ac9-af08-663232a1a28b  255  128 Sports  MLB  Chicago  Cubs  2  f150d6a0-e493-40d6-85b6-dbd783768416  255  128
+ELAN
+D EVELOPER
+P ARTNER
+I NFORMATION
+This
+ELAN
+driver
+was
+written
+and
+supported
+by:
+Cindev
+Cinegration
+Development
+LLC
+6425
+W
+52nd
+Ave
+Suite
+1
+Arvada,
+CO
+80002
+Phone:
+720-295-2496
+Email:
+info@cindev.com
+Technical
+Support:
+https://help.drivercentral.io

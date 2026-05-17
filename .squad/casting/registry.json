@@ -1,0 +1,39 @@
+{
+  "agents": {
+    "lead": {
+      "persistent_name": "Trinity",
+      "universe": "The Matrix",
+      "created_at": "2026-05-16T14:08:16-07:00",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "driver-dev": {
+      "persistent_name": "Tank",
+      "universe": "The Matrix",
+      "created_at": "2026-05-16T14:08:16-07:00",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "integration": {
+      "persistent_name": "Cypher",
+      "universe": "The Matrix",
+      "created_at": "2026-05-16T14:08:16-07:00",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "tester": {
+      "persistent_name": "Switch",
+      "universe": "The Matrix",
+      "created_at": "2026-05-16T14:08:16-07:00",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "docs": {
+      "persistent_name": "Link",
+      "universe": "The Matrix",
+      "created_at": "2026-05-16T14:08:16-07:00",
+      "legacy_named": false,
+      "status": "active"
+    }
+  }
+}
