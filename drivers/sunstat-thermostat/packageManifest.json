@@ -1,0 +1,27 @@
+{
+  "packageName": "SunStat Connect Plus",
+  "author": "Mads Kristensen",
+  "minimumHEVersion": "2.3.0",
+  "dateReleased": "2026-05-16",
+  "version": "0.1.3",
+  "communityLink": "",
+  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/README.md",
+  "drivers": [
+    {
+      "id": "fe4da0f7-5c8f-429c-8a5d-8d5797667e1f",
+      "name": "SunStat Connect Plus",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/sunstat-thermostat-parent.groovy",
+      "required": true,
+      "version": "0.1.3"
+    },
+    {
+      "id": "2139d8a6-3dc4-4f7c-95b4-e18ecef215f9",
+      "name": "SunStat Connect Plus Thermostat",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/sunstat-thermostat-child.groovy",
+      "required": true,
+      "version": "0.1.3"
+    }
+  ]
+}
