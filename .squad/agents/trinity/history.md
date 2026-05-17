@@ -111,3 +111,8 @@ Cypher has confirmed that the cloud API is fully documented in public references
 ## Team Updates (2026-05-17T03:01:41Z)
 
 **SunStat Connect Plus v0.1.0 shipped.** Architecture proposal (trinity-sunstat-architecture.md) merged into decisions.md. Tank implemented full parent/child driver pair. Switch drafted comprehensive test plan. Cypher's API research finalized. Awaiting Mads' real-device verification (Mode.Enum, modelId, ROPC probe, httpPatch sandbox compatibility).
+
+## Team Updates (2026-05-17T03:37:53Z)
+
+**SunStat Connect Plus v0.1.2 released with 6 new features.** Tank wired EnergyMeter + 4 energy attrs, schedule control, thermostat hold, outdoor sensor, setpoint rounding, floor bounds. Switch expanded test coverage to 48 cases (#26-#48). Link bumped manifests/READMEs (v0.1.2, v0.4.0). Link-3 audited all 3 READMEs against 8 community Hubitat repos, applied 6 targeted edits (compatibility headers, version badges, releases links). Awaiting Mads' real-device verification and 3 README audit answers (forum threads, donation link, C-5 testing).
+

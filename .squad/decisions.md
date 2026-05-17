@@ -1964,3 +1964,73 @@ ode_modules/, and OS junk (Thumbs.db, .DS_Store). Keep the published repo focuse
 - Direct driver manifest: https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/packageManifest.json
 **Status:** Awaiting HubitatCommunity maintainer merge of PR #106 for inclusion in master list.
 
+### 2026-05-16: README Community-Conformance Audit
+**By:** Link (DevRel / Documentation)
+**Status:** Completed
+**Scope:** Root README + Gemstone Lights README + SunStat Connect Plus README
+
+**Why**
+Prior to shipping v0.4.0 (Gemstone) and v0.1.2 (SunStat), align our driver documentation with community Hubitat standards to improve discoverability and user experience.
+
+**Survey Approach**
+Examined 8 high-signal community Hubitat driver repos (HubitatCommunity/hubitatpublic, dcmeglio/hubitat-packagemanager, ogiewon/Hubitat, bptworld/Hubitat, markus-li/Hubitat, etc.) to identify prevailing conventions.
+
+**Prevailing Conventions Identified**
+- Explicit **minimum HE version** (e.g., "2.1.9" or "2.3.3.x") + **hub generations** (C-5, C-7, C-8)
+- **Changelog/version story** externally linked (GitHub Releases, CHANGELOG.md, wiki) — not buried in code headers
+- **Hubitat Community forum link** (mandatory; often with specific thread if available)
+- **HPM install pattern:** manifest URL as primary path; manual install as secondary
+- **Donation links** (PayPal/Venmo) — common in multi-driver collections, optional
+- **Per-driver README scope:** capabilities tables, commands, attributes, setup, troubleshooting, examples
+
+**Conventions Adopted**
+
+1. **Explicit Compatibility Header** (new standard for our drivers)
+   - Format: `Compatibility: Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License`
+   - Replaces vague "recent platform releases"
+   - Visible at top of each per-driver README for immediate clarity
+
+2. **Root README: Enhanced Compatibility Section**
+   - Split into hub/platform info + per-driver network requirements
+   - Clarifies which drivers need cloud API access
+
+3. **Root README: Added Changelog Reference**
+   - Links to RELEASING.md to document versioning story
+   - Users can understand how versions are managed
+
+4. **Per-Driver README: Latest Version Badge + Releases Link**
+   - Gemstone: "Latest: v0.4.0 — LightEffects, ColorTemperature... See [releases](https://github.com/madskristensen/hubitat-drivers/releases)"
+   - SunStat: "Latest: v0.1.2 — energy reporting, schedule control... See [releases](https://github.com/madskristensen/hubitat-drivers/releases)"
+   - Directs users to GitHub Releases for full changelog
+
+**Conventions Intentionally NOT Adopted**
+
+1. **Screenshots / GIFs of device tiles** — low signal-to-noise for cloud REST drivers
+2. **Build / CI badges** — Groovy lacks standard CI ecosystem
+3. **Donation links (PayPal/Venmo)** — common but optional; Mads' call
+4. **"Fingerprint" / device pairing info** — applies to Zigbee/Z-Wave only; our drivers are cloud REST
+5. **Multi-hub comparison table** — C-5 support intentionally unverified; keeping explicit C-7/C-8 prevents support burden
+
+**Audit Results**
+- **Repos surveyed:** 8 (community Hubitat drivers)
+- **READMEs audited:** 3 (root + 2 drivers)
+- **Edits applied:** 6 targeted edits across 3 files
+- **Top gaps closed:** (1) min HE version clarity, (2) releases link, (3) compatibility header
+
+**Applied To**
+- `root README.md`
+- `drivers/gemstone-lights/README.md`
+- `drivers/sunstat-thermostat/README.md`
+
+**Open Questions for Mads**
+1. **Hubitat Community forum topics:** Do these drivers have dedicated forum threads? If so, link them in the READMEs for faster support.
+2. **Donation link:** Would you like PayPal/Venmo links added (common in Hubitat community)? No pressure — entirely optional.
+3. **C-5 hub testing:** Have you verified these drivers on C-5, or should we keep C-7/C-8 as the explicit support tier?
+
+**Notes**
+- All edits preserve existing tone and structure
+- No rewrites; only targeted additions for clarity
+- No changes to package manifests, version numbers, or code
+- Links to GitHub releases are stable and version-agnostic
+- Platform version 2.3.3.x matches Hubitat's recent stable LTS
+

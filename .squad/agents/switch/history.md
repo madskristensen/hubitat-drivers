@@ -91,3 +91,35 @@ This SunStat test plan template is now the canonical pattern for Hubitat cloud t
 ## Team Updates (2026-05-17T03:01:41Z)
 
 **SunStat Connect Plus v0.1.0 shipped.** Manual test plan (switch-sunstat-test-plan.md) merged into decisions.md and copied to drivers/sunstat-thermostat/TESTING.md. Tank implemented driver scaffold. Trinity's architecture and Cypher's API research finalized. Awaiting Mads' real-device verification to run test suite.
+
+## v0.1.2 Test Case Additions (2026-05-16T20:32:38-07:00)
+
+**Added 23 new test cases (26–48) covering six v0.1.2 features.** Test plan now totals 58 tests (1–25 core + v0.1.1 home/away, 26–48 v0.1.2 energy/schedule/hold/outdoor/precision/bounds, 49–58 edge cases & logging).
+
+### Learnings from v0.1.2 Test Design
+
+- **Energy meters require temporal state tracking:** Energy attributes (daily, monthly, yesterday, last-month) depend on the device's clock and month boundaries. Tests must tolerate rounding differences (±0.5 kWh) and account for the fact that energy is cumulative and does not reset until month-end. Verify against the manufacturer's app as the ground truth.
+
+- **Schedule enable/disable is a binary API toggle, not a complex command:** Unlike schedule read/write (Tier 4 deferred), simple enable/disable is Tier 1. Test must verify optimistic update → API call → polling reconciliation. External changes (toggled in Watts app) must propagate via the next poll cycle.
+
+- **Hold mode is a read-only derived attribute:** Unlike Boost (which may have duration/delta parameters), Hold is inferred from whether the current setpoint matches the scheduled value for the current time. It reads `data.Target.Hold` from the API response. Tests verify the "following" vs. "holding" state reflects the override condition, not a separate API call.
+
+- **Optional hardware (outdoor sensor) requires graceful degradation:** When a feature is hardware-optional (outdoor probe, some houses don't have it), tests must include a "not available" case and skip hardware-specific tests if the sensor is absent. Mark tests with `[skip if no outdoor probe]` and `[default expectation if not installed]` so testers know what to expect.
+
+- **Precision (step) rounding is a UX polish feature that must be transparent to the user:** Rounding 72.3 to 72.0 (on 1°F devices) or 20.7 to 20.5/21.0 (on 0.5°C devices) should happen silently in the driver. Tests verify the rounding happens in the API PATCH body and the attribute reflects the rounded value, not the user's input. This prevents confusion on the dashboard.
+
+- **Bounds clamping with warning logs is the safe pattern for range validation:** When `setFloorMinTemp(95)` exceeds the max (85), log a clear warning (e.g., "clamped to 85") and send the clamped value to the API. Never reject the command; graceful clamping is better UX than an error. Tests verify both the log message and the actual clamped value sent.
+
+- **Test plan version/section numbering must be updated carefully during additions:** When inserting new test areas mid-plan, all downstream test numbers shift. Use the `edit` tool with precise old_str matching to renumber systematically. This task renumbered 8 existing tests (26–34 → 49–58) and added 23 new tests (26–48) without corrupting the file structure.
+
+### Test Tier Distribution for v0.1.2
+
+- **Tier 1 (Core):** Tests 32–33 (schedule enable/disable) — user-facing commands that must work reliably
+- **Tier 2 (Feature):** Tests 26–31 (energy), 35–38 (hold), 43 (precision), 45–48 (bounds) — feature completeness and correctness
+- **Tier 3 (Polish/Optional):** Tests 34 (error handling), 39–42 (outdoor sensor + precision details), 44 (Celsius-only precision) — nice-to-have robustness
+- **Tier 4 (Defer/Hardware-dependent):** Test 30 (energy missing, hard to reproduce) — requires special setup or firmware coordination
+
+## Team Updates (2026-05-17T03:37:53Z)
+
+**SunStat Connect Plus v0.1.2 test coverage expanded.** Switch added 23 new test cases (#26-#48) for the 6 v0.1.2 features (energy, schedule, hold, outdoor, precision, floor bounds). Existing edge cases renumbered to #49-#58. Tank implemented features to match test expectations. Link bumped manifests and READMEs. Link-3 audited READMEs against 8 community Hubitat driver repos. Awaiting Mads' real-device verification and answers on 3 README audit open questions (forum topics, donation link, C-5 testing).
+

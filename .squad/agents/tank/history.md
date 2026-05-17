@@ -62,3 +62,20 @@
 ---
 
 **For archived sessions and learnings, see history-archive.md**
+
+## Learnings
+
+### EnergyMeter Capability Quirks
+Adding `capability "EnergyMeter"` gives you the built-in `energy` attribute automatically — no separate `attribute "energy", "number"` declaration needed (Hubitat adds it for you). Custom sibling attributes (`energyYesterday`, `energyMonth`, `energyLastMonth`) must be declared explicitly. The `energy` event requires `unit: "kWh"` to display correctly in dashboards. Always guard array access with `instanceof List` before indexing — older SunStat firmwares may omit the entire `data.Energy` block; log a debug message and skip rather than erroring.
+
+### Hold/Schedule Attribute Patterns
+API integer-as-boolean fields (e.g. `data.Target.Hold`) should map to descriptive string enums (`"holding"/"following"/"unknown"`) rather than `"true"/"false"` — this is more self-documenting and survives future API revisions where non-zero values may encode hold duration. For API string enums that must be surfaced as commands (e.g. `SchedEnable`), always use lowercase Hubitat-side values (`"on"/"off"`) even if the API uses titlecase (`"On"/"Off"`). Always emit optimistic attribute updates before the PATCH call so dashboards respond immediately.
+
+### Step-Rounding Pattern for Setpoints
+When `data.Target.Steps` is present, persist it to `state.setpointStep` each poll and apply it in every setpoint write command: `rounded = (Math.round(temp / step) * step).setScale(2, ROUND_HALF_UP)`. A `validStep()` helper (returns `step > 0 ? step : 1.0`) prevents division-by-zero if the API returns 0 for an unknown firmware. Apply step-rounding *before* clamping, not after, so the clamped value is always on a valid step boundary.
+
+## Team Updates (2026-05-17T03:37:53Z)
+
+**SunStat Connect Plus v0.1.2 complete.** Tank wired 6 new features: EnergyMeter capability + 4 energy attributes (energy, energyYesterday, energyMonth, energyLastMonth), setScheduleEnabled command + scheduleEnabled attribute, thermostatHold attribute, outdoorTemperature/outdoorSensorStatus, setpointStep with step-rounding, floor min/max clamping. Switch added 23 test cases (#26-#48). Link bumped packageManifest.json + READMEs. Link-3 completed README community-conformance audit (3 READMEs against 8 community repos, 6 edits applied: explicit compatibility headers, latest-version badges, GitHub Releases links). Awaiting Mads' real-device verification (Mode.Enum, modelId, httpPatch compatibility) + answers on 3 audit open questions (forum topics, donation link, C-5 testing).
+
+
