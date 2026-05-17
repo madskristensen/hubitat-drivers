@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.4
+ * Version: 0.4.5
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.5 — 2026-05-16 — Fix color byte order: Gemstone wire format is ABGR (A, B, G, R) not ARGB. v0.4.4 packed bytes as ARGB which caused red to render as blue, green correctly, blue as red. Swap r/b byte positions in hubitatHueSatToArgb and kelvinToArgb; reverse the same in gemstoneArgbToHubitatColor.
  *   0.4.4 — 2026-05-16 — Force ARGB color values to positive Long (Gemstone API requires unsigned 32-bit range [0, 4294967295]; v0.4.2's (0xFF << 24) produced a negative signed-int which failed validation). hubitatHueSatToArgb and kelvinToArgb now use long arithmetic with 0xFFL literals and return Long. gemstoneArgbToHubitatColor accepts Number/Long for symmetry.
  *   0.4.3 — 2026-05-16 — Diagnostic: flatten multi-line 400 response bodies (Python tracebacks from Gemstone API) to single-line log output so the full error is visible. Bumped truncate length to 2000.
  *   0.4.2 — 2026-05-16 — Diagnostic + payload fixes for setColor 400 / setColorTemperature silent-fail. Surface response.getErrorData() in 400 handler; log non-gated info when request is queued (no token or no deviceId); ARGB color generation now includes 0xFF alpha byte; setColor/setColorTemperature no longer override pattern.id (preserves real UUID from refresh); referencePatternId omitted entirely instead of sent as null.
@@ -30,7 +31,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.4"
+@Field static final String DRIVER_VERSION = "0.4.5"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -50,7 +51,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.4"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.5"
 
 metadata {
     definition(
@@ -1900,6 +1901,9 @@ private String colorTemperatureName(Integer colorTemperature) {
 }
 
 private Long kelvinToArgb(Integer colorTemperature) {
+    // NOTE: Despite the historical name, this produces an ABGR-packed Long for the
+    // Gemstone cloud API wire format (A in high byte, then B, G, R). Confirmed
+    // by v0.4.5 empirical testing on a real Gemstone controller.
     Double temperature = clampColorTemperature(colorTemperature) / 100.0d
     Double red
     Double green
@@ -1928,7 +1932,7 @@ private Long kelvinToArgb(Integer colorTemperature) {
     Integer redValue = clampByte(Math.round(red) as Integer)
     Integer greenValue = clampByte(Math.round(green) as Integer)
     Integer blueValue = clampByte(Math.round(blue) as Integer)
-    return ((0xFFL << 24) | ((redValue & 0xFFL) << 16) | ((greenValue & 0xFFL) << 8) | (blueValue & 0xFFL)) as Long
+    return ((0xFFL << 24) | ((blueValue & 0xFFL) << 16) | ((greenValue & 0xFFL) << 8) | (redValue & 0xFFL)) as Long
 }
 
 private Integer clampByte(Integer value) {
@@ -1955,6 +1959,9 @@ private Integer wireBrightnessToLevel(Integer brightness) {
 }
 
 private Long hubitatHueSatToArgb(Integer huePercent, Integer saturationPercent) {
+    // NOTE: Despite the historical name, this produces an ABGR-packed Long for the
+    // Gemstone cloud API wire format (A in high byte, then B, G, R). Confirmed
+    // by v0.4.5 empirical testing on a real Gemstone controller.
     float h = (clampPercent(huePercent) / 100.0f) * 360.0f
     float s = clampPercent(saturationPercent) / 100.0f
     float c = s
@@ -1983,14 +1990,18 @@ private Long hubitatHueSatToArgb(Integer huePercent, Integer saturationPercent) 
     Integer g = Math.round((gf + m) * 255.0f) as Integer
     Integer b = Math.round((bf + m) * 255.0f) as Integer
 
-    return ((0xFFL << 24) | ((r & 0xFFL) << 16) | ((g & 0xFFL) << 8) | (b & 0xFFL)) as Long
+    return ((0xFFL << 24) | ((b & 0xFFL) << 16) | ((g & 0xFFL) << 8) | (r & 0xFFL)) as Long
 }
 
 private Map gemstoneArgbToHubitatColor(Number argb) {
+    // NOTE: Despite the historical name, this produces an ABGR-packed Long for the
+    // Gemstone cloud API wire format (A in high byte, then B, G, R). Confirmed
+    // by v0.4.5 empirical testing on a real Gemstone controller.
     long argbLong = (argb instanceof Long) ? (long) argb : ((argb ?: 0) as Long)
-    float r = ((argbLong >> 16) & 0xFFL) / 255.0f
+    // Wire format is ABGR: high byte alpha, then B (>>16), G (>>8), R (low). See setter notes above.
+    float b = ((argbLong >> 16) & 0xFFL) / 255.0f
     float g = ((argbLong >> 8)  & 0xFFL) / 255.0f
-    float b = (argbLong         & 0xFFL) / 255.0f
+    float r = (argbLong         & 0xFFL) / 255.0f
 
     float max = [r, g, b].max() as float
     float min = [r, g, b].min() as float
