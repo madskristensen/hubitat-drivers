@@ -73,3 +73,33 @@ The full driver stack is now in place: Trinity's architecture, Tank's scaffold, 
 - Document confirmed endpoints and JSON property shapes
 
 **Blocked until:** Tank's HTTP wiring + Switch's validation.
+
+---
+
+## Team Update — HPM Release Flow (2026-05-16T23:14:20Z)
+
+**v0.4.0 Release Complete**
+
+Executed one-time push authorization for Gemstone Lights v0.4.0 release and HPM community list PR.
+
+**Flow Summary:**
+1. ✅ **Push commit 6f2f85e** (Squad coordination state + HPM infra) to origin/main
+2. ✅ **Triggered release.yml workflow** via `gh workflow run release.yml`
+3. ✅ **Release created** (`gemstone-lights-v0.4.0`) with changelog body auto-populated from driver header
+4. ✅ **Forked HubitatCommunity/hubitat-packagerepositories** and edited repositories.json to add entry for Mads Kristensen
+5. ✅ **PR #106 created** against HubitatCommunity master list
+
+**Learnings:**
+
+- **Workflow dispatch auto-registration:** The release.yml workflow was immediately available for `workflow_dispatch` trigger after the push. No need to wait for GitHub's workflow registration cycle.
+- **Release body auto-population works:** The GitHub Actions workflow correctly parsed the driver's Changelog section and populated the release body—no manual PR notes needed.
+- **Community list JSON structure:** The HubitatCommunity/hubitat-packagerepositories repository.json uses tab indentation (not spaces). When using PowerShell to manipulate JSON files, `ConvertFrom-Json | ConvertTo-Json` reformats the entire file to spaces, breaking the diff hygiene. **Surgical text replacement is mandatory** to preserve file format. A regex-based or line-by-line text replacement avoids accidental reformatting.
+- **HPM manifests are optional during setup:** The driver itself publishes a repository.json at the root level; the community list entry points to that raw GitHub URL. No additional HPM manifest layer was required in the main repo.
+- **PR flow feels natural:** The one-time community list PR was straightforward—fork, edit, push, create PR. The gh CLI makes this seamless, and the link/Tank coordination meant all prep materials (PR body, JSON snippet) were already staged.
+
+**URLs:**
+- **Commit:** https://github.com/madskristensen/hubitat-drivers/commit/6f2f85e
+- **Release:** https://github.com/madskristensen/hubitat-drivers/releases/tag/gemstone-lights-v0.4.0
+- **Community PR:** https://github.com/HubitatCommunity/hubitat-packagerepositories/pull/106
+
+**Status:** Awaiting HubitatCommunity maintainer review and merge of the community list PR.
