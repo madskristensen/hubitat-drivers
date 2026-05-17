@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.7
+ * Version: 0.4.8
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.8 — 2026-05-16 — Fill descriptionText on every sendEvent so the Hubitat Events tab Description column is populated for status-refresh events (effectName, colorMode, lightEffects, authStatus, etc.), not just user-initiated commands. Uses device.displayName so it works regardless of what the user renamed the device.
  *   0.4.7 — 2026-05-16 — Drop the non-favorite name list from the debug catalog-load log. Mads has 1457 non-favorite patterns; even at debug level, dumping all names was multi-KB. Log now shows just the count. Non-favorite names are still surfaced (capped at 20) on miss-path warns.
  *   0.4.6 — 2026-05-16 — Log hygiene + favorites-only UI/state: stop dumping the full preset list on every named setEffect call (only on miss, warn level, capped at 20); `lightEffects` UI dropdown now shows favorites only (curated set marked in the Gemstone app); `state.effectCatalog` and `state.effectPatterns` cache favorites only — non-favorites still resolve by name via on-demand catalog lookup, but no longer clog the device State Variables panel. Existing installs prune non-favorite state entries on next driver update.
  *   0.4.5 — 2026-05-16 — Fix color byte order: Gemstone wire format is ABGR (A, B, G, R) not ARGB. v0.4.4 packed bytes as ARGB which caused red to render as blue, green correctly, blue as red. Swap r/b byte positions in hubitatHueSatToArgb and kelvinToArgb; reverse the same in gemstoneArgbToHubitatColor.
@@ -33,7 +34,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.7"
+@Field static final String DRIVER_VERSION = "0.4.8"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -53,7 +54,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.7"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.8"
 
 metadata {
     definition(
@@ -188,7 +189,7 @@ def setLevel(level, duration = 0) {
     Integer clamped = clampPercent(level)
     infoLog "${device.displayName} level → ${clamped}"
     sendEvent(name: "level", value: clamped, unit: "%", descriptionText: "${device.displayName} level set to ${clamped}%", type: "digital")
-    sendEvent(name: "switch", value: clamped > 0 ? "on" : "off", type: "digital")
+    sendEvent(name: "switch", value: clamped > 0 ? "on" : "off", descriptionText: "${device.displayName} turned ${clamped > 0 ? 'on' : 'off'}", type: "digital")
     state.lastOnState = clamped > 0
 
     if (clamped == 0) {
@@ -212,7 +213,7 @@ def setColor(colorMap) {
     sendEvent(name: "hue", value: hue, descriptionText: "${device.displayName} hue set to ${hue}", type: "digital")
     sendEvent(name: "saturation", value: saturation, descriptionText: "${device.displayName} saturation set to ${saturation}", type: "digital")
     sendEvent(name: "level", value: level, unit: "%", descriptionText: "${device.displayName} level set to ${level}%", type: "digital")
-    sendEvent(name: "switch", value: level > 0 ? "on" : "off", type: "digital")
+    sendEvent(name: "switch", value: level > 0 ? "on" : "off", descriptionText: "${device.displayName} turned ${level > 0 ? 'on' : 'off'}", type: "digital")
     state.lastOnState = level > 0
     clearCurrentEffectIndex()
     updateColorMode(COLOR_MODE_RGB)
@@ -256,10 +257,10 @@ def setColorTemperature(colorTemperature, level = null, transitionTime = null) {
     infoLog "${device.displayName} color temperature → ${kelvin}K level=${targetLevel} (RGB fallback)"
     updateColorTemperatureAttributes(kelvin)
     Map hs = gemstoneArgbToHubitatColor(kelvinToArgb(kelvin))
-    sendEvent(name: "hue", value: hs.hue, type: "digital")
-    sendEvent(name: "saturation", value: hs.saturation, type: "digital")
+    sendEvent(name: "hue", value: hs.hue, descriptionText: "${device.displayName} hue set to ${hs.hue}", type: "digital")
+    sendEvent(name: "saturation", value: hs.saturation, descriptionText: "${device.displayName} saturation set to ${hs.saturation}", type: "digital")
     sendEvent(name: "level", value: targetLevel, unit: "%", descriptionText: "${device.displayName} level set to ${targetLevel}%", type: "digital")
-    sendEvent(name: "switch", value: targetLevel > 0 ? "on" : "off", type: "digital")
+    sendEvent(name: "switch", value: targetLevel > 0 ? "on" : "off", descriptionText: "${device.displayName} turned ${targetLevel > 0 ? 'on' : 'off'}", type: "digital")
     state.lastOnState = targetLevel > 0
     clearCurrentEffectIndex()
     updateColorMode(COLOR_MODE_CT)
@@ -958,9 +959,9 @@ private void activateEffectWithPattern(String patternId, String resolvedName, Ma
     Integer effectIndex = effectIndexForPatternId(patternId)
     infoLog "${device.displayName} effect → ${displayEffectName(resolvedName)}"
     rememberPattern(pattern)
-    sendEvent(name: "level", value: wireBrightnessToLevel(safeInt(pattern.brightness, 255)), unit: "%", type: "digital")
+    sendEvent(name: "level", value: wireBrightnessToLevel(safeInt(pattern.brightness, 255)), unit: "%", descriptionText: "${device.displayName} level set to ${wireBrightnessToLevel(safeInt(pattern.brightness, 255))}%", type: "digital")
     state.lastOnState = true
-    sendEvent(name: "switch", value: "on", type: "digital")
+    sendEvent(name: "switch", value: "on", descriptionText: "${device.displayName} turned on", type: "digital")
     updateCurrentEffectIndex(effectIndex)
     updateColorMode(COLOR_MODE_EFFECTS)
     executeOrQueueRequest(buildEffectRequest(pattern, resolvedName))
@@ -1307,7 +1308,7 @@ private void handleRefreshResponse(Map payload) {
 
     Boolean onState = data.onState == true
     state.lastOnState = onState
-    sendEvent(name: "switch", value: onState ? "on" : "off", type: "digital")
+    sendEvent(name: "switch", value: onState ? "on" : "off", descriptionText: "${device.displayName} turned ${onState ? 'on' : 'off'}", type: "digital")
 
     Map pattern = data.pattern instanceof Map ? data.pattern as Map : null
     if (pattern) {
@@ -1319,13 +1320,13 @@ private void handleRefreshResponse(Map payload) {
         rememberPattern(pattern)
 
         Integer level = wireBrightnessToLevel(safeInt(pattern.brightness, 255))
-        sendEvent(name: "level", value: level, unit: "%", type: "digital")
+        sendEvent(name: "level", value: level, unit: "%", descriptionText: "${device.displayName} level set to ${level}%", type: "digital")
 
         List colors = pattern.colors instanceof List ? pattern.colors as List : []
         if (colors) {
             Map hs = gemstoneArgbToHubitatColor(safeInt(colors[0], 0))
-            sendEvent(name: "hue", value: hs.hue, type: "digital")
-            sendEvent(name: "saturation", value: hs.saturation, type: "digital")
+            sendEvent(name: "hue", value: hs.hue, descriptionText: "${device.displayName} hue set to ${hs.hue}", type: "digital")
+            sendEvent(name: "saturation", value: hs.saturation, descriptionText: "${device.displayName} saturation set to ${hs.saturation}", type: "digital")
         }
 
         if (inferredColorMode) {
@@ -1343,7 +1344,7 @@ private void handleRefreshResponse(Map payload) {
         }
     } else {
         state.remove("lastPattern")
-        sendEvent(name: "level", value: onState ? safeInt(device.currentValue("level"), 100) : 0, unit: "%", type: "digital")
+        sendEvent(name: "level", value: onState ? safeInt(device.currentValue("level"), 100) : 0, unit: "%", descriptionText: "${device.displayName} level set to ${onState ? safeInt(device.currentValue('level'), 100) : 0}%", type: "digital")
         updateEffectName("")
         clearCurrentEffectIndex()
     }
@@ -1707,7 +1708,7 @@ private void rememberPattern(Map pattern) {
 private void updateEffectName(String value) {
     String safeValue = safeString(value)
     if (safeString(device.currentValue("effectName")) != safeValue) {
-        sendEvent(name: "effectName", value: safeValue, type: "digital")
+        sendEvent(name: "effectName", value: safeValue, descriptionText: "${device.displayName} effect → ${safeValue}", type: "digital")
     }
 }
 
@@ -1715,33 +1716,33 @@ private void updateColorMode(String value) {
     String safeValue = safeString(value)
     state.lastColorMode = safeValue
     if (safeValue && safeString(device.currentValue("colorMode")) != safeValue) {
-        sendEvent(name: "colorMode", value: safeValue, type: "digital")
+        sendEvent(name: "colorMode", value: safeValue, descriptionText: "${device.displayName} color mode → ${safeValue}", type: "digital")
     }
 }
 
 private void updateColorTemperatureAttributes(Integer colorTemperature) {
     Integer kelvin = clampColorTemperature(colorTemperature)
     if (safeInt(device.currentValue("colorTemperature"), 0) != kelvin) {
-        sendEvent(name: "colorTemperature", value: kelvin, unit: "K", type: "digital")
+        sendEvent(name: "colorTemperature", value: kelvin, unit: "K", descriptionText: "${device.displayName} color temperature set to ${kelvin}K", type: "digital")
     }
 
     String colorName = colorTemperatureName(kelvin)
     if (safeString(device.currentValue("colorName")) != colorName) {
-        sendEvent(name: "colorName", value: colorName, type: "digital")
+        sendEvent(name: "colorName", value: colorName, descriptionText: "${device.displayName} color name set to ${colorName}", type: "digital")
     }
 }
 
 private void updateLightEffectsAttribute(Map lightEffectsMap) {
     String lightEffectsJson = JsonOutput.toJson(lightEffectsMap ?: [:])
     if (safeString(device.currentValue("lightEffects")) != lightEffectsJson) {
-        sendEvent(name: "lightEffects", value: lightEffectsJson, type: "digital")
+        sendEvent(name: "lightEffects", value: lightEffectsJson, descriptionText: "${device.displayName} effects catalog refreshed (${lightEffectsMap?.size() ?: 0} entries)", type: "digital")
     }
 }
 
 private void updateFavoriteEffectsAttribute(List favoriteNames) {
     String favoriteValue = favoriteNames ? favoriteNames.join(", ") : ""
     if (safeString(device.currentValue("favoriteEffects")) != favoriteValue) {
-        sendEvent(name: "favoriteEffects", value: favoriteValue, type: "digital")
+        sendEvent(name: "favoriteEffects", value: favoriteValue, descriptionText: "${device.displayName} favorite effects updated", type: "digital")
     }
 }
 
@@ -2436,7 +2437,7 @@ private String truncate(String text, Integer maxLength = 160) {
 
 private void updateAuthStatus(String value) {
     if (safeString(device.currentValue("authStatus")) != value) {
-        sendEvent(name: "authStatus", value: value, type: "digital")
+        sendEvent(name: "authStatus", value: value, descriptionText: "${device.displayName} auth status → ${value}", type: "digital")
     }
 }
 
