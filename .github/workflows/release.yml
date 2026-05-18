@@ -201,6 +201,11 @@ jobs:
             notes_file='release-notes.md'
             target_sha=$(git rev-parse HEAD)
 
+            if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" >/dev/null 2>&1; then
+              echo "::notice::Skipping ${tag}: tag already exists"
+              continue
+            fi
+
             printf '%s\n' "$notes" > "$notes_file"
 
             tag_object_sha=$(gh api \
