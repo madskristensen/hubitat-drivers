@@ -133,6 +133,7 @@ Participated in 4-way driver improvement scan with Tank, Cypher, Switch. Finding
 ## Team updates
 
 - 2026-05-17: Participated in top-3 driver improvements batch — sunstat v0.1.6, touchstone v0.1.6, gemstone v0.4.9.
+- 2026-05-18: Daikin WiFi research memos (`daikin-capability-gap-memo.md`) were used as direct input for Tank-2's clean-room driver implementation (commit b26c04f). Research established the capability gap inventory (supportedThermostatModes, lifecycle, energy polling) and informed the v0.1.0 priority list. Clean-room pattern proves that research-stage feasibility analysis naturally feeds independent authorship without source code copying.
 
 ---
 
@@ -157,4 +158,26 @@ Participated in 4-way driver improvement scan with Tank, Cypher, Switch. Finding
 6. **Cloud drivers (Gemstone, SunStat) — wire vs. visible** — Redundant API calls in cloud drivers don't cause visible physical artifacts (lights don't flash on an idempotent PUT when value matches). The cost is API quota and latency. These are 🟡 not 🔴. Exception: Gemstone's `PUT /deviceControl/play/pattern` re-executes the animation sequence on the hardware, which IS visible — hence the 🔴 for `activateEffectWithPattern`.
 
 **Filed:** `.squad/decisions/inbox/trinity-redundant-write-audit.md`
+
+---
+
+## Learnings
+
+### 2026-05-18 — Daikin WiFi driver capability gap analysis (eriktack/hubitat-daikin-wifi v1.0.3)
+
+**Daikin BRP069B API surface (reusable notes):**
+- Local LAN HTTP on port 80, no auth required. BRP069B (not C) series only.
+- Six useful read endpoints: `get_control_info` (power/mode/setpoint/fan), `get_sensor_info` (indoor temp, outdoor temp, optional humidity), `get_model_info` (per-unit capability flags), `get_week_power_ex` / `get_year_power_ex` (energy history), `get_special_mode` (econo/powerful flags).
+- Two write endpoints beyond `set_control_info`: `set_special_mode` (econo/powerful) and `set_program` (on-device timer — rarely useful alongside Hubitat rules).
+- Energy fields (`week_heat`, `week_cool`, `curr_year_heat`, etc.) are in tenths of kWh, slash-delimited arrays. Parse with `.split('/')`.
+- Outdoor temp `otemp` and indoor temp `htemp` return `"-"` when the sensor is unavailable — must guard before `Double.parseDouble()`. (Bug confirmed by Cypher's concurrent analysis.)
+
+**Top capability gaps observed (pattern, not specific count):**
+- `supportedThermostatModes` is the single most common schema gap in SmartThings-era Hubitat thermostat ports. It's never declared or emitted; Rule Machine and modern dashboards break silently without it. Always check this first when auditing any ported thermostat driver.
+- Energy endpoint over-polling: drivers that include energy history calls in their main `refresh()` cycle will hit energy endpoints at the same cadence as control/sensor polling. Energy data changes at most hourly; it should be on its own 30-minute schedule.
+- Missing `initialize()` lifecycle is near-universal in SmartThings-era ports. All of them rely solely on `updated()` for schedule registration, which means polling dies on hub restart.
+
+**Fork architecture verdict:** Yes, fork is architecturally sound. The driver's core structure (LAN HubAction, map-based response parsing, `runEvery*` scheduling, `unschedule()` on save) is correct for Hubitat. The issues are schema completeness and lifecycle gaps, not structural misdesign. A targeted fix session is lower risk than a rewrite.
+
+**Filed:** `.squad/files/daikin-research/daikin-capability-gap-memo.md` and `.squad/decisions/inbox/trinity-daikin-capability-gap.md`
 

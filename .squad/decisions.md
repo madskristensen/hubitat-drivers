@@ -2776,6 +2776,114 @@ discoveryComplete()
 
 ---
 
+# Decision: drivers/daikin-wifi/ v0.1.0 Fork
+
+**Author:** Tank  
+**Date:** 2026-05-18  
+**Commit:** a3ac5cf
+
+---
+
+## Summary
+
+Forked `eriktack/hubitat-daikin-wifi` (MIT, last code commit 2021-04-30) into `drivers/daikin-wifi/` as `v0.1.0`. Upstream is effectively abandoned (issues disabled, 2 open PRs unreviewed for 1–2 years). Fork rights confirmed — MIT license.
+
+---
+
+## v0.1.0 Scope (Items 0–5 + EnergyMeter)
+
+| Item | Change | Status |
+|------|--------|--------|
+| 0 | Sentinel guard: `.isNumber()` before `Double.parseDouble()` on `otemp`/`htemp` — fixes `NumberFormatException` every poll cycle when outdoor sensor unavailable | ✅ Shipped |
+| 1 | `supportedThermostatModes` emitted in `installed()` + `updated()` — fixes Rule Machine / dashboard mode selectors | ✅ Shipped |
+| 2 | `supportedThermostatFanModes` also emitted in `installed()`, deprecated `displayed: false` removed | ✅ Shipped |
+| 3 | `initialize()` lifecycle added, called from both `installed()` + `updated()` — fixes post-reboot polling dead zone | ✅ Shipped |
+| 4 | `refreshEnergy()` method on fixed 30-min cron schedule; `get_week_power_ex` + `get_year_power_ex` removed from `refresh()` and `updateDaikinDevice()` | ✅ Shipped |
+| 5 | `capability "HealthCheck"` + `lastActivity` attribute — Pattern A (LAN HTTP variant): `ping()` returns HubAction, cleared in `parse()`, 5s `pingTimeout`, `lastActivity` throttled to ≥60s | ✅ Shipped |
+| + | `capability "EnergyMeter"` + standard `energy` attribute (= today's kWh) | ✅ Shipped |
+
+---
+
+## Deferred to v0.1.1+
+
+- **Econo / powerful mode** (`get_special_mode` / `set_special_mode`) — Trinity item 7
+- **`get_model_info` capability detection** — prevents unsupported commands appearing on incapable units
+- **Full event hygiene pass** — `descriptionText:` on all 66 `sendEvent` calls, full `emitIfChanged()` sweep — Trinity item 8
+- **Humidity** (`RelativeHumidityMeasurement`) — requires `get_model_info` first
+
+---
+
+## Attribution
+
+- **Original source:** `eriktack/hubitat-daikin-wifi` — `daikin-wifi-split-system-hubitat.groovy` v1.0.3 (2021-04-30)
+- **Original copyright:** Copyright 2018 Ben Dews — https://bendews.com (MIT)
+- **Contribution:** RBoy Apps
+- **Hubitat port:** eriktack, based on tsaaek community work
+- **License:** MIT — original copyright preserved verbatim in file header per MIT license terms
+
+---
+
+# Decision Drop: Daikin WiFi Driver — Fork → Clean-Room Course Correction
+
+**Date:** 2026-05-18  
+**Author:** Tank  
+**Status:** Decided — implemented
+
+---
+
+## Context
+
+A previous Tank spawn delivered `drivers/daikin-wifi/` v0.1.0 as a fork of `eriktack/hubitat-daikin-wifi` (commit `a3ac5cf`). Mads explicitly redirected: he wants a **clean-room implementation** — new driver, same protocol knowledge, independent authorship.
+
+---
+
+## Decision
+
+**Do not fork. Write a clean-room implementation.**
+
+1. Revert the fork commit via `git revert a3ac5cf` (never `git reset --hard` — shared history must not be rewritten).
+2. Implement `drivers/daikin-wifi/daikin-wifi.groovy` v0.1.0 from scratch using:
+   - Protocol knowledge from team research memos (Cypher + Trinity prose analysis)
+   - In-repo structural patterns (Touchstone, SunStat, Gemstone) as implementation reference
+   - **Not** the upstream source code or any copy thereof
+3. Credit eriktack as **inspiration / prior art** in the file header and README — not as MIT licensor.
+4. License: Mads Kristensen's own MIT copyright.
+
+---
+
+## Rationale
+
+- **Legal cleanliness:** Clean-room work is unambiguously Mads's own original work. No obligation to preserve a third-party copyright block.
+- **Quality:** Lets us build the driver to this repo's standards from the ground up, not retrofit SmartThings-circa-2017 code to Hubitat idioms.
+- **Mads's explicit direction:** "don't fork. create a new one in this repo. make sure to credit the person for the inspiration."
+
+---
+
+## Attribution Model
+
+| Location | What |
+|---|---|
+| File header | `Inspiration / prior art: eriktack/hubitat-daikin-wifi — first community driver ...` |
+| README `## Acknowledgments` | Credit + link to upstream repo |
+| License block | `MIT License — original work by Mads Kristensen (2026)` — no third-party copyright included |
+
+---
+
+## Deferred Items (v0.1.1+)
+
+- `get_special_mode` / `set_special_mode` — econo and powerful modes
+- `get_model_info` on `initialize()` — runtime capability detection (humidity sensor presence, swing support)
+- `setSchedule()` full implementation — on-device timer via `get_program` / `set_program`
+
+---
+
+## Commits
+
+- **Revert:** `29f8389` — `Revert "feat(daikin-wifi): fork of eriktack/hubitat-daikin-wifi as v0.1.0"`
+- **Clean-room:** `b26c04f` — `feat(daikin-wifi): clean-room driver for Daikin BRP069B WiFi adapters v0.1.0`
+
+---
+
 
 
 
