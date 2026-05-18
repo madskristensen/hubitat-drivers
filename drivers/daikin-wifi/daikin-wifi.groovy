@@ -1,7 +1,7 @@
 ﻿/**
  * Daikin WiFi Thermostat
  * Author:  Mads Kristensen
- * Version: 0.1.3
+ * Version: 0.1.4
  * License: MIT
  *
  * Local LAN control for Daikin WiFi adapters (BRP069B series, BRP15B61, and similar
@@ -14,6 +14,7 @@
  *   original. Credit and thanks to @eriktack for the foundational research.
  *
  * Changelog:
+ *   0.1.4 — 2026-05-18 — feat: econo/powerful mode (setSpecialMode + specialMode attr), get_model_info runtime capability cache, full event hygiene audit
  *   0.1.3 — 2026-05-18 — feat: add setSwingMode command + swingMode attribute (off/vertical/horizontal/3d) — Daikin f_dir 0-3 mapping
  *   0.1.2 — 2026-05-18 — fix: replace HubAction (constructor not found on user firmware) with asynchttpGet — modern Hubitat HTTP-over-LAN pattern
  *   0.1.1 — 2026-05-18 — hotfix: remove invalid read of schedule property in updated(); correct HubAction constructor signature in sendGet
@@ -29,7 +30,7 @@ import groovy.json.JsonOutput
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String  DRIVER_VERSION            = "0.1.3"
+@Field static final String  DRIVER_VERSION            = "0.1.4"
 @Field static final Integer DAIKIN_PORT               = 80
 @Field static final Integer LAST_ACTIVITY_THROTTLE_MS = 60000
 @Field static final Integer ENERGY_POLL_MINUTES       = 30
@@ -67,6 +68,14 @@ import groovy.json.JsonOutput
     "off": "0", "vertical": "1", "horizontal": "2", "3d": "3"
 ]
 
+// Daikin BRP069B special-mode codes — adv field in get_special_mode response.
+// Community-documented values for BRP069B4x: 0/"" = neither, 2 = econo, 12 = powerful.
+// The adv field may appear as a compound string (e.g. "2-fff10000") on some firmware;
+// extract the leading numeric token before lookup.
+@Field static final List<String>        SPECIAL_MODE_OPTIONS = ["off", "econo", "powerful"]
+@Field static final Map<String, String> SPECIAL_MODE_TO_ADV  = ["off": "0",  "econo": "2",  "powerful": "12"]
+@Field static final Map<String, String> ADV_TO_SPECIAL_MODE  = ["": "off",  "0": "off",  "2": "econo",  "12": "powerful"]
+
 // ---------------------------------------------------------------------------
 // Metadata
 // ---------------------------------------------------------------------------
@@ -94,10 +103,13 @@ metadata {
             description: "Daikin fan speed code (A=Auto, B=Silent, 3–7=speed levels)"]]
         command "setSwingMode", [[name: "Mode", type: "ENUM", constraints: ["off", "vertical", "horizontal", "3d"],
             description: "Swing direction: off=fixed, vertical=up/down, horizontal=left/right, 3d=both"]]
+        command "setSpecialMode", [[name: "Mode", type: "ENUM", constraints: ["off", "econo", "powerful"],
+            description: "Special mode: off=normal, econo=energy-saving, powerful=boost"]]
 
         attribute "outsideTemp",  "number"
         attribute "fanRate",      "enum",   FAN_RATE_OPTIONS
         attribute "swingMode",    "enum",   ["off", "vertical", "horizontal", "3d"]
+        attribute "specialMode",  "enum",   ["off", "econo", "powerful"]
         attribute "healthStatus", "enum",   ["online", "offline", "unknown"]
         attribute "lastActivity", "string"
     }
@@ -202,6 +214,7 @@ def initialize() {
     ensureDNI()
     registerSchedules()
     runIn(2, "refresh")
+    requestModelInfo()
 }
 
 def uninstalled() {
@@ -312,6 +325,16 @@ def setSwingMode(String mode) {
     sendControlWrite([f_dir: daikinFDir])
 }
 
+def setSpecialMode(String mode) {
+    String lmode = mode?.toLowerCase()
+    if (!SPECIAL_MODE_OPTIONS.contains(lmode)) { log.warn "[Daikin] Unknown special mode: ${mode}"; return }
+    log.info "[Daikin] ${device.displayName} special mode → ${lmode}"
+    emitIfChanged("specialMode", lmode, null, "${device.displayName} special mode is ${lmode}")
+    String setSpmode  = (lmode == "off") ? "0" : "1"
+    String spmodeKind = SPECIAL_MODE_TO_ADV[lmode]
+    sendGet("/aircon/set_special_mode?set_spmode=${setSpmode}&spmode_kind=${spmodeKind}", "handleSetSpecialMode")
+}
+
 def setHeatingSetpoint(temp) {
     BigDecimal tempBd = new BigDecimal(temp.toString())
     BigDecimal clamped = clampSetpoint(tempBd)
@@ -345,10 +368,15 @@ def refresh() {
     debugLog "refresh() — polling control + sensor info"
     sendGet("/aircon/get_control_info", "handleControlInfo")
     runIn(2, "doSensorRefresh")
+    runIn(4, "doSpecialModeRefresh")
 }
 
 def doSensorRefresh() {
     sendGet("/aircon/get_sensor_info", "handleSensorInfo")
+}
+
+def doSpecialModeRefresh() {
+    sendGet("/aircon/get_special_mode", "parseSpecialMode")
 }
 
 def poll() { refresh() }
@@ -443,6 +471,49 @@ private void sendGet(String path, String callbackMethod) {
     } catch (Exception e) {
         log.warn "[Daikin] sendGet failed (${path}): ${e.message}"
     }
+}
+
+private void requestModelInfo() {
+    sendGet("/aircon/get_model_info", "parseModelInfo")
+}
+
+def parseModelInfo(hubitat.scheduling.AsyncResponse response, Map data) {
+    if (response == null || response.hasError()) {
+        log.warn "[Daikin] get_model_info unavailable — capability cache skipped"
+        return
+    }
+    String body = response.getData()
+    if (!body) { log.warn "[Daikin] Empty response from get_model_info"; return }
+    traceLog "parseModelInfo: ${body}"
+
+    Map kv = parseKV(body)
+    if (kv.ret != "OK") {
+        log.warn "[Daikin] get_model_info: ret= — capability cache skipped"
+        return
+    }
+
+    // BRP069B4x community-documented fields (exact names vary by firmware revision):
+    //   model / en_model — product model string
+    //   rev   / en_ver   — firmware revision string
+    //   en_hum  — "1" if humidity sensor present
+    //   swing_l — "1" if horizontal (left/right) swing supported
+    //   swing_v — "1" if vertical (up/down) swing supported
+    String modelName    = kv.model   ?: kv.en_model ?: "(unknown)"
+    String firmware     = kv.rev     ?: kv.en_ver   ?: "(unknown)"
+    boolean hasHumidity = (kv.en_hum  ?: "0") == "1"
+    boolean swingH      = (kv.swing_l ?: "0") == "1"
+    boolean swingV      = (kv.swing_v ?: "0") == "1"
+
+    state.modelInfo = [
+        name             : modelName,
+        firmware         : firmware,
+        hasHumiditySensor: hasHumidity,
+        supportsSwing    : (swingH || swingV),
+        supportsSwingH   : swingH,
+        supportsSwingV   : swingV
+    ]
+
+    log.info "[Daikin] Model: ${modelName} fw=${firmware} humidity=${hasHumidity} swing=${swingH || swingV}"
 }
 
 private void sendControlWrite(Map overrides) {
@@ -607,6 +678,36 @@ def handleSetControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
     }
     // Read back immediately to confirm the new state.
     runIn(2, "getControlInfo")
+}
+
+def handleSetSpecialMode(hubitat.scheduling.AsyncResponse response, Map data) {
+    if (!checkHttpOk(response, "set_special_mode")) { return }
+    Map kv = parseKV(response.getData() ?: "")
+    if (kv.ret == "OK") {
+        debugLog "set_special_mode accepted"
+    } else {
+        log.warn "[Daikin] set_special_mode: ret="; return
+    }
+    runIn(2, "doSpecialModeRefresh")
+}
+
+def parseSpecialMode(hubitat.scheduling.AsyncResponse response, Map data) {
+    if (!checkHttpOk(response, "get_special_mode")) { return }
+    String body = response.getData()
+    if (!body) { log.warn "[Daikin] Empty response from get_special_mode"; return }
+    traceLog "parseSpecialMode: ${body}"
+
+    Map kv = parseKV(body)
+    if (kv.ret != "OK") { log.warn "[Daikin] get_special_mode: ret="; return }
+
+    // adv field: "" / "0" = neither, "2" = econo, "12" = powerful.
+    // Some firmware variants return compound strings like "2-fff10000"; extract leading token.
+    String advRaw  = kv.adv ?: """
+    String advCode = advRaw.split("-")[0].trim()
+    String specialMode = ADV_TO_SPECIAL_MODE[advCode] ?: "off"
+
+    emitIfChanged("specialMode", specialMode, null, "${device.displayName} special mode is ${specialMode}")
+    emitLastActivity()
 }
 
 def handlePingResponse(hubitat.scheduling.AsyncResponse response, Map data) {

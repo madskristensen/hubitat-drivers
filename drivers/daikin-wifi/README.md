@@ -1,4 +1,4 @@
-# Daikin WiFi Thermostat
+﻿# Daikin WiFi Thermostat
 
 Local LAN control for Daikin WiFi adapters (BRP069B series and similar) via the unauthenticated `/aircon/*` HTTP API on port 80. No cloud account, no polling latency, no external dependency — all control traffic stays on your LAN.
 
@@ -21,7 +21,9 @@ Local LAN control for Daikin WiFi adapters (BRP069B series and similar) via the 
 | Switch | `on` / `off` shortcut over thermostat power |
 | HealthCheck + `ping()` | LAN reachability probe; marks device offline after 5s timeout |
 
-Custom attributes: `outsideTemp` (outdoor sensor), `fanRate` (Daikin fan speed code), `swingMode` (off/vertical/horizontal/3d), `healthStatus`, `lastActivity`.
+Custom commands: `setFanRate` (Daikin speed codes A/B/3-7), `setSwingMode` (off/vertical/horizontal/3d), `setSpecialMode` (off/econo/powerful).
+
+Custom attributes: `outsideTemp` (outdoor sensor), `fanRate` (Daikin fan speed code), `swingMode` (off/vertical/horizontal/3d), `specialMode` (off/econo/powerful), `healthStatus`, `lastActivity`.
 
 ## Setup
 
@@ -43,12 +45,11 @@ The three *Default … on power-on* preferences let you choose a mode, setpoint,
 
 Both schedules are registered in `initialize()` and survive hub reboots.
 
-## Known Limitations (v0.1.0)
+## Known Limitations (v0.1.4)
 
-- **No econo / powerful mode** — `get_special_mode` / `set_special_mode` endpoints not yet implemented. Planned for v0.1.1.
 - **No on-device timer** — `get_program` / `set_program` not implemented (use Hubitat rules instead).
-- **No runtime capability detection** — the driver does not call `get_model_info` to check whether your specific unit supports the humidity sensor. Humidity attribute stays unset if the sensor is absent.
 - **Setpoint unity** — Daikin's local API exposes a single setpoint register (`stemp`) shared across modes. The driver writes it to both `heatingSetpoint` and `coolingSetpoint` on refresh. You can set them independently via Hubitat commands; the driver uses the mode-appropriate value on each write.
+- **`get_model_info` field names are firmware-dependent** — `state.modelInfo` is cached for diagnostics on each `initialize()`. Field mapping (model name, firmware, humidity/swing flags) follows community-documented BRP069B4x names; exact values require hardware confirmation.
 
 ## Acknowledgments
 
