@@ -1,7 +1,7 @@
 /**
  * SunStat Connect Plus — Child Driver (Thermostat)
  * Author:  Mads Kristensen
- * Version: 0.1.10
+ * Version: 0.1.11
  * License: MIT
  *
  * Hubitat capability surface for the Watts® Home SunStat Connect Plus
@@ -9,6 +9,7 @@
  * driver (SunStat Connect Plus) via parent.sendDevicePatch(...).
  *
  * Changelog:
+ *   0.1.11 — 2026-05-18 — version synced to parent metadata capability release; no child behavior change
  *   0.1.10 — 2026-05-18 — cache Schedule.Floor.W and skip redundant setFloorMinTemp PATCH (audit SC-4)
  *   0.1.9 — 2026-05-18 — funnel poll telemetry through emitIfChanged (temperature/setpoints/energy/floor); dedupes event history on unchanged polls (perf audit fix #5)
  *   0.1.8 — 2026-05-18 — skip redundant PATCH calls when device already matches (audit SP-1, SC-1, SC-2, SC-3); SC-4 deferred
@@ -28,7 +29,7 @@ import groovy.json.JsonSlurper
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION                    = "0.1.10"
+@Field static final String DRIVER_VERSION                    = "0.1.11"
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_F        = 110L
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_C        = 43L
 

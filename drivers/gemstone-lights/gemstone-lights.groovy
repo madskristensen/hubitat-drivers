@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.15
+ * Version: 0.4.16
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.16 — 2026-05-18 — add Polling capability marker so Hubitat apps discover poll() support
  *   0.4.15 — 2026-05-18 — replace cloneMap JSON round-trips with recursive Map/List copies on hot request/pattern paths
  *   0.4.15 — 2026-05-18 — dedupe unchanged refresh switch/level/hue/saturation events so poll telemetry stays stat-only
  *   0.4.14 — 2026-05-18 — throttle lastActivity emit to ≥60s; cuts unchanged-event DB churn on polls (perf audit fix #1)
@@ -52,7 +53,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.15"
+@Field static final String DRIVER_VERSION = "0.4.16"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -72,7 +73,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.15"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.16"
 
 metadata {
     definition(
@@ -88,6 +89,7 @@ metadata {
         capability "ColorTemperature"
         capability "LightEffects"
         capability "Refresh"
+        capability "Polling"
         capability "Initialize"
 
         command "setEffect", [[name: "name", type: "STRING", description: "Gemstone effect name (⭐ prefix optional)"]]

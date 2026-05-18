@@ -6,6 +6,11 @@
 
 ## Latest Work (2026-05-18)
 
+### 2026-05-18T17:45:00Z — Cloud driver metadata hygiene shipped (all 8 perf/quality todos closed)
+- **Gemstone v0.4.16**: added `capability "Polling"` so Hubitat apps discover `poll()`; bumped driver + `drivers/gemstone-lights/packageManifest.json`.
+- **SunStat v0.1.11**: parent now declares `capability "Polling"` + `capability "Actuator"`; synced child + `drivers/sunstat-thermostat/packageManifest.json` to v0.1.11 for release lockstep.
+- **Status:** SHIPPED — all 8 perf/quality todos from the 2026-05-18 board are now shipped.
+
 ### 2026-05-18T17:11:04Z — SunStat v0.1.10 shipped (SC-4 closes audit)
 - **SunStat v0.1.10**: cached `Schedule.Floor.W` into `state.floorWarmth` alongside `state.floorAway`, then added a skip-if-match guard in `setFloorMinTemp()` so redundant floor-min writes no longer issue a no-op PATCH.
 - Bumped parent + child + `drivers/sunstat-thermostat/packageManifest.json` to v0.1.10 for release sync; parent change is version-sync only.

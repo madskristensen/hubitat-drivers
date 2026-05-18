@@ -2,8 +2,8 @@
   "packageName": "Mads Kristensen — Hubitat Drivers",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
-  "dateReleased": "2026-05-17",
-  "version": "1.0.4",
+  "dateReleased": "2026-05-18",
+  "version": "1.0.5",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/README.md",
   "drivers": [
