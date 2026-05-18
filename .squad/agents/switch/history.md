@@ -180,3 +180,11 @@ Your cross-driver reliability analysis (8 anti-patterns) directly informed this 
 **2026-05-18 Team Update:** MyQ feasibility research completed; verdict = build ratgdo ESPHome HTTP driver (local, no cloud). Cypher confirmed ratgdo firmware actively maintained; Trinity sketched architecture. Awaiting Mads hardware decision. See .squad/decisions.md for full report.
 
 **2026-05-18 Team Update (Scribe merge):** Rainbird verdict = install existing community driver; no new code to test this round.
+## Team Update — PurpleAir Cloud Driver (2026-05-18)
+
+**From:** Cypher audit (2026-05-18T23:18:00Z)
+
+PurpleAir cloud driver is the next likely build target. No hardware needed for testing — use any public sensor ID from map.purpleair.com.
+
+---
+

@@ -221,3 +221,15 @@ All 8 versions validated on Mads's real BRP069B hardware (firmware version pendi
 **2026-05-18 Team Update (Scribe merge):** Rainbird verdict = install MHedish community driver; do not build competing version. AES/CBC + javax.crypto confirmed sandbox-safe for any future encrypted-local driver. Bosch Home Connect identified as next greenfield opportunity.
 
 **2026-05-18 Team Update (Scribe):** Bosch Home Connect verdict = install craigde/hubitat-homeconnect-v3 community driver. OAuth Authorization Code Grant works in Hubitat via parent App cloud callback URI — pattern unblocks future cloud-OAuth drivers.
+## Team Update — PurpleAir Cloud Driver Greenfield (2026-05-18)
+
+**From:** Cypher audit (2026-05-18T23:18:00Z)
+
+PurpleAir CLOUD-API driver is greenfield (no Hubitat community driver exists targeting api.purpleair.com/v1/sensors/{id}). If Mads green-lights, this is your next build: ~150–250 lines, EPA Barkjohn 2021 AQI conversion, Bearer key auth, single-device polling pattern modeled on Gemstone.
+
+**Blocking hardware?** No. Test with any public sensor ID from map.purpleair.com. Free tier: 1M points/month.
+
+**Build recommendation:** 80/100 Strong Fit.
+
+---
+
