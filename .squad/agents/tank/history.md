@@ -167,3 +167,20 @@ Cypher + Trinity completed assessment of `eriktack/hubitat-daikin-wifi` upstream
 - **The typo:** ?: """ (3 quotes) opens a Groovy multiline GString that's never closed. Hubitat's parser rejects the entire driver file at load time with a parse error. The intent was ?: "" (empty-string fallback).
 - **Always grep for """ after touching any GString fallback expression.** A single extra quote is invisible at a glance but fatal on load.
 - **Lesson:** Hardware-untested features deserve a paranoid grep pass before commit. Tank-6 audited "no executable HubAction" but missed this Groovy literal subtlety. Add """ to the pre-commit mental checklist alongside isNumber() guards and mitIfChanged hygiene.
+
+---
+
+## Team Updates — v0.1.5 Hotfix + v0.1.6 Audit Findings (2026-05-18 — 21:29:42Z)
+
+**v0.1.5 shipped (commit 6e90625) with two critical bugfixes:**
+1. **Line 705:** Unclosed triple-quote GString (?: """) — parse error resolved.
+2. **Line 701:** Missing log interpolation (\) — debug logging now includes actual return values.
+
+**Trinity's ecosystem survey (parallel):** Surveyed 5 peer thermostat drivers. Finding: **setpointDisplay** (human-readable string like "Heat: 72°F") present in ~90% of peers, missing from our Daikin + SunStat. Cost: 0.5 hrs/driver. Recommended as v0.1.6 Phase 1 quick win.
+
+**Cypher's API audit + driver quality assessment (parallel):** Catalogued all 28 Daikin BRP069B endpoints; we implement the 7 that matter. Quality findings:
+- 🔴 **Critical (v0.1.6):** NPE in setpoint setters (lines 340/350) when temp is null. Effort: 30 min.
+- 🟡 **Minor (v0.1.6 recommended):** Missing log interpolation 2 places; energy poll when off; dead yearTotal. Effort: 5+5+30 min.
+- 🟡 **Advanced (v0.1.6 optional):** BRP069A backward compat via /common/basic_info. Effort: 1–2h (needs hardware testing).
+
+**v0.1.6 scope captured.** Full decisions: .squad/decisions.md

@@ -4,6 +4,51 @@
 
 ---
 
+## Learnings
+
+### Daikin BRP069B Complete Endpoint Catalog (Session cypher-5, 2026-05-18)
+
+Full reference for any future Daikin driver work. Sources: ael-code/daikin-control README, Apollon77/daikin-controller src/DaikinACRequest.ts + DaikinAC.ts v2.2.1.
+
+**Implemented in our driver (v0.1.5):**
+- `/aircon/get_control_info` — mode, pow, setpoint, fan rate, swing
+- `/aircon/set_control_info` — all control writes (requires pow, mode, stemp, shum, f_rate, f_dir)
+- `/aircon/get_sensor_info` — indoor/outdoor temp, humidity
+- `/aircon/get_model_info` — model name, fw rev, humidity/swing capability flags
+- `/aircon/get_special_mode` + `/aircon/set_special_mode` — econo/powerful mode (adv field)
+- `/aircon/get_week_power_ex` — weekly kWh (s_dayw slash-delimited)
+- `/aircon/get_year_power_ex` — monthly kWh (this_year slash-delimited)
+
+**Not called — worth adopting:**
+- `/common/basic_info` — MAC, firmware, device name, `lpwFlag`. If `lpwFlag=1` (some BRP069A units), all set calls need `lpw=` param appended. Apollon77 reads this at init and auto-configures lpw globally.
+- `/aircon/get_demand_control` + `/aircon/set_demand_control` — max-power cap for demand-response. Confirmed in Apollon77 v2.2.1 (2025-05-24). Device-side validation needed on BRP069B41.
+
+**Not called — maybe later:**
+- `/common/get_notify` — filter maintenance alert (community-reported; schema undocumented)
+- `/aircon/get_day_power_ex` — hourly kWh for today (Apollon77 TODO list, typo'd `get_day_paower_ex`)
+- `/aircon/get_week_power` + `/aircon/get_year_power` — older non-`_ex` variants for BRP069A firmware fallback
+
+**Not called — skip:**
+- `/common/get_remote_method` + `set_remote_method` — cloud polling negotiation; irrelevant for LAN
+- `/aircon/get_program` + `set_program` — on-device schedule; deferred per Trinity memo
+- `/aircon/get_scdltimer` + `set_scdltimer` — on/off weekly timer; same rationale
+- `/aircon/get_timer`, `/aircon/get_target`, `/aircon/get_price` — unknown/undocumented purpose
+- `/common/set_led` — non-functional on tested hardware (ael-code note)
+- `/common/reboot` — dangerous; 30s disconnect
+- `/common/set_regioncode`, `/common/get_datetime`, `/aircon/get_wifi_setting` — cloud-facing or credential-risk
+
+### Top Perf/Quality Findings from v0.1.4/v0.1.5 (Session cypher-5, 2026-05-18)
+
+Driver is production-quality overall. Remaining items are maintenance-tier:
+
+1. **🔴 Null crash** — `setHeatingSetpoint(null)` / `setCoolingSetpoint(null)` throws NPE at `temp.toString()` (line 340, 350). Fix: null guard before BigDecimal construction.
+2. **🟡 Missing log interpolation** — `"ret="` without `${kv.ret}` in `parseModelInfo` (line 492) and `handleSetSpecialMode` (line 690).
+3. **🟡 Energy poll when off** — `refreshEnergy()` fires 2 HTTP calls even when `switch == "off"`.
+4. **🟡 Dead computation** — `handleYearPower` computes `yearTotal` (line 667) but never emits it. Debug-log only.
+5. **🟢 All else clean** — asynchttpGet, unschedule/schedule ordering, emitIfChanged coverage, .isNumber() guards, sandbox compliance, °F↔°C conversion — all verified correct.
+
+---
+
 ## Current Active Work (2026-05-18)
 
 ### HPM Multi-Driver Bundle Feasibility Research (Session cypher-4)
@@ -86,3 +131,20 @@ Two independent firmware failures observed in the Daikin WiFi driver:
 3. **Event hygiene audit** — All five checks passed (emitIfChanged, descriptionText, 60s throttle, no displayed:false, no isStateChange:true anti-patterns)
 
 Your v0.1.0 capability gap research directly enabled this final ship. Hardware verification pending on Mads's BRP069B unit.
+
+---
+
+## Team Updates — Daikin API Audit Complete (2026-05-18 — 21:29:42Z)
+
+**API completeness audit shipped:** Catalogued all 28 Daikin BRP069B endpoints. Our driver implements the 7 that matter (control, power, special mode, model info, swing direction).
+
+**Skip list (10 endpoints):** Cloud negotiation, scheduling, timers, undocumented, dangerous, credential-risk endpoints. Rationale documented in .squad/decisions.md.
+
+**Maybe later (4 endpoints, v0.1.7+ candidates):** Demand control (needs real-device validation), filter alerts (schema unknown), hourly energy (Apollon77 TODO), legacy power variants (low priority).
+
+**Driver quality findings — v0.1.5 production-ready:**
+- 🔴 **Critical:** NPE in setpoint setters when temp is null (RM "clear" cmd). Guard needed at lines 340/350. (30 min fix)
+- 🟡 **Minor:** Missing log interpolation (lines 492, 690); energy poll when off (line 385); dead yearTotal (line 667). (5+5+30 min fixes)
+- 🟡 **Optional:** BRP069A backward compat reading lpwFlag. (1–2h, needs hardware testing)
+
+**Overall verdict:** No structural issues. All remaining items are maintenance-tier. v0.1.6 scope awaiting Mads's decision. Full audit memo: .squad/files/daikin-research/daikin-api-perf-audit-memo.md

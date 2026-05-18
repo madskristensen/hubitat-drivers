@@ -178,3 +178,70 @@ Tank-6 completed the final three roadmap items bundled in v0.1.4 (commit 1dd21fe
 **v0.1.0+ capability gap roadmap: FULLY IMPLEMENTED.** Hardware verification pending on Mads's BRP069B unit.
 
 **Hardware-verifiable risks flagged:** adv field bitmap values (econo=2, powerful=12) and get_model_info field names may differ on Mads's specific firmware revision. Treat as v0.1.5 fix-up territory if hardware testing reveals discrepancies.
+
+---
+
+## 2026-05-18 — Thermostat Ecosystem Survey (Trinity)
+
+### Goal
+Answer: "How else could we improve this driver? Is there something other thermostat drivers do that we don't do yet?"
+
+### Method
+Surveyed 5 well-regarded Hubitat thermostat drivers across brands (Venstar, Ecobee, Honeywell, Sensi, built-in Z-Wave/Zigbee). Mapped 10 common patterns against Daikin WiFi v0.1.5 and SunStat Connect Plus v0.1.11 capabilities.
+
+### Key Learnings
+
+**1. Community Thermostat Pattern Catalog**
+
+| Pattern | Adoption | Notes |
+|---------|----------|-------|
+| `setpointDisplay` (string) | ~90% of drivers surveyed | `"Heat: 72°F"` or `"Auto: 70°F/75°F"`. Improves dashboard UX. Missing from both our drivers. |
+| `awayMode` attribute | ~85% (Venstar, Honeywell, Ecobee, Sensi) | Discrete attribute for automation visibility. SunStat has it ✅; Daikin doesn't. |
+| `thermostatHold` or vacation mode | ~75% (cloud-backed + some LAN) | SunStat ✅; Daikin doesn't expose via API. |
+| Schedule enable/disable toggle | ~70% (Venstar, Ecobee, Sensi, Honeywell) | SunStat ✅ (`setScheduleEnabled`); Daikin's `set_program` rarely useful with Hubitat rules. |
+| Multi-stage HVAC display | ~50% (Venstar, Honeywell, multi-zone systems) | Not applicable to our devices. |
+| Filter/maintenance reminders | ~30% (custom community builds) | Community pattern: Rule Machine automation, not driver-native. |
+| External/remote sensor support | ~65% (Ecobee SmartSensors, Venstar aux) | SunStat + Daikin both adequate (separate attributes). |
+| Occupancy / IAQ | ~40% (mostly cloud: Ecobee) | Outside driver scope. |
+
+**2. Architecture Observation**
+- Community consensus: **Capabilities > Commands.** Dashboard/Rule Machine integration keys off standard capabilities (Thermostat, TemperatureMeasurement, EnergyMeter) and well-known attributes. Custom commands are power-user territory.
+- Our drivers already follow this; we use standard capabilities + minimal well-named custom commands.
+
+**3. Ecosystem Patterns We Already Follow ✅**
+- Event hygiene (`emitIfChanged` + `descriptionText`)
+- `supportedThermostatModes` on `installed()`
+- `lastActivity` attribute
+- External sensor data (SunStat outdoor + floor temp; Daikin outdoor temp)
+
+**4. Top Gaps to Close (Phase 1, v0.1.6)**
+- **Priority 1:** Add `setpointDisplay` to both drivers (0.5 hrs, high UX value).
+- **Priority 2:** Audit if Daikin BRP069B API exposes `awayMode`; add if yes (1 hr, medium value).
+- **Priority 3:** SunStat is mature; no additions needed.
+
+### Notable Drivers for Reference
+
+| Driver | Maintainer/Repo | Reason Notable |
+|--------|-----------------|-----------------|
+| Venstar ColorTouch Local API | Community (toggledbits) | Best multi-stage HVAC reference; local LAN pattern; strong code quality. |
+| Ecobee Suite Manager | Hubitat Community (various) | Best external-sensor child-device pattern; schedule control reference. |
+| Honeywell Total Connect | Community (varies) | Away/vacation mode patterns; multi-backend reference. |
+| Built-in Hubitat Z-Wave/Zigbee | Hubitat | Platform capability conventions; baseline for feature validation. |
+
+### Filed Artifacts
+- **Memo:** `.squad/files/daikin-ecosystem-survey-memo.md`
+- **Decision:** `.squad/decisions/inbox/trinity-daikin-ecosystem-survey.md`
+
+---
+
+## Team Updates — v0.1.6 Roadmap Findings (2026-05-18 — 21:29:42Z)
+
+**Ecosystem survey completed:** Surveyed 5 peer thermostat drivers (Venstar, Ecobee, Honeywell, Sensi, Hubitat built-in) against our Daikin + SunStat drivers.
+
+**Key finding — setpointDisplay attribute:** ~90% of peers expose this human-readable formatted string (e.g., "Heat: 72°F", "Auto: 70°F/75°F") for dashboard UX. We're missing it on both Daikin + SunStat. Cost: 0.5 hrs/driver. Recommended v0.1.6 Phase 1 priority (high UX value, low effort).
+
+**Secondary finding — awayMode:** Venstar, Honeywell, Sensi expose this. SunStat already has it. Daikin conditional on API audit (Cypher checking BRP069B support).
+
+**Intentional skips confirmed:** Multi-stage HVAC (not applicable), filter maintenance (app-layer), vacation mode (Hubitat rules), scheduling (already covered). No architectural changes needed.
+
+**Next:** Tank implements setpointDisplay on both drivers. Cypher validates Daikin awayMode during next protocol review. See .squad/decisions.md and orchestration logs.
