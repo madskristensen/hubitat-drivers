@@ -683,3 +683,70 @@ Added in OPTIONS bounds-checks + log.warn + early bail in pplyDps() for enum DP
 
 ---
 ## Archived Prior (moved from history.md at 2026-05-18T17:11:04Z)
+
+---
+
+## Archived from 2026-05-18 — Daikin WiFi v0.1.0–v0.1.7 Release Arc (Ephemeral Notes)
+
+**8 versions shipped (v0.1.0 → v0.1.7) in a single working arc on 2026-05-18.** This section archives version-specific hotfix notes, in-flight diagnostic learnings, and pattern explanations now captured in skills.
+
+### v0.1.0-v0.1.1 Hotfixes (HubAction Constructor Failures)
+
+- **v0.1.0:** Clean-room implementation from Trinity's protocol memo. Applied sentinel-value guards ("-" checks), DNI hex encoding, basic lifecycle, polling structure.
+- **v0.1.1 hotfix (c28882f):** Groovy write-only property shadowing: def setSchedule() conflicts with platform schedule() method. Switched to idiomatic unEvery*() patterns. Also attempted HubAction(Map, Protocol, Map) which was not found on Mads's firmware.
+- **v0.1.2 hotfix:** Switched from failing HubAction Map forms to synchttpGet for HTTP-over-LAN (works reliably on firmware 2.2+).
+
+### v0.1.3 (Swing Mode Support)
+
+- Added swingMode attribute (f_dir mapping: 0=off, 1=vertical, 2=horizontal, 3=3d).
+- Pattern: sendControlWrite helper covers all set_control_info calls (6-param requirement: pow, mode, stemp, f_rate, f_dir, shum).
+
+### v0.1.4 (Special Mode + Model Info)
+
+- **get_special_mode endpoint:** Parses dv field for econo/powerful flags (dv=2→econo, dv=12→powerful).
+- **get_model_info caching:** Fire-and-forget at initialize; cached fields (name, firmware, sensors, swing support) for diagnostics.
+- **Event hygiene audit:** Confirmed all sendEvent calls include descriptionText; no issues found.
+- **Note:** Both endpoints marked UNVERIFIED on Mads's hardware at time of shipping.
+
+### v0.1.5 Hotfix (Groovy GString Typo)
+
+- **Typo:** ?: """ (3 quotes) opens multiline GString, never closed. Parse error at load time. Fixed to ?: "" (empty-string fallback). [See skill: groovy-gstring-pitfalls]
+- **Missing log interpolation:** Two debug logs missing backslash in interpolation fixed.
+
+### v0.1.6 (Setpoint Guards + Display String)
+
+- **Critical NPE fix:** setpoint setters (setHeatingSetpoint, setCoolingSetpoint) guard against null temp values from Rule Machine "clear" operations.
+- **Guard pattern:** null → NaN check → temperatureToC → range check (5–40 °C) → clamp (mode-specific) → proceed.
+- **setpointDisplay attribute:** Composed string ("Heat: 72°F" / "Cool: 68°F" / "Auto: 70°F / 75°F") emitted at end of parse + end of command paths for immediate dashboard refresh.
+- **Energy poll guard:** Skip refreshEnergy() when switch=off (saves ~96 API calls/day).
+- **Dead code removal:** Removed unused yearTotal BigDecimal sum computation.
+
+### v0.1.7 (Graceful Endpoint Degradation + Thermostat Fixes)
+
+- **get_special_mode 404 handling:** Set state.specialModeUnsupported flag on first 404; probe-then-disable pattern. [See skill: hubitat-endpoint-graceful-degradation]
+- **Energy field corrections:** Fixed s_dayw (week power) parsing; corrected curr_year_heat/cool field names (was using non-existent this_year).
+- **tempUp/tempDown mode-aware logic:** Heat→adjust heating only, Cool→adjust cooling only, Auto→adjust both by same delta, Off/Dry/Fan→log and return. [See skill: hubitat-mode-aware-setpoint-commands]
+- **Thermostat enum fix:** Changed invalid 	hermostatOperatingState = "drying" to spec-compliant "fan only" for dry mode. [See skill: hubitat-thermostat-capability-enums]
+
+### Project-Specific Daikin Protocol Knowledge (Kept in Active History)
+
+The following items are retained in the active history section for future Daikin v0.1.8+ work:
+- BRP069B endpoint reference (28 total endpoints; 7 implemented)
+- Sentinel-value pattern ("-" for unavailable sensors)
+- Mode-to-setpoint mapping and swingMode enum values
+- Energy polling cadence trade-offs (30-min intervals adequate for hourly changes)
+- Special mode flags (econo=2, powerful=12) and set_special_mode parameters
+- Compound adv string parsing (split on dash, take leading numeric token)
+
+### New Skills Created This Arc
+
+1. **hubitat-sentinel-value-guards** (medium confidence) — Pattern for guarding numeric parses against sentinel values
+2. **hubitat-mode-aware-setpoint-commands** (low confidence) — tempUp/tempDown mode-aware logic
+3. **hubitat-thermostat-capability-enums** (low confidence) — Valid Hubitat enum values for thermostat attributes
+
+### Skills Bumped This Arc
+
+1. **hubitat-endpoint-graceful-degradation** (low → medium) — Validated in v0.1.7 production
+2. **hubitat-asynchttpget-pattern** (medium) — Confirmed stable across all 8 versions
+3. **hubitat-hubaction-constructors** (medium) — Confirmed Map-based forms unreliable; documented async replacement
+

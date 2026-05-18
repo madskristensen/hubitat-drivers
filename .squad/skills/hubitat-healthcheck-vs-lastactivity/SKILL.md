@@ -1,7 +1,9 @@
 # Skill: Hubitat Health Monitoring — HealthCheck vs lastActivity
 
-**Domain:** Hubitat Groovy Driver Development
-**Applies to:** All drivers in this repo
+**Domain:** Hubitat Groovy Driver Development  
+**Applies to:** All drivers in this repo  
+**Confidence:** medium  
+**Validated on:** Touchstone v0.1.21 (HealthCheck+ping), Gemstone v0.4.11 (lastActivity only), SunStat v0.1.7 (lastActivity parent/child) — multiple independent implementations across LAN socket, cloud REST, and parent/child patterns
 
 ---
 
