@@ -1,30 +1,24 @@
-﻿# Tank — Driver Developer
+# Tank — Driver Developer
 
-**⚠️ SUMMARIZED 2026-05-18T01:41:11Z — Main history moved to `history-archive.md` (file was 20,381 bytes).**
+**⚠️ SUMMARIZED 2026-05-17T20:29:23Z — Detailed history moved to `history-archive-2026-05-17.md` (file was 28,580 bytes).**
 
 ---
 
-## Current Active Work (2026-05-18)
+## Current Active Work (2026-05-17)
 
-### Touchstone v0.1.19 — Child Lock Command (DP 108)
-- **Shipped:** 2026-05-18 (Commit 3a59f04)
-- **Status:** Pending Switch hardware validation (Test 38)
-- **Change:** Added `setChildLock(on|off)` command + `childLock` attribute
-- **Test:** Test 38 in TESTING.md (verify buttons disable/enable)
-
-### Touchstone v0.1.20 — Active-TCP IP Discovery
-- **Shipped:** 2026-05-18 (Commit ffbfd08)
-- **Status:** Pending Switch hardware validation (Test 39)
-- **Change:** Added `discover` command + `networkAddress` attribute; active TCP /24 scan state machine; DHCP-renewal recovery
-- **Test:** Test 39 in TESTING.md (simulate DHCP renewal; verify discovery recovers IP)
-- **Skill Created:** `.squad/skills/hubitat-active-tcp-discovery/SKILL.md`
+### Touchstone v0.1.20 — Active-TCP IP Discovery + Child Lock
+- **Shipped:** 2026-05-17 (Commits ffbfd08 + 3a59f04)
+- **Status:** Pending Switch hardware validation (Tests 38–39)
+- **Changes:** 
+  - v0.1.19: Added `setChildLock(on|off)` command + `childLock` attribute (DP 108)
+  - v0.1.20: Added `discover` command + `networkAddress` attribute; active TCP /24 scan state machine; DHCP-renewal recovery
+- **Skills:** hubitat-active-tcp-discovery (new), hubitat-healthcheck-vs-lastactivity (confidence bumped medium→high)
 
 ### HPM Multi-Driver Bundle v1.0.0
-- **Shipped:** 2026-05-18 (Commit a0e695d)
+- **Shipped:** 2026-05-17 (Commit a0e695d)
 - **Status:** Pending Switch validation (HPM install test)
-- **Change:** Root `packageManifest.json` (all 4 drivers, `required: false`); `release.yml` updates (bundle tag generation)
-- **Skill Created:** `.squad/skills/hpm-bundle-manifest/SKILL.md`
-- **UUID Mapping:** Reused from per-driver manifests (mandatory for HPM Match-Up dedup)
+- **Changes:** Root `packageManifest.json` (all 4 drivers, `required: false`); `release.yml` bundle tag generation
+- **Skill:** hpm-bundle-manifest (new)
 
 ### Gemstone v0.4.10 — Multi-Controller Zones / Named Controller Binding
 - **Shipped:** 2026-05-17 (Commit e35b666)
@@ -34,26 +28,25 @@
 - **Shipped:** 2026-05-17 (Commit 67f905b)
 - **Status:** Pending Switch hardware validation (Tests 34–37)
 
-## Active Milestones Summary
+---
 
-### Touchstone Fireplace Driver (Current)
+## Touchstone Fireplace Driver — Progression
 
 **Latest:** v0.1.20 (active TCP discovery + child lock)
 
-**Progression:**
-- v0.1.4: optional power-on defaults + safety hardening (heater never auto-starts) + Hubitat sandbox reflection fixes
-- v0.1.5: removed `paragraph()` from preferences (app-only Hubitat restriction)
-- v0.1.18: persistent socket architecture + heartbeat + push frame handling
-- v0.1.19: child lock (DP 108 boolean)
-- v0.1.20: active TCP /24 scan discovery for DHCP renewal recovery
+**Key releases:**
+- v0.1.4: Power-on defaults + safety hardening (heater never auto-starts) + Hubitat sandbox reflection fixes
+- v0.1.5: Removed `paragraph()` from preferences (app-only Hubitat restriction)
+- v0.1.18: Persistent socket architecture + heartbeat + push frame handling
+- v0.1.19: Child lock (DP 108 boolean)
+- v0.1.20: Active TCP /24 scan discovery for DHCP renewal recovery
 
 **Key learnings:**
 - Power-on defaults: use runInMillis() for async delay (1500ms) to allow firmware settle post-power-on
 - Heater safety: never auto-toggle hazardous hardware; keep behind explicit user commands
 - Hubitat sandbox: blocks reflection (.getClass(), .metaClass, etc.) at runtime, not just imports
-- Persistent socket architecture: heartbeat every 10s, reconnect backoff [5s, 30s, 60s, 300s], push frame handling for real-time state
+- Persistent socket: heartbeat every 10s, reconnect backoff [5s, 30s, 60s, 300s], push frame handling for real-time state
 - Discovery state machine: sequential rawSocket connects, gwId matching, coordinated guards to avoid interference with normal ops
-- Documentation for safety-critical features: be explicit, clear, and direct about intentional omissions
 
 ---
 

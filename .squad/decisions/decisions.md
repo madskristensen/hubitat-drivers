@@ -1,4 +1,45 @@
-# Decisions\n\nGenerated 2026-05-17T09:40:49Z\n\n---\n\n## cypher-bosch-home-connect-feasibility\n\n---
+﻿# Decisions
+
+Generated 2026-05-17T20:29:23Z
+
+---
+
+## tank-skill-audit-2026-05-17
+
+---
+author: tank
+date: 2026-05-17T20:29:23-07:00
+status: archived
+subject: Reskill pass — audit 10 skills, bump healthcheck confidence, capture idempotent-release-workflow
+---
+
+### Audit Results
+- **Skills audited:** 10 existing skills (all valid, no staleness)
+- **Confidence bumped:** hubitat-healthcheck-vs-lastactivity (medium → high) after independent confirmation across three drivers in session
+- **New skill:** idempotent-release-workflow (confidence: low, from commit ea2a74f) — handles graceful tag re-creation in release workflows
+- **Cross-references added:** tuya-local-groovy ↔ hubitat-sandbox-pitfalls (overlap clarification); idempotent-release-workflow → hpm-release-workflow & hpm-bundle-manifest (dependency links)
+- **No deprecations or merges**
+- **Next:** Bump idempotent-release-workflow to medium on second independent application
+
+---
+
+## cypher-bosch-home-connect-feasibility
+
+---
+author: cypher
+date: 2026-05-17T09:31:55-07:00
+status: ready-for-review
+subject: Bosch Home Connect fridge door-open driver — feasibility & API spec
+---
+# Decisions
+
+Generated 2026-05-17T20:29:23Z
+
+---
+
+## cypher-bosch-home-connect-feasibility
+
+---
 author: cypher
 date: 2026-05-17T09:31:55-07:00
 status: ready-for-review
@@ -644,7 +685,9 @@ The driver will use Device Flow with a user-registered `client_id` and `client_s
 ## trinity-bosch-home-connect-architecture
 
 ---
-decision_id: trinity-bosch-home-connect-architecture\n\n---
+decision_id: trinity-bosch-home-connect-architecture
+
+---
 decision_id: trinity-bosch-home-connect-architecture
 author: Trinity
 date: 2026-05-17T09:31:55-07:00
