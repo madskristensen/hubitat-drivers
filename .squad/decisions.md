@@ -2,6 +2,62 @@
 
 ---
 
+## 2026-05-18: Tank — Pending driver perf/quality todos
+
+**Status:** PENDING — Eight fresh perf/quality audit items proposed by Tank, including one outstanding repo-backed item (SC-4 from Trinity's redundant-write audit).
+
+### Proposed Items
+
+1. **id**: `sunstat-sc4-cache-floor-min-temp`
+   **title**: Cache floor warmth and skip redundant `setFloorMinTemp` PATCH
+   **description**: In `drivers/sunstat-thermostat/sunstat-thermostat-child.groovy`, extend `parseDeviceStateInternal()` to cache `Schedule.Floor.W` alongside the existing `state.floorAway`, then compare that cached value in `setFloorMinTemp()` before sending the read-modify-write PATCH. This closes the last unshipped repo-backed audit item and avoids no-op Watts API calls when rules re-assert the same floor minimum.
+   **priority**: medium
+   **source**: existing audit ID `SC-4`
+
+2. **id**: `touchstone-rxbuffer-partial-state`
+   **title**: Persist `state.rxBuffer` only when a partial Tuya frame remains
+   **description**: In `drivers/touchstone-fireplace/touchstone-fireplace.groovy`, `parse()` writes the full concatenated hex buffer into `state.rxBuffer` before `consumeReceiveBuffer()`, even when the chunk is fully consumed. Move the state write so only leftover partial-frame data is persisted; this reduces Hubitat state I/O on every inbound socket chunk without changing frame parsing behavior.
+   **priority**: high
+   **source**: new — Tank proposal
+
+3. **id**: `touchstone-drop-lastdps-state`
+   **title**: Remove dead `state.lastDps` writes from Touchstone frame processing
+   **description**: `processFrame()` in `drivers/touchstone-fireplace/touchstone-fireplace.groovy` still stores each normalized DPS map into `state.lastDps`, but nothing ever reads that cache. Dropping the write trims hot-path state churn and keeps the device State Variables panel cleaner with no functional change.
+   **priority**: medium
+   **source**: new — Tank proposal
+
+4. **id**: `touchstone-dedupe-parse-events`
+   **title**: Dedupe unchanged Touchstone telemetry events in `applyDps()`
+   **description**: In `drivers/touchstone-fireplace/touchstone-fireplace.groovy`, `applyDps()` already distinguishes changed vs unchanged values for logging, but `emitAttribute()` still sends events for both. Add change checks (or a parse-only `emitIfChanged` helper) for attributes such as `flameColor`, `flameBrightness`, `charcoalColor`, `flameSpeed`, `heatLevel`, `heatingSetpoint`, and `temperature` so periodic refreshes and push echoes stop filling event history with unchanged state.
+   **priority**: high
+   **source**: new — Tank proposal
+
+5. **id**: `touchstone-byte-copy-helpers`
+   **title**: Replace boxed byte-copy loops with primitive / arraycopy helpers
+   **description**: `concatBytes()`, `sliceBytes()`, `startsWithBytes()`, and `protocol33HeaderBytes()` in `drivers/touchstone-fireplace/touchstone-fireplace.groovy` still use `for (Integer i = ...)` loops in hot protocol helpers. Switch to primitive `int` counters and `System.arraycopy` where possible to reduce autoboxing and per-frame copy overhead on every send/receive cycle.
+   **priority**: medium
+   **source**: new — Tank proposal
+
+6. **id**: `gemstone-clonemap-copy-hygiene`
+   **title**: Replace Gemstone `cloneMap()` JSON round-trips with lighter copies
+   **description**: In `drivers/gemstone-lights/gemstone-lights.groovy`, `cloneMap()` serializes to JSON and parses back for every pattern/request copy, and the helper sits on many hot call sites (`rememberPattern`, request queueing, refresh handling, effect activation). Replace it with a lighter copy strategy tailored to the actual pattern/request shapes so refreshes and command bursts spend less CPU and GC time on avoidable JSON work.
+   **priority**: high
+   **source**: new — Tank proposal
+
+7. **id**: `gemstone-dedupe-refresh-telemetry-events`
+   **title**: Gate unchanged Gemstone refresh telemetry behind change checks
+   **description**: `handleRefreshResponse()` in `drivers/gemstone-lights/gemstone-lights.groovy` still emits `switch`, `level`, `hue`, and `saturation` on every successful refresh even when the payload matches current device state. Reuse the same event-hygiene pattern SunStat adopted today so poll-driven refreshes stop creating duplicate events while user-command paths keep their digital events.
+   **priority**: high
+   **source**: new — Tank proposal
+
+8. **id**: `cloud-driver-metadata-hygiene`
+   **title**: Add missing `Polling` / `Actuator` markers on cloud drivers
+   **description**: `drivers/gemstone-lights/gemstone-lights.groovy` and `drivers/sunstat-thermostat/sunstat-thermostat-parent.groovy` both implement `poll()` but still omit `capability "Polling"`, and the SunStat parent accepts commands without `capability "Actuator"`. Add the missing metadata markers so Hubitat apps discover these drivers correctly and command-capable parents advertise the expected contract.
+   **priority**: low
+   **source**: new — Tank proposal
+
+---
+
 ## 2026-05-18: Redundant-write audit shipping — five driver releases
 
 **Status:** SHIPPED — 5 driver releases close 16 of 17 audit findings (SC-4 deferred).
