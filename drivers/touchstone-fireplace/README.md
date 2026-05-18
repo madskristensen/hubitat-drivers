@@ -4,9 +4,9 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: v0.1.14 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
+> **Status: v0.1.15 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
 >
-> **Latest: v0.1.14** — `setFlameColor` and `setLogColor` reverted to NUMBER input (1–6 and 1–12). The invented color name placeholders from v0.1.13 have been removed; numeric input is honest until someone with hardware verifies the actual palette mapping. `setFlameBrightness` keeps its named ENUM (Dimmest/Dim/Medium/Brighter/Brightest). Removed legacy `setDpRaw` alias — use `setRawDP` instead.
+> **Latest: v0.1.15** — `setFlameColor` restored to named ENUM with authoritative labels from the Tuya app (Orange/Blue/White/Orange+Blue/Orange+White/Blue+White). Added unconditional `log.info` diagnostic lines so you can verify the wire DP value and device echo in Hubitat logs. `setLogColor` remains NUMBER input (1–12) — log palette labels not yet verified.
 >
 > **Killer feature:** Works out-of-the-box for Touchstone Sideline Elite; adapts to other Touchstone models (Steel, Forte, Onyx, etc.) and generic Tuya WiFi fireplaces via configurable Device Profiles and in-driver discovery — no Python, no manual tinytuya wizard needed.
 
@@ -65,10 +65,23 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 | Command | Parameters | Description |
 |---|---|---|
-| **`setFlameColor(color)`** | number `1`–`6` | Set flame effect palette (DP 101). Palette indices are user-discoverable on hardware. |
+| **`setFlameColor(color)`** | `"Orange"` / `"Blue"` / `"White"` / `"Orange+Blue"` / `"Orange+White"` / `"Blue+White"` | Set flame effect palette (DP 101). Labels verified from Tuya app. |
 | **`setFlameBrightness(level)`** | `"Dimmest"` / `"Dim"` / `"Medium"` / `"Brighter"` / `"Brightest"` | Set flame lighting level (DP 102) |
 | **`setFlameSpeed(speed)`** | `"Slow"` / `"Medium"` / `"Fast"` | Set flame animation speed (Sideline Elite DP 103) |
-| **`setLogColor(color)`** | number `1`–`12` | Set log/ember color palette (DP 104). Palette indices are user-discoverable on hardware. |
+| **`setLogColor(color)`** | number `1`–`12` | Set log/ember color palette (DP 104). Palette indices are user-discoverable on hardware. Log color labels (12 values) are not yet verified — stays NUMBER input. |
+
+#### Flame color palette (DP 101 — verified Tuya app labels)
+
+| DP value | Label         |
+|----------|---------------|
+| `"1"`    | Orange        |
+| `"2"`    | Blue          |
+| `"3"`    | White         |
+| `"4"`    | Orange+Blue   |
+| `"5"`    | Orange+White  |
+| `"6"`    | Blue+White    |
+
+> **Log color (DP 104, 12 values):** Palette labels are not yet known from hardware verification — `setLogColor` uses NUMBER input (1–12). Once the log color mapping is confirmed, it will be promoted to a named ENUM in a future version.
 
 > **DP 105 (log brightness):** The Sideline Elite firmware appears to treat DP 105 as read-only — writes are silently dropped. The `setLogBrightness` command was removed in v0.1.11; the actual write target for log/ember brightness control on this model is unknown. Pending further investigation.
 
@@ -381,6 +394,7 @@ Some remote buttons (log brightness, flame tempo, remote timer) don't map to Tuy
 
 ## Changelog
 
+- **v0.1.15 (2026-05-17):** Restored named ENUM for `setFlameColor` with authoritative labels from the Tuya mobile app (Orange/Blue/White/Orange+Blue/Orange+White/Blue+White). DP 101 value `"1"` = Orange (the app's default). v0.1.13's invented labels (Red/Orange/…) were wrong — picking "Orange" sent DP=2 which is actually Blue, explaining the "doesn't do anything" report. Added unconditional `log.info` diagnostic lines in both `setFlameColor` (write path) and `applyDps` DP 101 (echo path) so you can verify wire values and device echo in Hubitat logs. `setLogColor` (DP 104, 12 values) stays NUMBER — log palette labels not yet verified.
 - **v0.1.14 (2026-05-17):** Reverted `setFlameColor` and `setLogColor` from v0.1.13's named ENUM back to NUMBER input (ranges 1–6 and 1–12). The invented color label placeholders (Red/Orange/etc., Crimson/Coral/etc.) were unverified guesses; numeric input is honest until hardware mapping is confirmed. `setFlameBrightness` keeps its named ENUM (Dimmest/Dim/Medium/Brighter/Brightest — universally meaningful). Removed legacy `setDpRaw` command alias; use `setRawDP` instead.
 - **v0.1.11 (2026-05-17):**Removed `setLogBrightness` command, `logBrightness` attribute, and `defaultLogBrightness` preference. Real-hardware testing on the Sideline Elite confirmed DP 105 is read-only or unimplemented on this firmware — writes are silently dropped. Added defensive input-validation guards to `setFlameColor`, `setFlameBrightness`, and `setLogColor` (unknown values now log-warn and bail before writing to device).
 - **v0.1.6 (2026-05-17):** Added `setFlameSpeed(speed)` command + `flameSpeed` attribute (DP 103); added `setLogBrightness(level)` command + `logBrightness` attribute (DP 105); removed duplicate `power` attribute — use `switch` for all on/off automations.
