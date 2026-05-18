@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - 'drivers/**/packageManifest.json'
+      - 'packageManifest.json'
 
 permissions:
   contents: write
@@ -30,7 +31,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          mapfile -t manifests < <(find drivers -type f -name 'packageManifest.json' | sort)
+          mapfile -t manifests < <(
+            { find . -maxdepth 1 -name 'packageManifest.json';
+              find drivers -type f -name 'packageManifest.json'; } | sort
+          )
 
           if [ "${#manifests[@]}" -eq 0 ]; then
             echo '[]' > release-candidates.json
@@ -56,6 +60,32 @@ jobs:
 
             if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
               echo "Tag ${tag} already exists; skipping"
+              continue
+            fi
+
+            # Bundle manifest at repo root: no Groovy driver file, no changelog extraction.
+            if [ "$driver_dir" = "." ]; then
+              notes="Bundle version ${version}: see individual driver changelogs."
+              tag="bundle-v${version}"
+              jq \
+                --arg manifest "$manifest" \
+                --arg driver "" \
+                --arg slug "bundle" \
+                --arg version "$version" \
+                --arg tag "$tag" \
+                --arg name "$package_name" \
+                --arg notes "$notes" \
+                '. + [{
+                  manifest: $manifest,
+                  driver: $driver,
+                  slug: $slug,
+                  version: $version,
+                  tag: $tag,
+                  name: $name,
+                  notes: $notes
+                }]' release-candidates.json > release-candidates.next.json
+              mv release-candidates.next.json release-candidates.json
+              echo "Queued bundle release ${tag}"
               continue
             fi
 

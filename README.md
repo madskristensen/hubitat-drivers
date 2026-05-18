@@ -4,7 +4,18 @@ Community Hubitat Elevation drivers by Mads Kristensen.
 
 > **Current status:** Three beta drivers available — **Gemstone Lights** v0.4.8 (cloud REST, working in production), **SunStat Connect Plus** v0.1.4 (cloud REST, energy monitoring and schedule control), and **Touchstone / Tuya Fireplace** v0.1.5 (LAN integration, now ready for first public release).
 
-## Install via HPM (recommended)
+## Install all drivers via one URL (HPM bundle)
+
+Install all of Mads's drivers in a single HPM operation:
+
+1. In Hubitat: **Apps → Hubitat Package Manager → Install → "From a URL"**
+2. Paste: `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/packageManifest.json`
+3. HPM will show a checklist of all available drivers — select the ones you want
+4. Follow the prompts
+
+> **Note:** Install via the bundle URL **or** via a per-driver URL — not both. Installing a driver through both paths causes duplicate update prompts when that driver is updated. If you already installed a driver via its per-driver URL, skip it in the bundle checklist.
+
+## Install via HPM (per-driver)
 
 1. In Hubitat: **Apps → Hubitat Package Manager → Install → "From a URL"**
 2. Paste one of the following packageManifest URLs:
@@ -48,6 +59,8 @@ Status: **Submitted** — PR filed as HubitatCommunity/hubitat-packagerepositori
 ## Contributing
 
 Found a bug or have an idea? Open an issue or send a pull request.
+
+When bumping any per-driver version, also bump the root `packageManifest.json` version (patch/minor as appropriate) so HPM bundle users receive update notifications.
 
 ## Changelog
 
