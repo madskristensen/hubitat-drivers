@@ -1,7 +1,7 @@
 ﻿/**
  * Daikin WiFi Thermostat
  * Author:  Mads Kristensen
- * Version: 0.1.5
+ * Version: 0.1.6
  * License: MIT
  *
  * Local LAN control for Daikin WiFi adapters (BRP069B series, BRP15B61, and similar
@@ -14,6 +14,7 @@
  *   original. Credit and thanks to @eriktack for the foundational research.
  *
  * Changelog:
+ *   0.1.6 — 2026-05-18 — feat: setpointDisplay attribute (peer-driver UX); fix: null/range guards on setpoint setters; cleanup: skip energy poll when off, remove dead yearTotal computation, fix log typo
  *   0.1.5 — 2026-05-18 — hotfix: close unclosed triple-quote string literal in parseSpecialMode (driver wouldn't load); fix empty log interpolation
  *   0.1.4 — 2026-05-18 — feat: econo/powerful mode (setSpecialMode + specialMode attr), get_model_info runtime capability cache, full event hygiene audit
  *   0.1.3 — 2026-05-18 — feat: add setSwingMode command + swingMode attribute (off/vertical/horizontal/3d) — Daikin f_dir 0-3 mapping
@@ -31,7 +32,7 @@ import groovy.json.JsonOutput
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String  DRIVER_VERSION            = "0.1.5"
+@Field static final String  DRIVER_VERSION            = "0.1.6"
 @Field static final Integer DAIKIN_PORT               = 80
 @Field static final Integer LAST_ACTIVITY_THROTTLE_MS = 60000
 @Field static final Integer ENERGY_POLL_MINUTES       = 30
@@ -111,8 +112,9 @@ metadata {
         attribute "fanRate",      "enum",   FAN_RATE_OPTIONS
         attribute "swingMode",    "enum",   ["off", "vertical", "horizontal", "3d"]
         attribute "specialMode",  "enum",   ["off", "econo", "powerful"]
-        attribute "healthStatus", "enum",   ["online", "offline", "unknown"]
-        attribute "lastActivity", "string"
+        attribute "healthStatus",    "enum",   ["online", "offline", "unknown"]
+        attribute "lastActivity",    "string"
+        attribute "setpointDisplay", "string"
     }
 
     preferences {
@@ -259,6 +261,7 @@ def off() {
     emitIfChanged("thermostatMode",           "off",  null, "${device.displayName} thermostat mode → off")
     emitIfChanged("thermostatOperatingState", "idle", null, "${device.displayName} operating state → idle")
     sendControlWrite([pow: "0"])
+    emitIfChanged("setpointDisplay", composeSetpointDisplay(), null, "${device.displayName} setpoint display updated")
 }
 
 // ---------------------------------------------------------------------------
@@ -289,6 +292,7 @@ def setThermostatMode(String mode) {
     emitIfChanged("switch",                   "on",    null, "${device.displayName} turned on")
     emitIfChanged("thermostatOperatingState", opState, null, "${device.displayName} operating state → ${opState}")
     sendControlWrite([pow: "1", mode: daikinCode])
+    emitIfChanged("setpointDisplay", composeSetpointDisplay(), null, "${device.displayName} setpoint display updated")
 }
 
 def setThermostatFanMode(String fanMode) {
@@ -337,23 +341,55 @@ def setSpecialMode(String mode) {
 }
 
 def setHeatingSetpoint(temp) {
+    if (temp == null) {
+        log.warn "[Daikin] setHeatingSetpoint called with null — ignoring"
+        return
+    }
+    Double tDouble = temp.doubleValue()
+    if (tDouble.isNaN()) {
+        log.warn "[Daikin] setHeatingSetpoint(${temp}) is NaN — ignoring"
+        return
+    }
+    // Convert to °C before range check — BRP069B documented safe envelope is 5–40 °C
     BigDecimal tempBd = new BigDecimal(temp.toString())
+    BigDecimal tC     = temperatureToC(tempBd)
+    if (tC < 5.0G || tC > 40.0G) {
+        log.warn "[Daikin] setHeatingSetpoint(${temp}) out of BRP069B range (5–40 °C) — ignoring"
+        return
+    }
     BigDecimal clamped = clampSetpoint(tempBd)
     String unitStr = "°${location.temperatureScale}"
     log.info "[Daikin] ${device.displayName} heating setpoint → ${clamped}${unitStr}"
     emitIfChanged("heatingSetpoint", clamped, unitStr, "${device.displayName} heating setpoint → ${clamped}${unitStr}")
     emitIfChanged("thermostatSetpoint", clamped, unitStr, "${device.displayName} setpoint → ${clamped}${unitStr}")
     sendControlWrite([stemp: "${temperatureToC(clamped)}"])
+    emitIfChanged("setpointDisplay", composeSetpointDisplay(), null, "${device.displayName} setpoint display updated")
 }
 
 def setCoolingSetpoint(temp) {
+    if (temp == null) {
+        log.warn "[Daikin] setCoolingSetpoint called with null — ignoring"
+        return
+    }
+    Double tDouble = temp.doubleValue()
+    if (tDouble.isNaN()) {
+        log.warn "[Daikin] setCoolingSetpoint(${temp}) is NaN — ignoring"
+        return
+    }
+    // Convert to °C before range check — BRP069B documented safe envelope is 5–40 °C
     BigDecimal tempBd = new BigDecimal(temp.toString())
+    BigDecimal tC     = temperatureToC(tempBd)
+    if (tC < 5.0G || tC > 40.0G) {
+        log.warn "[Daikin] setCoolingSetpoint(${temp}) out of BRP069B range (5–40 °C) — ignoring"
+        return
+    }
     BigDecimal clamped = clampSetpoint(tempBd)
     String unitStr = "°${location.temperatureScale}"
     log.info "[Daikin] ${device.displayName} cooling setpoint → ${clamped}${unitStr}"
     emitIfChanged("coolingSetpoint",    clamped, unitStr, "${device.displayName} cooling setpoint → ${clamped}${unitStr}")
     emitIfChanged("thermostatSetpoint", clamped, unitStr, "${device.displayName} setpoint → ${clamped}${unitStr}")
     sendControlWrite([stemp: "${temperatureToC(clamped)}"])
+    emitIfChanged("setpointDisplay", composeSetpointDisplay(), null, "${device.displayName} setpoint display updated")
 }
 
 def setSchedule(schedule) {
@@ -384,6 +420,10 @@ def poll() { refresh() }
 
 def refreshEnergy() {
     if (!settings.ip) { return }
+    if (device.currentValue("switch") == "off") {
+        traceLog "Skipping energy poll — device is off"
+        return
+    }
     debugLog "refreshEnergy() — polling week + year power"
     sendGet("/aircon/get_week_power_ex", "handleWeekPower")
     runIn(3, "doYearPowerRefresh")
@@ -489,7 +529,7 @@ def parseModelInfo(hubitat.scheduling.AsyncResponse response, Map data) {
 
     Map kv = parseKV(body)
     if (kv.ret != "OK") {
-        log.warn "[Daikin] get_model_info: ret= — capability cache skipped"
+        log.warn "[Daikin] get_model_info: ret=${kv.ret} — capability cache skipped"
         return
     }
 
@@ -577,13 +617,14 @@ def handleControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
     // stemp can be "-" in fan/dry modes; guard before parsing
     if (stemp?.isNumber()) {
         BigDecimal setpointC       = stemp.toBigDecimal()
-        BigDecimal setpointDisplay = temperatureFromC(setpointC)
+        BigDecimal setpointInScale = temperatureFromC(setpointC)
         String unitStr             = "°${location.temperatureScale}"
-        emitIfChanged("heatingSetpoint",   setpointDisplay, unitStr, "${device.displayName} heating setpoint → ${setpointDisplay}${unitStr}")
-        emitIfChanged("coolingSetpoint",   setpointDisplay, unitStr, "${device.displayName} cooling setpoint → ${setpointDisplay}${unitStr}")
-        emitIfChanged("thermostatSetpoint", setpointDisplay, unitStr, "${device.displayName} setpoint → ${setpointDisplay}${unitStr}")
+        emitIfChanged("heatingSetpoint",    setpointInScale, unitStr, "${device.displayName} heating setpoint → ${setpointInScale}${unitStr}")
+        emitIfChanged("coolingSetpoint",    setpointInScale, unitStr, "${device.displayName} cooling setpoint → ${setpointInScale}${unitStr}")
+        emitIfChanged("thermostatSetpoint", setpointInScale, unitStr, "${device.displayName} setpoint → ${setpointInScale}${unitStr}")
     }
 
+    emitIfChanged("setpointDisplay", composeSetpointDisplay(), null, "${device.displayName} setpoint display updated")
     emitLastActivity()
 }
 
@@ -659,14 +700,6 @@ def handleYearPower(hubitat.scheduling.AsyncResponse response, Map data) {
 
     Map kv = parseKV(body)
     if (kv.ret != "OK") { log.warn "[Daikin] get_year_power_ex: ret=${kv.ret}"; return }
-
-    // this_year is a slash-separated list of monthly kWh totals.
-    String thisYear = kv.this_year
-    if (thisYear) {
-        List<String> months = thisYear.split("/")
-        BigDecimal yearTotal = (months.findAll { it?.isNumber() }.collect { it.toBigDecimal() }.sum() ?: 0) as BigDecimal
-        debugLog "Energy this year: ${yearTotal} kWh across ${months.size()} months"
-    }
 }
 
 def handleSetControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
@@ -687,7 +720,7 @@ def handleSetSpecialMode(hubitat.scheduling.AsyncResponse response, Map data) {
     if (kv.ret == "OK") {
         debugLog "set_special_mode accepted"
     } else {
-        log.warn "[Daikin] set_special_mode: ret="; return
+        log.warn "[Daikin] set_special_mode: ret=${kv.ret}"; return
     }
     runIn(2, "doSpecialModeRefresh")
 }
@@ -770,6 +803,24 @@ private void emitLastActivity() {
         emitIfChanged("healthStatus", "online", null, "${device.displayName} responded to ping")
     } else if (device.currentValue("healthStatus") != "online") {
         emitIfChanged("healthStatus", "online", null, "${device.displayName} is online")
+    }
+}
+
+private String composeSetpointDisplay() {
+    String mode  = device.currentValue("thermostatMode") ?: "off"
+    String scale = location?.temperatureScale ?: "F"
+    BigDecimal h = device.currentValue("heatingSetpoint") as BigDecimal
+    BigDecimal c = device.currentValue("coolingSetpoint") as BigDecimal
+    String hStr  = h != null ? "${h}" : "--"
+    String cStr  = c != null ? "${c}" : "--"
+    switch (mode) {
+        case "off":  return "Off"
+        case "heat": return "Heat: ${hStr}°${scale}"
+        case "cool": return "Cool: ${cStr}°${scale}"
+        case "auto": return "Auto: ${hStr}°${scale} / ${cStr}°${scale}"
+        case "dry":  return "Dry"
+        case "fan":  return "Fan"
+        default:     return "${mode.capitalize()}: ${hStr}°${scale}"
     }
 }
 
