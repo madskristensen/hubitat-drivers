@@ -6,18 +6,44 @@
 
 ## Current Active Work (2026-05-18)
 
+### HPM Multi-Driver Bundle Feasibility Research (Session cypher-4)
+- **Shipped:** 2026-05-18
+- **Verdict:** ✅ Feasible — HPM natively supports multiple drivers in one manifest
+- **Deliverable:** `.squad/decisions/inbox/cypher-hpm-bundle-feasibility.md` (merged into decisions.md)
+- **Duration:** 558s
+- **Key Findings:**
+  - In-repo precedent: SunStat already ships 2-driver manifest (parent + child)
+  - Bundle manifest goes at repo root; per-driver manifests remain unchanged (additive)
+  - UUID reuse mandatory for HPM Match-Up deduplication
+  - Version coupling: bundle version independent of per-driver versions
+  - Release workflow needs update: add root manifest path trigger, handle `driver_dir == "."` case
+  - Unknown edge case flagged: does HPM show one update or two when user installs via both bundle and per-driver URLs? (Switch to test)
+
+### Tuya Autodiscovery on Hubitat Feasibility Research (Session cypher-4)
+- **Shipped:** 2026-05-18
+- **Verdict:** ⚠️ Feasible-with-caveats — passive UDP blocked, but active TCP Plan B viable
+- **Deliverable:** `.squad/decisions/inbox/cypher-tuya-autodiscovery-feasibility.md` (merged into decisions.md)
+- **Duration:** 558s (combined with HPM research)
+- **Key Findings:**
+  - ❌ Passive UDP broadcast listening: NOT supported by Hubitat (staff confirmed 2018, unchanged)
+  - ✅ Active TCP probe: feasible via sequential rawSocket.connect() on /24 subnet port 6668
+  - Tuya v3.3 discovery via active TCP: DP_QUERY frame + gwId match (fail-closed)
+  - Scan time: 2s/IP worst case → ~8 min full sweep; smart ±20 range typically <1 min
+  - Fallback (primary recommendation): DHCP reservation in router (zero driver code)
+  - Risks for Switch: gwId in response must be confirmed, hub rate-limiting on rapid connects
+  - Sources: Hubitat staff (2018 UDP confirmation), tinytuya, HA tuya-local, Tuya v3.3 protocol docs
+
 ### Gemstone Zones / Segments — API Feasibility Research (Session cypher-3)
 - **Shipped:** 2026-05-17 
 - **Verdict:** ✅ Feasible via multi-instance + controllerName preference (Option A-lite)
 - **Reference impls:** sslivins/pygemstone + sslivins/hass-gemstone
-- **Duration:** 263s
-- **Deliverable:** `.squad/decisions/inbox/cypher-gemstone-zones-feasibility.md` (merged into decisions.md)
+- **Deliverable:** Merged into decisions.md (used for Tank-15 Gemstone v0.4.10 design)
 
-### Key Findings
-- Gemstone zones = multiple physical controllers, each with own deviceId
-- Cloud API supports independent per-zone control via `deviceOrGroupId` query parameter
-- No new endpoints needed
-- Device groups may unlock simultaneous multi-zone control (schema unconfirmed)
+## Key Findings From Tank-15 Support
+
+Cypher-4 research directly enabled two Tank-15 ships:
+1. **HPM Bundle v1.0.0:** Research validated manifest schema, UUID reuse requirement, release workflow changes
+2. **Touchstone v0.1.20 Discovery:** Research confirmed active TCP approach as only viable Hubitat path for Tuya autodiscovery
 
 ---
 
@@ -221,7 +247,50 @@ Participated in 4-way driver improvement scan with Trinity, Tank, Switch. Findin
 
 **Verdict:** No boost endpoint exists in the Watts Home API.
 
+---
+
+## 2026-05-17 (session cypher-9) — HPM Bundle + Tuya Autodiscovery Feasibility
+
+**Full reports:**
+- `.squad/decisions/inbox/cypher-hpm-bundle-feasibility.md` — ✅ Feasible
+- `.squad/decisions/inbox/cypher-tuya-autodiscovery-feasibility.md` — ⚠️ Feasible-with-caveats (Plan B only)
+
+### HPM Bundle
+- HPM `drivers` array accepts N entries natively; SunStat already uses 2 (in-repo precedent)
+- `required: false` makes driver optional — user prompted per-entry during install
+- All 3 driver IDs can be reused in bundle manifest (HPM matches on id+name+namespace)
+- Bundle manifest at repo root; release.yml needs path trigger update + bundle-case handler (no .groovy → skip changelog extraction)
+- Version coupling: top-level package `version` (independent of per-driver versions); bump bundle whenever any driver bumps
+- Reference packages confirmed: gilderman/utec-lock (apps+drivers+libraries), spinrag/hubitat (full metadata)
+
+### Hubitat UDP Capability (definitive)
+- **Hubitat CANNOT passively receive UDP broadcasts.** Confirmed by Hubitat staff (community.hubitat.com/t/udp-broadcast-support/3957/11, December 2018), unchallenged since.
+- `LAN_TYPE_UDPCLIENT` (sendHubCommand) = send UDP + receive reply to that specific send. Request-reply only.
+- `interfaces.rawSocket` = TCP only. No UDP bind/listen possible.
+- Tuya devices broadcast on 6666/6667 spontaneously; passive listening required; Hubitat blocks this path entirely.
+
+### Plan B for Tuya Autodiscovery
+- Active TCP probe on port 6668 via `interfaces.rawSocket` (driver already knows this API)
+- Filter match by gwId in device response
+- Sequential /24 scan from last-known IP; ~2s per IP worst case (full /24 ≤ 8 min)
+- Ship as explicit "Discover" command button, NOT background autodiscovery
+- DHCP reservation in router = primary/zero-code recommendation for users
+
+---
+
 ## Learnings
+
+### 2026-05-17T19:28:07-07:00 — Hubitat Platform: UDP Passive Listen Not Supported
+
+- Hubitat staff confirmation (2018): `LAN_TYPE_UDPCLIENT` only for request-reply UDP. No passive UDP listener API exists. `interfaces.rawSocket` is TCP-only.
+- For any feature requiring "listen for inbound UDP from unknown sources" (Tuya, LIFX, WiZ discovery): NOT feasible. Must use active TCP probing or user-supplied IP.
+- Research method: search GitHub for `interfaces.rawSocket` patterns in Groovy drivers; cross-check community.hubitat.com UDP broadcast thread.
+
+### 2026-05-17T19:28:07-07:00 — HPM Multi-Driver Bundle: Direct Precedent in This Repo
+
+- SunStat `packageManifest.json` already ships a 2-driver manifest (parent + child). Schema supports N entries trivially.
+- Canonical schema source: HubitatCommunity/hubitatpackagemanager README.
+- Release.yml path `find drivers -type f` excludes root-level manifests; needs a small update for bundle support.
 
 ### 2026-05-17T15:50:06-07:00 — Watts Home API: No Boost Surface
 

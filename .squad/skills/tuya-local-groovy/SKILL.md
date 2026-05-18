@@ -238,7 +238,155 @@ Recommended discovery commands:
 
 This keeps the driver honest about what is tested while still giving adjacent Tuya models a workable self-service mapping path inside Hubitat.
 
-## Repo Release Workflow Changelog Format
+## Persistent Socket Pattern (v0.1.18+)
+
+For drivers where real-time push updates matter (physical remotes, multi-controller setups), use a persistent socket rather than the open→send→close pattern.
+
+### Lifecycle
+
+```groovy
+def initialize() {
+    unschedule()
+    closeSocket(false)          // stamps intentionalCloseAt; suppresses socketStatus callback
+    // ... reset state ...
+    runIn(1, "openSocket")      // 1s gap lets OS release the port
+}
+
+def openSocket() {
+    try {
+        interfaces.rawSocket.connect(settings.deviceIP, 6668, byteInterface: true, readDelay: 150)
+        state.socketOpen = true
+        state.reconnectAttempts = 0
+        updateSocketState("open")
+        unschedule("sendHeartbeat")
+        runIn(HEARTBEAT_INTERVAL_SECONDS, "sendHeartbeat")
+        runIn(2, "refresh")
+    } catch (Exception e) {
+        state.socketOpen = false
+        updateSocketState("error")
+        scheduleReconnect()
+    }
+}
+```
+
+### Heartbeat (10 s self-rescheduling)
+
+```groovy
+@Field static final Integer HEARTBEAT_INTERVAL_SECONDS = 10
+
+def sendHeartbeat() {
+    if (!preferencesReady() || state.socketOpen != true) return
+    try {
+        byte[] frame = buildTuyaFrame(TUYA_CMD_HEARTBEAT, "")
+        interfaces.rawSocket.sendMessage(hubitat.helper.HexUtils.byteArrayToHexString(frame))
+        debugLog "Heartbeat sent"
+    } catch (Exception e) {
+        log.warn "[Driver] Heartbeat failed: ${e.message}"
+        state.socketOpen = false
+        unschedule("sendHeartbeat")
+        scheduleReconnect()
+        return
+    }
+    runIn(HEARTBEAT_INTERVAL_SECONDS, "sendHeartbeat")
+}
+```
+
+> **Critical:** Tuya cmd 9 heartbeat must have truly empty payload (0 bytes, no AES encryption). Add this guard to `encryptTuyaPayload()`:
+> ```groovy
+> if (cmd == TUYA_CMD_HEARTBEAT) { return new byte[0] }
+> ```
+> Without it, `AES/ECB/PKCS5Padding` produces 16 bytes of padding for empty input — an invalid Tuya heartbeat.
+
+### Reconnect with backoff
+
+```groovy
+@Field static final List<Integer> RECONNECT_DELAYS_SECONDS = [5, 30, 60, 300]
+
+private void scheduleReconnect() {
+    Integer attempt = safeInt(state.reconnectAttempts, 0)
+    Integer delay = RECONNECT_DELAYS_SECONDS[Math.min(attempt, RECONNECT_DELAYS_SECONDS.size() - 1)]
+    state.reconnectAttempts = (attempt + 1)
+    updateSocketState("reconnecting")
+    unschedule("reconnectSocket")
+    runIn(delay, "reconnectSocket")
+}
+
+def reconnectSocket() {
+    if (state.socketOpen == true) return
+    openSocket()
+}
+```
+
+### Suppress intentional-close callbacks
+
+```groovy
+private void closeSocket(Boolean markOffline) {
+    state.intentionalCloseAt = now()    // 3-second grace window
+    state.socketOpen = false
+    unschedule("sendHeartbeat")
+    try { interfaces.rawSocket.close() } catch (ignored) {}
+    updateSocketState("closed")
+}
+
+def socketStatus(String message) {
+    Long intentionalAt = safeLong(state.intentionalCloseAt, 0L)
+    if ((now() - intentionalAt) < 3000L) {
+        debugLog "socketStatus (intentional close, suppressed): ${message}"
+        return
+    }
+    // handle real disconnect → scheduleReconnect()
+}
+```
+
+> A boolean `intentionalClose` flag has a race condition: `initialize()` resets it before `socketStatus()` fires. The timestamp approach is safe — stale values from previous sessions have a large `(now() - intentionalAt)` diff and never suppress.
+
+### pumpQueue without on-demand connect
+
+In the persistent model, `pumpQueue()` should check a flag rather than try to connect:
+
+```groovy
+if (state.socketOpen != true) {
+    debugLog "pumpQueue: socket not open; waiting for reconnect"
+    return
+}
+```
+
+After `openSocket()` succeeds, call `runIn(2, "refresh")` which triggers `enqueueRequest()` → `pumpQueue()` — any queued writes drain first (FIFO queue), then the refresh.
+
+### responseTimeout — do NOT close socket
+
+In the persistent model, do NOT close the socket on `responseTimeout`. Just requeue and retry:
+
+```groovy
+def responseTimeout() {
+    if (state.awaitingResponse != true) return
+    requeueInFlight()
+    scheduleRetry("No response within timeout. Retrying.")
+    // Do NOT call closeSocket() — keep the persistent connection alive
+}
+```
+
+### socketState attribute
+
+Add `attribute "socketState", "enum", ["open", "closed", "reconnecting", "error"]` to expose connection health on dashboards. Emit at info level on state transitions only:
+
+```groovy
+private void updateSocketState(String value) {
+    String current = safeStr(device.currentValue("socketState"))
+    if (current != value) {
+        log.info "[Driver] socketState → ${value}"
+        sendEvent(name: "socketState", value: value)
+    }
+}
+```
+
+### Push frame handling — free
+
+Existing `parse()` → `processFrame()` → `applyDps()` pipeline already handles spontaneous STATUS frames (cmd 8). No separate push handler needed — the only change is keeping the socket open so those frames can arrive.
+
+---
+
+
 
 This repo's `.github/workflows/release.yml` parses each driver's top-of-file `Changelog:` block with the regex `^(\d+\.\d+\.\d+)\s+[—-]\s+(\d{4}-\d{2}-\d{2})\s+[—-]\s+(.*)$` (see line ~106).
 
@@ -258,6 +406,8 @@ When adding or editing driver changelog entries:
 - [ ] CRC32 validation
 - [ ] AES-ECB encrypt/decrypt helpers
 - [ ] request queue + one-in-flight guard
-- [ ] 5s / 15s / 30s retry backoff
-- [ ] idle socket close to reduce Tuya single-client contention
+- [ ] 5s / 15s / 30s retry backoff (command-level)
+- [ ] **Persistent socket:** `openSocket()` + 10 s self-rescheduling heartbeat + reconnect backoff [5s, 30s, 60s, 300s]
+- [ ] `socketState` attribute surfaced on dashboard
+- [ ] `intentionalCloseAt` timestamp guard in `closeSocket()` / `socketStatus()` to suppress spurious reconnects
 - [ ] delayed refresh after writes when the device has stale post-transition DPs

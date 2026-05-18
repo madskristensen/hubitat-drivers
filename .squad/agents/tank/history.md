@@ -1,4 +1,4 @@
-# Tank — Driver Developer
+﻿# Tank — Driver Developer
 
 **⚠️ SUMMARIZED 2026-05-18T01:41:11Z — Main history moved to `history-archive.md` (file was 20,381 bytes).**
 
@@ -6,29 +6,53 @@
 
 ## Current Active Work (2026-05-18)
 
-### Touchstone v0.1.18 — Persistent Socket + Tuya Push Subscriptions
-- **Shipped:** 2026-05-17 (Commit 67f905b)
-- **Status:** Pending Switch hardware validation
+### Touchstone v0.1.19 — Child Lock Command (DP 108)
+- **Shipped:** 2026-05-18 (Commit 3a59f04)
+- **Status:** Pending Switch hardware validation (Test 38)
+- **Change:** Added `setChildLock(on|off)` command + `childLock` attribute
+- **Test:** Test 38 in TESTING.md (verify buttons disable/enable)
+
+### Touchstone v0.1.20 — Active-TCP IP Discovery
+- **Shipped:** 2026-05-18 (Commit ffbfd08)
+- **Status:** Pending Switch hardware validation (Test 39)
+- **Change:** Added `discover` command + `networkAddress` attribute; active TCP /24 scan state machine; DHCP-renewal recovery
+- **Test:** Test 39 in TESTING.md (simulate DHCP renewal; verify discovery recovers IP)
+- **Skill Created:** `.squad/skills/hubitat-active-tcp-discovery/SKILL.md`
+
+### HPM Multi-Driver Bundle v1.0.0
+- **Shipped:** 2026-05-18 (Commit a0e695d)
+- **Status:** Pending Switch validation (HPM install test)
+- **Change:** Root `packageManifest.json` (all 4 drivers, `required: false`); `release.yml` updates (bundle tag generation)
+- **Skill Created:** `.squad/skills/hpm-bundle-manifest/SKILL.md`
+- **UUID Mapping:** Reused from per-driver manifests (mandatory for HPM Match-Up dedup)
 
 ### Gemstone v0.4.10 — Multi-Controller Zones / Named Controller Binding
 - **Shipped:** 2026-05-17 (Commit e35b666)
-- **Status:** Pending Switch hardware validation
+- **Status:** Pending Switch hardware validation (Tests 19–22)
 
-### Touchstone v0.1.11 — DP 105 Removal (Awaiting Mads Test)
-- **Investigation:** Mads tested setLogBrightness on real hardware — no response
-- **Conclusion:** DP 105 is read-only on Sideline Elite
-- **Action:** Removed command, attribute, and default preference
+### Touchstone v0.1.18 — Persistent Socket + Tuya Push Subscriptions
+- **Shipped:** 2026-05-17 (Commit 67f905b)
+- **Status:** Pending Switch hardware validation (Tests 34–37)
 
 ## Active Milestones Summary
 
 ### Touchstone Fireplace Driver (Current)
 
-v0.1.4 shipped with optional power-on defaults + safety hardening (heater never auto-starts) + Hubitat sandbox reflection fixes. See .squad/orchestration-log/ for v0.1.3 + v0.1.4 batch details.
+**Latest:** v0.1.20 (active TCP discovery + child lock)
+
+**Progression:**
+- v0.1.4: optional power-on defaults + safety hardening (heater never auto-starts) + Hubitat sandbox reflection fixes
+- v0.1.5: removed `paragraph()` from preferences (app-only Hubitat restriction)
+- v0.1.18: persistent socket architecture + heartbeat + push frame handling
+- v0.1.19: child lock (DP 108 boolean)
+- v0.1.20: active TCP /24 scan discovery for DHCP renewal recovery
 
 **Key learnings:**
 - Power-on defaults: use runInMillis() for async delay (1500ms) to allow firmware settle post-power-on
 - Heater safety: never auto-toggle hazardous hardware; keep behind explicit user commands
 - Hubitat sandbox: blocks reflection (.getClass(), .metaClass, etc.) at runtime, not just imports
+- Persistent socket architecture: heartbeat every 10s, reconnect backoff [5s, 30s, 60s, 300s], push frame handling for real-time state
+- Discovery state machine: sequential rawSocket connects, gwId matching, coordinated guards to avoid interference with normal ops
 - Documentation for safety-critical features: be explicit, clear, and direct about intentional omissions
 
 ---
@@ -191,3 +215,27 @@ Added in OPTIONS bounds-checks + log.warn + early bail in pplyDps() for enum DP
 
 - 2026-05-17 — **Backward-compat-via-blank-preference idiom:** when adding a new binding preference to an existing driver, make the blank/null case reproduce the exact old behavior with zero code divergence. Use `?: ""` to normalize null/blank to empty string, then `if (wanted)` to branch. Users upgrading see no change unless they explicitly set the new preference.
 
+
+## Learnings (v0.1.19 + v0.1.20 + HPM Bundle — 2026-05-17)
+
+### DP 108 Child Lock
+
+- 2026-05-17 — Boolean DP wiring pattern: DP 108 is a Tuya BOOL type. Write: sendDpWrite("108", normalized == "on", ...). Read in applyDps(): asBoolean() + map to on/off string. Key gotcha: do not name the method parameter "state" — shadows Hubitat's state map. Use lockState or similar.
+- 2026-05-17 — Attribute type for boolean DPs: declare as attribute "childLock", "enum", ["on", "off"]. Constraint list should match command ENUM constraints exactly.
+- 2026-05-17 — Optimistic attribute emit on write: emit childLock before device echo. Device echo via applyDps() DP 108 overwrites with confirmed state ~2 s later. Pattern: emit on write side, also handle in applyDps().
+
+### HPM Bundle Assembly
+
+- 2026-05-17 — Bundle UUID reuse required: id UUID in bundle packageManifest.json MUST match per-driver manifest UUID. HPM Match-Up uses id+name+namespace. Diverged UUIDs create duplicate installs.
+- 2026-05-17 — release.yml gotcha for root manifest: find drivers hard-codes the drivers/ prefix; root manifest not found. basename(dirname(root manifest)) returns "." breaking tag generation. Fix: update find to scan root; add conditional for driver_dir == "." to set tag=bundle-vX.Y.Z and skip changelog extraction.
+- 2026-05-17 — No per-driver version fields in bundle: use only top-level version. Mixing top-level + per-driver versioning causes HPM update-check issues.
+- 2026-05-17 — Bundle version bump convention: when any per-driver bumps, also bump root packageManifest.json. Document in repo README Contributing section.
+
+### Active TCP Discovery State Machine
+
+- 2026-05-17 — Smart-range scan via pre-computed queue: build probe order in discover() as state.discoveryProbeQueue (List of ints). Smart phase: +-20 from known IP first. Full sweep: remaining 1-254. discoveryProbeNext() pops from front. 254 integers in state ~1 KB — fine for Hubitat state storage.
+- 2026-05-17 — Socket state during discovery: stamp state.intentionalCloseAt = now() before each close in discoveryProbeNext(). Reuses v0.1.18 suppression mechanism to prevent each probe-close from triggering normal disconnect->reconnect handler.
+- 2026-05-17 — Guards against cross-contamination: add discoveryMode guards in openSocket(), reconnectSocket(), sendHeartbeat(). Without these, a scheduled reconnect from before discovery could fire and clobber state.socketOpen during the scan.
+- 2026-05-17 — Fail-closed devId match: only accept match if response.devId == storedDevId. If no devId in response (heartbeat echo, wrong-key garbage), log warn and skip. Prevents wrong Tuya device being accepted.
+- 2026-05-17 — parse() post-processing guard: during discovery, consumeReceiveBuffer() routes to discoveryHandleResponse() via processFrame(). Add discoveryMode guard after consumeReceiveBuffer() in parse() to skip pumpQueue() and other normal-mode operations.
+- 2026-05-17 — Timeout-based fallback for unreachable IPs: Hubitat rawSocket does not guarantee synchronous failure. Always schedule runIn(3, "discoveryProbeTimeout") after each connect. Cancel with unschedule("discoveryProbeTimeout") when discoveryHandleResponse fires. Timeout moves to next IP.

@@ -57,7 +57,49 @@ QA and testing specialist for Hubitat drivers. Focuses on real-device validation
 
 ---
 
+### 2026-05-18T02:42:00Z — Three New Driver Updates Queued for Hardware Validation
+
+**Three new test areas pending your validation:**
+
+1. **Touchstone v0.1.19 — Child Lock (DP 108)**
+   - **Test 38:** setChildLock command
+   - Action: Press `setChildLock on` from device page; verify physical buttons on fireplace are disabled
+   - Action: Press `setChildLock off`; verify buttons re-enable
+   - Expected: `childLock` attribute reflects on/off state in real time (push frame or next poll)
+   - **Risk:** None identified; simple boolean DP write
+   - **Pass criteria:** Buttons disable/enable as commanded; attribute state correct
+   - **Commit:** 3a59f04
+
+2. **Touchstone v0.1.20 — Active TCP Discovery (DHCP-Renewal Recovery)**
+   - **Test 39:** discover command
+   - **Pre-condition:** Fireplace DHCP IP known (e.g., 192.168.1.47)
+   - Action: Simulate DHCP renewal: Unplug fireplace for 5+ seconds, plug in. Device gets new IP (e.g., 192.168.1.100)
+   - Expected: Driver loses connection (logs "Cannot connect to Touchstone fireplace at 192.168.1.47")
+   - Action: Press `discover` button from device page
+   - Expected: Driver scans /24 subnet; logs "Tuya autodiscovery: found device at 192.168.1.100"; device `networkAddress` attribute updates to new IP
+   - Expected: All commands resume working at new IP
+   - **Risk:** Hub rate-limiting on rapid TCP connects; gwId match must work on v3.3 protocol
+   - **Pass criteria:** Discovery succeeds within 2 min; device recovers on new IP
+   - **Commit:** ffbfd08
+
+3. **HPM Bundle v1.0.0 — Multi-Driver Bundle Installation**
+   - **Test:** Install via bundle URL
+   - Action: Open Hubitat Package Manager → "Install from URL"
+   - Action: Paste: `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/packageManifest.json`
+   - Expected: HPM shows checklist of 4 drivers (Touchstone, Gemstone, SunStat parent, SunStat child)
+   - Action: Select all 4 drivers
+   - Expected: HPM installs all four `.groovy` files; no errors
+   - **Risk (Cypher-4 flagged):** Unknown HPM behavior if user already installed drivers via per-driver URLs. Test both scenarios:
+     - Scenario A: Fresh install via bundle only → should work cleanly
+     - Scenario B: Install Touchstone via per-driver URL first; then install bundle → does HPM show one update or two? (This is the unknown edge case)
+   - **Pass criteria:** Both scenarios install without duplicates or conflicts visible in HPM UI
+   - **Commit:** a0e695d
+
+**Expectation:** Run all three tests on real hardware after commits land. Report findings (including HPM edge case) to team.
+
+---
+
 ## Team updates
 
 - 2026-05-17: Participated in top-3 driver improvements batch — sunstat v0.1.6, touchstone v0.1.6, gemstone v0.4.9.
-- 2026-05-18: Queued for validation: Touchstone v0.1.18 persistent socket (Tests 34–37) + Gemstone v0.4.10 multi-zones (Tests 19–22). Both ready for hardware testing.
+- 2026-05-18: Queued for validation: Touchstone v0.1.18 persistent socket (Tests 34–37) + Gemstone v0.4.10 multi-zones (Tests 19–22) + Touchstone v0.1.19 child lock (Test 38) + Touchstone v0.1.20 discovery (Test 39) + HPM bundle v1.0.0 (multi-driver bundle install). Five validation areas pending hardware.

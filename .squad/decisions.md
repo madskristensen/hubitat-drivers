@@ -1,5 +1,58 @@
 # Decisions
 
+---
+
+## ⚠️ USER DIRECTIVE — NO JVM-BASED TESTING FRAMEWORKS
+
+**By:** Mads Kristensen (via Copilot)  
+**Date:** 2026-05-17  
+**Status:** ACTIVE — supersedes all prior intent to add JVM testing
+
+### What
+
+Do not add JVM-based unit testing frameworks (Gradle, Maven, Spock + .jar dependencies) to the hubitat-drivers repo. 
+
+**History:** Tank-14 (Spock unit test POC) was aborted mid-flight. Spock harness (~36 tests passing) was nearly complete, but Tank had already downloaded a full Gradle distribution (~150MB) plus dependencies — totaling 247MB in `tests/` — before Mads pulled the plug. Commit 8a3334a was immediately reverted via cab38d9.
+
+### Why
+
+The repo's value proposition is **single-file `.groovy` drivers that drop into Hubitat** — adding a parallel JVM build environment violates that simplicity. Drivers should remain lightweight and dependency-free.
+
+### Future Testing
+
+If testing is revisited:
+- ✅ **Acceptable:** Standalone Groovy scripts that run with the system `groovy` interpreter (no Gradle wrapper, no jar deps beyond what Groovy bundles)
+- ❌ **Not acceptable:** External build systems, wrapper downloads, jar dependencies
+- **Recommended:** TESTING.md hardware-validation plans owned by Switch (real device testing is the primary validation strategy)
+
+---
+
+## Tank-14 Session — Spock Unit Test POC (ABORTED + REVERTED)
+
+**Date:** 2026-05-17  
+**Agent:** Tank (claude-sonnet-4.6, background mode)  
+**Duration:** 699 seconds (before abort)  
+**Status:** ABORTED + REVERTED  
+**Revert commit:** cab38d9 (force-reverted entire Spock commit 8a3334a)
+
+### What Happened
+
+Tank was building a Spock + Gradle unit testing harness for the hubitat-drivers repo:
+- ~36 unit tests passing
+- Gradle wrapper + dependencies downloaded (~247MB total in `tests/`)
+- Commit 8a3334a ready for merge
+
+User (Mads) demanded immediate rollback: "too many dependencies and .jar files." Coordinator reverted the commit via cab38d9 and killed the Gradle daemon (PID 56616).
+
+### Why It Was Aborted
+
+The Gradle bootstrap + jar artifacts violated the repo's design principle: lightweight, single-file `.groovy` drivers with no build system dependencies. The 247MB downloads made the repository heavy for a simple driver distribution model.
+
+### Captured Directive
+
+This abort event triggered the USER DIRECTIVE above: no JVM-based testing frameworks in this repo.
+
+---
 
 # Decision Record — Touchstone v0.1.18: Persistent Socket Architecture
 
@@ -1373,3 +1426,727 @@ Orange (`"1"`) is the app default.
 **Log color (DP 104):** 12-value palette labels unknown. `setLogColor` remains NUMBER (1–12) until hardware owner provides Tuya app screenshot. Do NOT invent log color labels.
 
 **Lesson:** Always request Tuya app screenshot from hardware owner before assigning human-readable labels to enum DPs. Owner-verified screenshots are the only trustworthy source.
+
+---
+# HPM Multi-Driver Bundle Feasibility
+
+**By:** Cypher  
+**Date:** 2026-05-17  
+**Requested by:** Mads Kristensen
+
+---
+
+## 1. Verdict
+
+✅ **Feasible — proceed.**
+
+The HPM schema natively supports multiple drivers in a single `packageManifest.json`. Our own SunStat driver already ships a 2-entry `drivers` array — the pattern is proven in-repo. The main work is: create one new bundle manifest, update `release.yml` to handle it (small but required), and decide on version coupling.
+
+---
+
+## 2. HPM Manifest Schema
+
+Source: [HubitatCommunity/hubitatpackagemanager README](https://raw.githubusercontent.com/HubitatCommunity/hubitatpackagemanager/main/README.md)
+
+The manifest is a JSON file. The `drivers` array accepts N entries. `required: false` on an entry makes it **optional** — HPM will prompt the user to opt in/out during install. `required: true` installs silently with no prompt.
+
+Relevant fields per driver entry:
+
+| Field | Required | Notes |
+|---|---|---|
+| `id` | Yes | UUID, must be unique within the manifest |
+| `name` | Yes | Must match the `name:` metadata in the `.groovy` exactly — mismatch causes duplicate installs on Match-Up |
+| `namespace` | Yes | Must match the `namespace:` metadata in the `.groovy` |
+| `location` | Yes | Raw GitHub URL to the `.groovy` file |
+| `required` | Yes | `true` = always installed; `false` = user-selectable optional |
+| `version` | No | Per-driver version; omit if using top-level package versioning (don't mix) |
+
+Full schema skeleton for a bundle:
+
+```json
+{
+  "packageName": "Mads Kristensen — Hubitat Drivers",
+  "author": "Mads Kristensen",
+  "minimumHEVersion": "2.3.0",
+  "dateReleased": "2026-05-17",
+  "version": "1.0.0",
+  "communityLink": "",
+  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/README.md",
+  "drivers": [
+    {
+      "id": "63f16ca9-2413-418f-a5d5-b798c23452ee",
+      "name": "Touchstone / Tuya Fireplace",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/touchstone-fireplace.groovy",
+      "required": false
+    },
+    {
+      "id": "257ada29-4d65-4f90-9183-da6cc75ef908",
+      "name": "Gemstone Lights",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/gemstone-lights.groovy",
+      "required": false
+    },
+    {
+      "id": "fe4da0f7-5c8f-429c-8a5d-8d5797667e1f",
+      "name": "SunStat Connect Plus",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/sunstat-thermostat-parent.groovy",
+      "required": false
+    },
+    {
+      "id": "2139d8a6-3dc4-4f7c-95b4-e18ecef215f9",
+      "name": "SunStat Connect Plus Thermostat",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/sunstat-thermostat-child.groovy",
+      "required": false
+    }
+  ]
+}
+```
+
+Notes:
+- All four driver UUIDs are reused from the existing per-driver manifests — this is intentional and correct. HPM matches on `id` + `name` + `namespace`; the same code installed from either source is tracked as the same package component.
+- SunStat ships both parent and child. In the bundle, both remain present (just as in the per-driver manifest). The SunStat child should probably be `required: false` at the bundle level too (if user skips SunStat, skip both).
+- Set all three drivers to `required: false` — user picks which ones to install. This is the natural UX for a "collection" manifest.
+
+---
+
+## 3. Reference Packages Found
+
+### Precedent in this repo
+
+**`drivers/sunstat-thermostat/packageManifest.json`** (in-repo, already shipping)  
+Already has a 2-driver `drivers` array (parent + child, both `required: true`). This is direct proof the format works as deployed.
+
+### External examples
+
+**`gilderman/utec-lock` — `repository/packageManifest.json`**  
+URL: https://raw.githubusercontent.com/gilderman/utec-lock/main/repository/packageManifest.json  
+Layout: `apps` + `drivers` + `libraries` arrays in one manifest. Shows that apps and libraries can coexist with drivers. Note: the manifest also has a top-level `namespace` field (not required by HPM but harmless).
+
+**`spinrag/hubitat` — `dmsMonitor/packageManifest.json`**  
+URL: https://raw.githubusercontent.com/spinrag/hubitat/main/dmsMonitor/packageManifest.json  
+Single-driver with `required: true`, `description` and `tags` fields (HPM repository-filing metadata). Shows the complete field set including category/tags needed for HPM repository submission.
+
+**Official HPM schema example** (canonical reference)  
+URL: https://raw.githubusercontent.com/HubitatCommunity/hubitatpackagemanager/main/README.md  
+The README shows a 2-driver example with one `required: true` and one `required: false`. This is the authoritative format reference.
+
+### Multi-driver community packages (observed conventions)
+
+Large community packages (Kasa Integration, ecobee Suite) use a single top-level `version` for the entire package and bump it any time any component changes. Per-component versioning exists in the schema but is rarely used in practice — see the HPM docs note: "don't mix-and-match."
+
+---
+
+## 4. Recommended Repo Layout
+
+### File to create
+
+**`packageManifest.json`** at repo root (or optionally `drivers/bundle/packageManifest.json`)
+
+**Recommendation: repo root**, because:
+- It is logically a meta-package, not a driver
+- Keeps it visually distinct from the per-driver manifests
+- URL is clean: `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/packageManifest.json`
+
+### Per-driver manifests: keep them
+
+Users who installed a single driver via its per-driver URL stay on that path. The bundle manifest is additive. HPM will not conflict because the same `id`/`name`/`namespace` tuples will be recognized as already-installed during Match-Up — see **§6 Migration** below.
+
+### Directory layout after change
+
+```
+hubitat-drivers/
+├── packageManifest.json          ← NEW (bundle)
+├── drivers/
+│   ├── touchstone-fireplace/
+│   │   ├── packageManifest.json  ← kept (per-driver)
+│   │   └── touchstone-fireplace.groovy
+│   ├── gemstone-lights/
+│   │   ├── packageManifest.json  ← kept (per-driver)
+│   │   └── gemstone-lights.groovy
+│   └── sunstat-thermostat/
+│       ├── packageManifest.json  ← kept (per-driver)
+│       ├── sunstat-thermostat-parent.groovy
+│       └── sunstat-thermostat-child.groovy
+└── .github/workflows/release.yml ← needs update (see §5)
+```
+
+---
+
+## 5. Release Workflow Changes
+
+### Current behavior
+
+`release.yml` triggers on:
+```yaml
+paths:
+  - 'drivers/**/packageManifest.json'
+```
+
+The detect step runs:
+```bash
+mapfile -t manifests < <(find drivers -type f -name 'packageManifest.json' | sort)
+```
+
+This `find drivers ...` hard-codes the `drivers/` prefix. A root-level `packageManifest.json` will **not** be found. The push trigger also won't fire for it.
+
+Additionally, for each manifest the script does:
+```bash
+driver_dir=$(dirname "$manifest")   # → "." for root manifest
+slug=$(basename "$driver_dir")       # → "." ← BREAKS tag generation
+```
+
+The tag would become `.-v1.0.0` — invalid.
+
+### Required changes
+
+**Change 1 — add root-level path to push trigger:**
+```yaml
+paths:
+  - 'drivers/**/packageManifest.json'
+  - 'packageManifest.json'           # ← add this
+```
+
+**Change 2 — update the find command to also scan root:**
+```bash
+mapfile -t manifests < <(
+  { find . -maxdepth 1 -name 'packageManifest.json';
+    find drivers -type f -name 'packageManifest.json'; } | sort
+)
+```
+
+**Change 3 — handle bundle manifest (no matching .groovy file):**
+
+The script currently errors out if no `.groovy` file is found. For a bundle manifest there is no `.groovy`. Two options:
+- **Option A (simple):** Add a `bundle-changelog.md` inside `drivers/bundle/` (or similar) and put the manifest there, not at root — then the slug becomes `bundle`, the driver_file search can look for a `*.md` changelog stub.
+- **Option B (cleaner):** Add a `type: "bundle"` detection in the script that skips changelog extraction and uses the `releaseNotes` top-level field from the manifest instead. 
+- **Option C (simplest):** Exclude the root manifest from the automated release workflow entirely. Bump it manually when any driver changes. The per-driver releases are already tagged individually; the bundle just needs to point at the latest `location` URLs (which are always the latest since they're `main` branch URLs).
+
+**Recommendation: Option C for now.** The bundle manifest has no changelog to extract — it's a meta-package. Tag the bundle release manually or trigger it via `workflow_dispatch`. Add a note in the root manifest's CONTRIBUTING instructions.
+
+If Option C, the workflow change is just the path trigger addition to fire on `packageManifest.json`, plus a conditional skip when `driver_dir == "."`:
+
+```bash
+if [ "$driver_dir" = "." ]; then
+  # Bundle manifest: no groovy file, no changelog extraction.
+  # Tag as "bundle-v${version}" with a simple "Bundle update" note.
+  notes="Bundle version ${version}: see individual driver changelogs."
+  tag="bundle-v${version}"
+fi
+```
+
+---
+
+## 6. Version Coupling Decision
+
+### What HPM docs say
+
+> "You can either version the entire package as a whole, or each app/driver can be versioned, but don't mix-and-match within the same package."
+
+### Community convention
+
+Large multi-driver packages overwhelmingly use **top-level package versioning** (one `version` field at the manifest root, no per-driver `version` fields). When any component bumps, the package version bumps. This is observed across Kasa Integration, ecobee Suite, and most well-maintained HPM packages.
+
+### Recommendation: bundle version is independent of per-driver versions
+
+- The per-driver manifests keep their own `version` (e.g., `"version": "0.1.18"`)
+- The bundle manifest has its own `version` (e.g., `"version": "1.0.0"`)
+- The bundle version bumps whenever any driver in the bundle bumps (or when a new driver is added)
+- The bundle manifest has NO per-driver `version` fields (avoids mix-and-match)
+
+Practical workflow: when you bump `drivers/touchstone-fireplace/packageManifest.json` from `0.1.18` to `0.1.19`, also bump the root `packageManifest.json` from `1.0.x` to `1.0.x+1`. HPM users who installed via the bundle will be notified of an update and will re-fetch all driver `.groovy` files from `main`.
+
+---
+
+## 7. User Experience
+
+### Installing via bundle
+
+1. User pastes the bundle URL into HPM "Install from URL"
+2. HPM reads the manifest, sees 4 drivers all with `required: false`
+3. HPM shows a checklist: user selects which drivers to install
+4. HPM fetches and installs the selected `.groovy` files
+5. HPM tracks the bundle package for future updates
+
+**Uninstall:** All-or-nothing at the package level (HPM uninstalls everything it installed for that package). Per-driver manifests are separate packages and unaffected.
+
+### Per-driver vs bundle update flow
+
+If a driver bumps and both the bundle manifest AND the per-driver manifest are updated, HPM will show updates in **both** the bundle package AND the per-driver package for any user who installed via both paths. This is a minor annoyance but not a bug — applying either update fetches the same `.groovy` content.
+
+---
+
+## 8. Migration: Existing Per-Driver Users
+
+**Scenario:** User already installed Touchstone Fireplace via `drivers/touchstone-fireplace/packageManifest.json`. They now install the bundle.
+
+**What happens:** HPM's Match-Up will recognize that the driver with `id: "63f16ca9-..."` + `name: "Touchstone / Tuya Fireplace"` + `namespace: "mads"` is already installed. HPM marks it as a matched component within the new bundle package. The user is now tracked under BOTH packages.
+
+**Risk:** When the per-driver manifest and bundle manifest both show updates, the user will see two update prompts for the same driver. This is cosmetically awkward but functionally harmless — both installs update the same `.groovy` content.
+
+**Mitigation:** Document in README: "Install via bundle OR per-driver URL, not both." No code change needed.
+
+---
+
+## 9. Implementation Work Breakdown (for Tank)
+
+1. **[S] Create root `packageManifest.json`** — new file, copy IDs/names/locations from existing manifests, all drivers `required: false`, initial `version: "1.0.0"`. ~5 min.
+
+2. **[S] Update `release.yml` push trigger** — add `- 'packageManifest.json'` to the `paths` list.
+
+3. **[M] Update `release.yml` detect step** — handle the root manifest case: skip changelog extraction, generate `bundle-v${version}` tag, emit a simple `notes` string. Approximately 10 lines of bash.
+
+4. **[S] Update root README** — add "Install all drivers via one HPM URL" section with the bundle URL; clarify the per-driver vs bundle trade-off.
+
+5. **[S] Establish version bump convention** — add a sentence to CONTRIBUTING.md (or equivalent): "When bumping any per-driver version, also bump the root `packageManifest.json` version."
+
+Total: roughly 1–2 hours of Tank work.
+
+---
+
+## 10. Unknowns
+
+- **HPM duplicate detection across packages:** I cannot empirically test whether HPM silently deduplicates or shows two update prompts when the same driver is tracked under two packages. The Match-Up behavior is described in the docs but the edge case of overlapping packages is undocumented. **Switch should test this on a real hub before shipping the bundle.**
+- **`namespace` top-level field:** Some manifests (e.g., gilderman/utec-lock) include a top-level `namespace` field not shown in the official schema. It appears to be optional metadata for HPM repository filing. Including it is harmless; I've left it out of the skeleton above.
+- **Bundle version policy:** Whether HPM users prefer "one URL, always current" vs "one URL, version-locked" is a user-preference question. The `main`-branch raw URLs in `location` mean users always get the latest code on update regardless of the bundle version — this is correct behavior.
+
+---
+
+# Tuya Autodiscovery on Hubitat — Feasibility
+
+**By:** Cypher  
+**Date:** 2026-05-17  
+**Requested by:** Mads Kristensen
+
+---
+
+## 1. Verdict
+
+⚠️ **Feasible-with-caveats — but the primary approach (passive UDP broadcast listening) is not supported on Hubitat.**
+
+The native Tuya LAN discovery mechanism requires passively listening for UDP broadcasts that devices emit spontaneously on port 6666/6667. **Hubitat does not support this.** A Hubitat staff member confirmed in the official UDP broadcast thread: *"No, we do not support [receiving UDP broadcasts]. You can only send out UDP messages and receive a reply to that message."* (Source: https://community.hubitat.com/t/udp-broadcast-support/3957/11, December 2018.)
+
+**Plan B is viable:** An explicit "Discover" button that performs an active TCP probe of the local /24 subnet on port 6668 can locate the fireplace. This is not automatic/background discovery — it's a user-triggered action — but it directly solves the "DHCP renewal silently breaks the driver" problem with acceptable UX.
+
+Verdict summary:
+- ❌ True UDP broadcast listening (passive): not feasible on Hubitat — no API
+- ⚠️ Active TCP scan ("Discover" button): feasible, ~1 hour of Tank work, addresses the user problem
+- ✅ DHCP reservation (user-side): always works, zero driver code, document as primary recommendation
+
+---
+
+## 2. Hubitat UDP Listening Capability
+
+### What Hubitat supports
+
+Hubitat provides two LAN comms mechanisms in drivers/apps:
+
+**A. `sendHubCommand` with `LAN_TYPE_UDPCLIENT`**
+
+Sends a UDP datagram to a specific `destinationAddress: "ip:port"`. Supports both unicast and broadcast (`255.255.255.255:port`). When the target device sends a response back to the hub's source IP:port, the response arrives in the driver's `parse()` callback. This is request-reply UDP only.
+
+```groovy
+def myHubAction = new hubitat.device.HubAction(
+    payloadHex,
+    hubitat.device.Protocol.LAN,
+    [type: hubitat.device.HubAction.Type.LAN_TYPE_UDPCLIENT,
+     destinationAddress: "192.168.1.100:6668",
+     encoding: hubitat.device.HubAction.Encoding.HEX_STRING,
+     callback: "parseUdp"])
+sendHubCommand(myHubAction)
+```
+
+The `parseUdp(message)` callback fires when a response arrives:
+```groovy
+def parseUdp(message) {
+    def resp = parseLanMessage(message)
+    if (resp.type == "LAN_TYPE_UDPCLIENT") {
+        // process resp.payload
+    }
+}
+```
+
+Source: abdinoor/Hubitat `Kasa-LAN-Switch.groovy` and dcmeglio HPM README examples.
+
+**B. `interfaces.rawSocket`**
+
+Opens a **TCP** socket to a specific IP:port. Used in the existing touchstone-fireplace driver (`interfaces.rawSocket.connect(ip, 6668, byteInterface: true, readDelay: 150)`). TCP-only — cannot receive UDP frames.
+
+### What Hubitat does NOT support
+
+- Passively listening on a UDP port (no `bind()` equivalent for UDP)
+- Receiving unsolicited UDP packets from arbitrary sources
+- Multicast UDP subscription
+- Any `parse()` or `rawSocket` callback triggered by an inbound UDP broadcast that the hub did not initiate
+
+**Citation:** Hubitat staff member (community.hubitat.com/t/udp-broadcast-support/3957/11):
+> *"if you are asking about the hub receiving udp broadcasts from a device. No, we do not support that. You can only send out UDP messages and receive a reply to that message."*
+
+This was confirmed in 2018. No subsequent Hubitat firmware release has added a passive UDP listener API. Community threads as recent as 2023-2024 still describe `LAN_TYPE_UDPCLIENT` as the sole UDP mechanism, with the same send-and-receive-reply constraint.
+
+---
+
+## 3. Tuya Broadcast Protocol
+
+### Overview
+
+Tuya devices (including the Touchstone Sideline, v3.3) emit UDP broadcast packets **spontaneously and continuously** on the local subnet. These are device-initiated broadcasts, not responses to any query. A listener (e.g., tinytuya, make-all/tuya-local) passively binds a socket to port 6666 or 6667 and waits.
+
+### Ports
+
+| Port | Protocol version | Encryption |
+|------|-----------------|------------|
+| 6666 | v3.1 (and fallback) | None — plaintext JSON |
+| 6667 | v3.3+ | XOR-encrypted with a known public key |
+
+### Payload shape (v3.3, after decryption)
+
+```json
+{
+  "ip": "192.168.1.47",
+  "gwId": "bf1234567890abcdef1234",
+  "active": 2,
+  "ability": 0,
+  "mode": 0,
+  "encrypt": true,
+  "productKey": "qhwld7e4eqvu5fbp",
+  "version": "3.3"
+}
+```
+
+The `gwId` field equals the device's `deviceId` (same value used in TCP protocol DPS frames). The `productKey` for the Touchstone Sideline is `qhwld7e4eqvu5fbp` (confirmed in cypher-touchstone-tuya-feasibility.md from make-all/tuya-local YAML).
+
+### Decryption for v3.3 broadcasts (port 6667)
+
+The broadcast payload (after the 20-byte header) is XOR-encrypted with the public key `yGAdlopoPVldABfn` (16 bytes, repeated to cover payload length). This key is publicly documented in tinytuya source and make-all/tuya-local. After XOR-decoding the result is the plaintext JSON above.
+
+Decryption steps:
+1. Receive raw UDP packet on port 6667
+2. Skip the first 20 bytes (Tuya header: prefix 4 bytes, sequence 4 bytes, command 4 bytes, length 4 bytes, return code 4 bytes)
+3. XOR each byte of the remaining payload with the corresponding byte of the repeating key `b'yGAdlopoPVldABfn'`
+4. The result is the plaintext JSON
+
+**This decryption is NOT needed for port 6666 (v3.1 broadcasts), where the JSON is sent in plaintext.**
+
+### Why tinytuya scanner cannot be ported directly to Hubitat
+
+tinytuya's `scanner.py` (and `tuya-local`'s equivalent) does:
+```python
+sock.bind(("", 6666))  # bind to port 6666, any source IP
+sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+data, addr = sock.recvfrom(4096)  # blocks, waiting for any broadcast
+```
+
+This is passive UDP listening — binding to a local port and waiting for inbound packets from **any** source IP. Hubitat has no equivalent API for this.
+
+---
+
+## 4. Recommended Architecture (Plan B — Active TCP Probe)
+
+Since passive UDP listening is blocked, the best feasible approach is an active TCP scan using the mechanism the driver already relies on (`interfaces.rawSocket`).
+
+### Core idea
+
+When the driver fails to connect to the stored IP, it can optionally (on user command) probe a range of IPs on port 6668. If a device responds with a Tuya v3.3 HELLO/ping frame that contains the stored `gwId`, the driver updates the stored IP automatically.
+
+### Implementation flow
+
+**Trigger points:**
+1. **`initialize()`** — after the driver restarts, if the stored IP is unreachable on first connection attempt, log a warning and trigger discovery (or display a message telling the user to press "Discover").
+2. **`discover()` command button** — explicit user action, callable from the Hubitat device page. Runs the scan. Logs the found IP and updates the preference.
+
+**Discovery steps:**
+
+```
+1. Extract the /24 from the last known IP (e.g., "192.168.1.47" → "192.168.1.")
+2. For i = 1..254 (or a smarter range: last-known ± 10 first, then full sweep):
+   a. Try interfaces.rawSocket.connect("192.168.1.{i}", 6668, byteInterface: true, readDelay: 150)
+   b. Send a Tuya v3.3 heartbeat frame (CMD 9, or STATUS_REQUEST CMD 10)
+   c. Wait for socketStatus() callback: if "established", send frame and await parse()
+   d. In parse(): decode the response, check if gwId matches stored deviceId
+   e. If match: save discovered IP to state and updateSetting("ipAddress", discoveredIp); break
+   f. If no response within ~2s: rawSocket.close(); move to next IP
+```
+
+### Caveats and constraints
+
+- **rawSocket is one-connection-at-a-time.** Hubitat's driver sandbox runs all callbacks on a single thread. Sequential scanning is safe but slow — ~2s per IP worst case = up to ~8 minutes for a full /24. In practice, the fireplace IP typically moves only a few octets, so a ±20 range around the last known IP takes <1 minute.
+- **The driver's socketStatus/parse callback model means sequential scanning requires state machine management** — `state.discoveryMode = true`, `state.discoveryNextIp = i`, etc. Not trivial but Tank-manageable in ~100 lines.
+- **Hubitat sandbox blocks `java.net.*` directly** — cannot use DatagramSocket, InetAddress scanning, or ARP lookups. Must use only the `interfaces.rawSocket` and `sendHubCommand` APIs.
+- **No broadcast ping shortcut.** Although `LAN_TYPE_UDPCLIENT` supports `destinationAddress: "255.255.255.255:6668"`, Tuya devices do NOT respond to UDP queries on port 6668 — they only respond to TCP connections on 6668. There is no UDP discovery query that Tuya devices are designed to answer.
+
+### IP surfacing
+
+On success:
+1. `log.info "Tuya autodiscovery: found device at ${discoveredIp} (was ${oldIp})"`
+2. `device.updateSetting("ipAddress", [type:"string", value: discoveredIp])` — updates the preference field directly
+3. `sendEvent(name: "networkAddress", value: discoveredIp)` — optional attribute for visibility
+
+### Handling multiple Tuya devices on the LAN
+
+Filter by `gwId` match. The driver already stores the `deviceId` (gwId) in preferences or state. When probing, only accept an IP if the Tuya status response's device ID matches the stored one. Other Tuya devices on the LAN will be ignored.
+
+---
+
+## 5. Fallback: No Discovery Needed (Recommended First Step)
+
+Before implementing any scanning, the recommended guidance to users should be:
+
+> **Set a DHCP reservation in your router for the fireplace's MAC address.** This prevents IP changes entirely. Most home routers expose this in the DHCP settings page. The fireplace's MAC address is visible in your router's connected-devices list.
+
+This costs zero driver code and solves the root problem permanently. The driver should print a clear log.error (not just log.warn) when a connection fails:
+
+```groovy
+log.error "Cannot connect to Touchstone fireplace at ${ip}. " +
+          "If your device IP changed (DHCP lease renewed), update the IP in device preferences. " +
+          "Tip: set a DHCP reservation in your router to prevent this."
+```
+
+The "Discover" button as Plan B gives power users an in-Hubitat recovery path without needing to log into the router.
+
+---
+
+## 6. Implementation Work Breakdown (for Tank)
+
+1. **[S] Improve error message on TCP connect failure** — change silent fail to `log.error` with actionable text including current IP and DHCP reservation tip. ~10 lines. (Minimum viable improvement, ship first.)
+
+2. **[M] Add `discover()` command** — driver metadata declaration + stub implementation. Triggers the scan described in §4. ~20 lines scaffolding.
+
+3. **[L] Implement active TCP probe state machine** — `discoveryMode` flag, sequential rawSocket connect/probe per IP, `socketStatus()`/`parse()` handlers dispatch to discovery path vs normal path, match on gwId, update preference on success. ~80–120 lines. Requires careful integration with existing socket lifecycle — the current driver uses rawSocket for normal Tuya commands; discovery must not clobber in-flight command state.
+
+4. **[S] Add `networkAddress` attribute** — surface discovered IP as an attribute so automations can observe IP changes. ~5 lines.
+
+5. **[S] Document in README** — "IP Discovery" section: DHCP reservation is primary, Discover button is fallback. Expected scan time for typical home network. ~20 lines.
+
+Total: ~3–4 hours of Tank work (dominated by the state machine).
+
+---
+
+## 7. Risks / Unknowns (Switch to Verify)
+
+| Risk | Severity | Notes |
+|---|---|---|
+| rawSocket sequential scan throughput | Medium | 2s timeout × 254 IPs = ~8 min worst case. Switch should measure actual scan time on a real C-8 hub. |
+| Hub sandbox rate-limiting rawSocket.connect() | Medium | Hubitat may throttle rapid sequential TCP connections. If connections are refused after N attempts, the scan will fail silently. Switch must observe hub logs during a test scan. |
+| gwId in Tuya v3.3 status response | Medium | The plan assumes the STATUS_REQUEST response includes gwId or that the driver can authenticate the device is the right one. Switch must confirm that a v3.3 status response (CMD 10) includes gwId in the payload — or identify an alternative fingerprint. |
+| Hubitat restart mid-scan | Low | If the hub restarts during a scan, state.discoveryNextIp is lost. Non-critical — user can press Discover again. |
+| No Tuya device at probed IP responds on 6668 | None | Expected — the scan just skips it. Safe. |
+| IP outside current /24 | Low | If DHCP issued an IP in a different subnet (unusual), the /24 scan won't find it. Fall back to manual entry. |
+
+---
+
+## 8. Sources
+
+1. Hubitat staff quote on UDP broadcast: https://community.hubitat.com/t/udp-broadcast-support/3957/11 (Patrick, Hubitat staff, December 2018)
+2. `LAN_TYPE_UDPCLIENT` code pattern and `parseUdp()` callback: `abdinoor/Hubitat` `Kasa-LAN-Switch.groovy` (live, verified)
+3. `interfaces.rawSocket` TCP-only: confirmed in existing `drivers/touchstone-fireplace/touchstone-fireplace.groovy` (this repo), which uses `rawSocket.connect()` for TCP to Tuya port 6668
+4. Tuya broadcast ports and XOR key: tinytuya source + make-all/tuya-local, documented in `.squad/decisions.md` (Touchstone Tuya feasibility section, cypher-6)
+5. Touchstone Sideline `productKey: "qhwld7e4eqvu5fbp"`: make-all/tuya-local YAML, cited in `cypher-touchstone-tuya-feasibility.md`
+6. Hubitat `LAN_TYPE_UDPCLIENT` example (broadcast-to-broadcast-address pattern): codahq comment at community.hubitat.com/t/udp-broadcast-support/3957/9 (December 2018)
+7. UDP broadcast-to-255.255.255.255 attempt with no response: community.hubitat.com/t/udp-broadcast-support/3957/23-25 (community developer, LIFX protocol, December 2018 — confirms broadcast send works but receiving broadcast replies from devices is unreliable or unsupported)
+
+---
+
+# HPM Multi-Driver Bundle Manifest v1.0.0
+
+**By:** Tank  
+**Date:** 2026-05-17  
+**Status:** Shipped — commit a0e695d
+
+---
+
+## What Was Done
+
+Created a single Hubitat Package Manager (HPM) bundle manifest at the repo root, bundling all four drivers so users can install all of Mads's drivers from one URL.
+
+### Files Created / Modified
+
+- **`packageManifest.json` (repo root, NEW):** Bundle manifest v1.0.0, four drivers with `required: false`
+- **`.github/workflows/release.yml` (MODIFIED):**
+  - Added `- 'packageManifest.json'` to push trigger `paths:`
+  - Updated `find` command to also scan repo root: `{ find . -maxdepth 1 -name 'packageManifest.json'; find drivers -type f -name 'packageManifest.json'; } | sort`
+  - Added conditional skip for root manifest: when `driver_dir == "."`, set `tag="bundle-v${version}"` and `notes="Bundle version ${version}: see individual driver changelogs."`, then `continue`
+- **`README.md` (root, MODIFIED):**
+  - Added "Install all drivers via one URL (HPM bundle)" section with URL and install instructions
+  - Added note: install via bundle OR per-driver URL, not both
+  - Added version bump convention in Contributing section
+
+### Bundle URL
+
+```
+https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/packageManifest.json
+```
+
+### UUID Mapping (reused from per-driver manifests)
+
+| Driver | UUID |
+|--------|------|
+| Touchstone / Tuya Fireplace | `63f16ca9-2413-418f-a5d5-b798c23452ee` |
+| Gemstone Lights | `257ada29-4d65-4f90-9183-da6cc75ef908` |
+| SunStat Connect Plus | `fe4da0f7-5c8f-429c-8a5d-8d5797667e1f` |
+| SunStat Connect Plus Thermostat | `2139d8a6-3dc4-4f7c-95b4-e18ecef215f9` |
+
+### Version Coupling
+
+- Bundle version `1.0.0` is independent of per-driver versions
+- Bundle has no per-driver `version` fields (HPM: never mix top-level + per-driver versioning)
+- When any per-driver version bumps, also bump root `packageManifest.json` (patch/minor)
+
+---
+
+## Gotchas Encountered
+
+1. **release.yml `find` hard-codes `drivers/`** — root manifest would have been silently ignored without the workflow update.
+2. **`basename(dirname("."))` returns `"."` → bad tag** — required the explicit `driver_dir == "."` branch with a custom tag format.
+3. **UUID reuse is mandatory** — HPM Match-Up matches on `id + name + namespace`. Different UUIDs between bundle and per-driver manifest = two separate tracked components = duplicate update prompts.
+
+---
+
+## Follow-Up (Switch)
+
+- HPM duplicate-detection edge case: if a user installed a driver via per-driver URL and then installs the bundle, does HPM show one update or two? Community HPM docs describe Match-Up behavior but the multi-package overlap case is untested. Switch should test before publicly advertising the bundle URL.
+
+---
+
+# Touchstone v0.1.19 — Child Lock Command (DP 108)
+
+**By:** Tank  
+**Date:** 2026-05-17  
+**Status:** Shipped — commit 3a59f04
+
+---
+
+## What Was Done
+
+Added `setChildLock(on|off)` command to the Touchstone / Tuya Fireplace driver (v0.1.18 → v0.1.19).
+
+### Changes
+
+- **Metadata:** Added `command "setChildLock", [[name: "state*", type: "ENUM", constraints: ["off", "on"]]]`
+- **Metadata:** Added `attribute "childLock", "enum", ["on", "off"]`
+- **New method:** `setChildLock(lockState)` — validates on/off, emits optimistic attribute, calls `sendDpWrite("108", lockState == "on", "child lock", WRITE_REFRESH_DELAY_SECONDS)`
+- **applyDps() DP 108 handler:** Now also emits `childLock` attribute (on/off) in addition to the raw `dp108` string attribute. Uses `asBoolean()` to convert the Tuya boolean wire value.
+- **README:** Added `setChildLock` to command reference; added `childLock` to attributes section.
+- **TESTING.md:** Added Test 38.
+- **packageManifest.json:** Bumped to 0.1.19.
+
+### Wire Protocol
+
+DP 108 is a Tuya BOOL type on the Touchstone Sideline Elite. `true` = locked (buttons disabled), `false` = unlocked. Wire values are passed directly as Groovy `Boolean` to the existing `sendDpWrite()` plumbing, which serializes them correctly in the JSON payload.
+
+### Notes for Switch
+
+- **Test 38** in TESTING.md covers lock-on/lock-off with observation of physical button response.
+- The `childLock` attribute should update in real time via push frames (the device echoes back DP 108 state on change). If push frame does not carry DP 108 on lock, the attribute will catch up on next poll.
+
+---
+
+## Key Pattern (Reusable)
+
+Two-line boolean DP dispatch:
+- Write: `sendDpWrite("N", userWantsOn, "label", WRITE_REFRESH_DELAY_SECONDS)`
+- Read (in applyDps): `Boolean lockBool = asBoolean(dps["N"]); String lockValue = lockBool ? "on" : "off"; emitAttribute("attrName", lockValue, ...)`
+
+---
+
+# Touchstone v0.1.20 — Active-TCP IP Discovery (DHCP-Renewal Recovery)
+
+**By:** Tank  
+**Date:** 2026-05-17  
+**Status:** Shipped — commit ffbfd08
+
+---
+
+## What Was Done
+
+Added `discover` command and active-TCP /24 subnet scan to the Touchstone fireplace driver (v0.1.19 → v0.1.20), solving the "DHCP lease renewal silently breaks the driver" problem.
+
+### Sub-item 3A: Improved error UX
+
+Changed `openSocket()` failure from `log.warn` to `log.error` with actionable text:
+- States the IP that was tried
+- Tells user to update preferences or press Discover
+- Recommends DHCP reservation as the permanent fix
+
+### Sub-item 3B: Active-TCP Discovery State Machine
+
+**New command:** `discover` (zero-arg button on device page)  
+**New attribute:** `networkAddress` (string) — surfaces discovered IP
+
+**State machine flow:**
+
+```
+discover()
+  → build state.discoveryProbeQueue (smart ±20 range first, then 1-254 sweep)
+  → closeSocket + unschedule heartbeat
+  → state.discoveryMode = true
+  → runIn(1, "discoveryProbeNext")
+
+discoveryProbeNext()
+  → if queue empty → discoveryComplete()
+  → pop next octet from queue
+  → rawSocket.connect(targetIp, 6668)
+  → send TUYA_CMD_DP_QUERY frame (to elicit response with devId)
+  → runIn(3, "discoveryProbeTimeout")
+
+socketStatus()  [modified]
+  → if discoveryMode + error/disconnect: cancel timeout, runIn(1, "discoveryProbeNext")
+  → if discoveryMode + other: debug log only
+
+parse() → processFrame()  [modified]
+  → if discoveryMode: route to discoveryHandleResponse(response) instead of applyDps()
+
+discoveryHandleResponse()
+  → if no devId in response: warn, skip, probeNext
+  → if devId matches stored deviceId: update deviceIP pref, emit networkAddress, discoveryComplete()
+  → if devId mismatch: debug log, probeNext
+
+discoveryProbeTimeout()
+  → if discoveryMode: probeNext
+
+discoveryComplete()
+  → state.discoveryMode = false
+  → log success or failure
+  → initialize()  ← restores normal socket + heartbeat
+```
+
+### Guards Added
+
+- `openSocket()`: skip if discoveryMode
+- `reconnectSocket()`: skip if discoveryMode
+- `sendHeartbeat()`: skip if discoveryMode
+- `parse()`: skip normal post-processing (pumpQueue, etc.) if discoveryMode
+
+---
+
+## Known Limitations / Switch Verification Items
+
+| Item | Notes |
+|------|-------|
+| gwId in v3.3 DP_QUERY response | The plan assumes the device responds with `devId` in the JSON payload. Switch should confirm on real hardware that a CMD 10 response from the Sideline Elite includes `devId`. If not, the discovery will find no match and log a warning. |
+| Hub sandbox rate-limiting | Hubitat may throttle rapid sequential rawSocket.connect() calls. If connections are refused after N attempts, the scan fails silently. Switch should observe hub logs during a test scan. |
+| Scan time | 2 s/IP worst case → ~8 min full sweep. Smart ±20 range typically < 1 min for normal DHCP drift. |
+| IP outside /24 | If DHCP assigns an IP in a different subnet, the scan won't find it. Document: set DHCP reservation to avoid this. |
+
+---
+
+## Key Design Decisions
+
+1. **Fail-closed on devId:** only accept if `response.devId == storedDevId`. No partial matches, no "first Tuya device on port 6668 wins."
+2. **pre-computed probe queue in state:** simpler than managing phase flags. 254 integers ~1 KB in Hubitat state.
+3. **intentionalCloseAt reuse:** avoids adding new socket-suppression logic; each probe-close stamps the same timestamp the rest of the driver already respects.
+4. **discoveryComplete() always calls initialize():** clean handoff from discovery to normal operation, regardless of success/failure.
+
+---
+
+## Version Bumps
+
+- `drivers/touchstone-fireplace/packageManifest.json`: 0.1.19 → 0.1.20
+- `packageManifest.json` (bundle root): 1.0.0 → 1.0.1
+
+---
+
+
+
