@@ -31,12 +31,12 @@ Status: **Submitted** — PR filed as HubitatCommunity/hubitat-packagerepositori
 
 ## Drivers
 
-| Driver | Status | Description | Docs |
-|--------|--------|-------------|------|
-| **Daikin WiFi Thermostat** | Beta | LAN integration for Daikin BRP069B series WiFi adapters. Local HTTP API control, no cloud account required, indoor/outdoor temperature, humidity, and energy meter. | [Driver README](drivers/daikin-wifi/README.md) |
-| **Gemstone Lights** | Beta | Cloud REST integration for Gemstone permanent outdoor lighting, including favorites-first LightEffects, named effects, and color-temperature fallback | [Driver README](drivers/gemstone-lights/README.md) |
-| **SunStat Connect Plus** | Beta | Cloud REST integration for SunStat Connect Plus electric floor heating thermostats via the Watts® Home API. Parent/child architecture; auto-discovers thermostats from your Watts account. | [Driver README](drivers/sunstat-thermostat/README.md) |
-| **Touchstone / Tuya Fireplace** | Beta | LAN integration for Touchstone Sideline Elite and other Tuya WiFi fireplaces. Flame color, log color, brightness, heater control. Includes in-driver DP discovery for unmapped models. | [Driver README](drivers/touchstone-fireplace/README.md) |
+| Driver | Transport | Description | Docs |
+|--------|-----------|-------------|------|
+| **Daikin WiFi Thermostat** | Local LAN | LAN integration for Daikin BRP069B series WiFi adapters. Local HTTP API control, no cloud account required, indoor/outdoor temperature, humidity, and energy meter. | [Driver README](drivers/daikin-wifi/README.md) |
+| **Gemstone Lights** | Cloud API | Cloud REST integration for Gemstone permanent outdoor lighting, including favorites-first LightEffects, named effects, and color-temperature fallback | [Driver README](drivers/gemstone-lights/README.md) |
+| **SunStat Connect Plus** | Cloud API | Cloud REST integration for SunStat Connect Plus electric floor heating thermostats via the Watts® Home API. Parent/child architecture; auto-discovers thermostats from your Watts account. | [Driver README](drivers/sunstat-thermostat/README.md) |
+| **Touchstone / Tuya Fireplace** | Local LAN | LAN integration for Touchstone Sideline Elite and other Tuya WiFi fireplaces. Flame color, log color, brightness, heater control. Includes in-driver DP discovery for unmapped models. | [Driver README](drivers/touchstone-fireplace/README.md) |
 
 ## Manual install
 
