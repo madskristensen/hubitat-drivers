@@ -2,7 +2,7 @@
 
 Community Hubitat Elevation drivers by Mads Kristensen.
 
-> **Current status:** Three beta drivers available — **Gemstone Lights** v0.4.8 (cloud REST, working in production), **SunStat Connect Plus** v0.1.4 (cloud REST, energy monitoring and schedule control), and **Touchstone / Tuya Fireplace** v0.1.5 (LAN integration, now ready for first public release).
+> **Current status:** Four beta drivers available — **Daikin WiFi Thermostat** v0.1.5 (LAN local API, Daikin BRP069B series), **Gemstone Lights** v0.4.8 (cloud REST, working in production), **SunStat Connect Plus** v0.1.4 (cloud REST, energy monitoring and schedule control), and **Touchstone / Tuya Fireplace** v0.1.5 (LAN integration, now ready for first public release).
 
 ## Install all drivers via one URL (HPM bundle)
 
@@ -19,6 +19,7 @@ Install all of Mads's drivers in a single HPM operation:
 
 1. In Hubitat: **Apps → Hubitat Package Manager → Install → "From a URL"**
 2. Paste one of the following packageManifest URLs:
+   - **Daikin WiFi Thermostat:** `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/daikin-wifi/packageManifest.json`
    - **Gemstone Lights:** `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/packageManifest.json`
    - **SunStat Connect Plus:** `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/packageManifest.json`
    - **Touchstone / Tuya Fireplace:** `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/packageManifest.json`
@@ -32,6 +33,7 @@ Status: **Submitted** — PR filed as HubitatCommunity/hubitat-packagerepositori
 
 | Driver | Status | Description | Docs |
 |--------|--------|-------------|------|
+| **Daikin WiFi Thermostat** | Beta | LAN integration for Daikin BRP069B series WiFi adapters. Local HTTP API control, no cloud account required, indoor/outdoor temperature, humidity, and energy meter. | [Driver README](drivers/daikin-wifi/README.md) |
 | **Gemstone Lights** | Beta | Cloud REST integration for Gemstone permanent outdoor lighting, including favorites-first LightEffects, named effects, and color-temperature fallback | [Driver README](drivers/gemstone-lights/README.md) |
 | **SunStat Connect Plus** | Beta | Cloud REST integration for SunStat Connect Plus electric floor heating thermostats via the Watts® Home API. Parent/child architecture; auto-discovers thermostats from your Watts account. | [Driver README](drivers/sunstat-thermostat/README.md) |
 | **Touchstone / Tuya Fireplace** | Beta | LAN integration for Touchstone Sideline Elite and other Tuya WiFi fireplaces. Flame color, log color, brightness, heater control. Includes in-driver DP discovery for unmapped models. | [Driver README](drivers/touchstone-fireplace/README.md) |
@@ -52,6 +54,7 @@ Status: **Submitted** — PR filed as HubitatCommunity/hubitat-packagerepositori
 - **Network:** Driver-specific; see per-driver README for network requirements
 
 **Driver Compatibility Details:**
+- **Daikin WiFi Thermostat** — Requires LAN reachability to the BRP069B series adapter; operates via the local HTTP API (no cloud account)
 - **Gemstone Lights** — Requires outbound HTTPS to Gemstone cloud API
 - **SunStat Connect Plus** — Requires outbound HTTPS to Watts Home cloud API
 - **Touchstone / Tuya Fireplace** — Requires LAN reachability to the Tuya WiFi module; needs the device's Tuya local key (obtained once via `tinytuya wizard`)
