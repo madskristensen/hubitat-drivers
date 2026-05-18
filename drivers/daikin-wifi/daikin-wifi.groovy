@@ -1,7 +1,7 @@
 /**
  * Daikin WiFi Thermostat
  * Author:  Mads Kristensen
- * Version: 0.1.0
+ * Version: 0.1.1
  * License: MIT
  *
  * Local LAN control for Daikin WiFi adapters (BRP069B series, BRP15B61, and similar
@@ -14,6 +14,7 @@
  *   original. Credit and thanks to @eriktack for the foundational research.
  *
  * Changelog:
+ *   0.1.1 — 2026-05-18 — hotfix: remove invalid read of schedule property in updated(); correct HubAction constructor signature in sendGet
  *   0.1.0 — 2026-05-18 — initial clean-room implementation; Thermostat + Switch +
  *     EnergyMeter + HealthCheck capabilities; .isNumber() sentinel guards on all
  *     numeric parses; separate 30-min energy poll; initialize() lifecycle.
@@ -26,7 +27,7 @@ import groovy.json.JsonOutput
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String  DRIVER_VERSION            = "0.1.0"
+@Field static final String  DRIVER_VERSION            = "0.1.1"
 @Field static final Integer DAIKIN_PORT               = 80
 @Field static final Integer LAST_ACTIVITY_THROTTLE_MS = 60000
 @Field static final Integer ENERGY_POLL_MINUTES       = 30
@@ -411,9 +412,9 @@ private void sendGet(String path, String callbackMethod) {
     try {
         sendHubCommand(new hubitat.device.HubAction(
             [method: "GET", path: path,
-             headers: ["HOST": "${settings.ip}:${DAIKIN_PORT}", "Accept": "*/*"]],
-            hubitat.device.Protocol.LAN,
-            [callback: callbackMethod]
+             headers: ["HOST": "${settings.ip}:${DAIKIN_PORT}", "Accept": "*/*"],
+             callback: callbackMethod],
+            hubitat.device.Protocol.LAN
         ))
     } catch (Exception e) {
         log.warn "[Daikin] sendGet failed (${path}): ${e.message}"
@@ -681,9 +682,17 @@ private BigDecimal currentSetpointC() {
 
 private void registerSchedules() {
     Integer minutes = (settings.refreshInterval ?: "5").toInteger()
-    String fastCron = (minutes == 1) ? "0 * * * * ?" : "0 */${minutes} * * * ?"
-    schedule(fastCron, "refresh")
-    schedule("0 */${ENERGY_POLL_MINUTES} * * * ?", "refreshEnergy")
+    // Use runEvery* instead of schedule() to avoid naming conflict with the
+    // Thermostat capability's setSchedule()/schedule write-only property.
+    switch (minutes) {
+        case 1:  runEvery1Minute("refresh");   break
+        case 5:  runEvery5Minutes("refresh");  break
+        case 10: runEvery10Minutes("refresh"); break
+        case 15: runEvery15Minutes("refresh"); break
+        case 30: runEvery30Minutes("refresh"); break
+        default: runEvery5Minutes("refresh");  break
+    }
+    runEvery30Minutes("refreshEnergy")
     debugLog "Schedules registered: refresh every ${minutes} min, energy every ${ENERGY_POLL_MINUTES} min"
 }
 
