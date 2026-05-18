@@ -6,6 +6,13 @@
 
 ## Latest Work (2026-05-18)
 
+### SunStat v0.1.8 — Close SP-1, SC-1, SC-2, SC-3 (batch yellows)
+- v0.1.8 added skip-if-match guards to setAwayModeInternal (parent SP-1), setThermostatMode (SC-1), setHeatingSetpoint (SC-2), and setScheduleEnabled (SC-3) — Trinity's 🟡 findings from the redundant-write audit; reduces Watts cloud API quota consumption
+- SC-3 dual-guard pattern: existing emitIfChanged dedupes Hubitat events; new write-guard reads pre-event value (before emitIfChanged) and skips PATCH if already matches — both guards coexist solving independent problems
+- SC-4 (setFloorMinTemp) deferred: needs state.floorMinTemp caching in parseDeviceState before guard can be applied
+- BY-DESIGN exclusions confirmed: SC-5 cancelBoost (state-assertion), SC-6 setBoost (always new value), SC-7 boostExpired/initialize (recovery paths) — NOT touched
+- Decision drop: .squad/decisions/inbox/tank-sunstat-yellows-batch.md
+
 ### Gemstone Lights v0.4.13 — Close G-2 through G-6 (batch yellows)
 - v0.4.13 added skip-if-match guards to on(), off(), setLevel(), setColor(), setColorTemperature() — Trinity's G-2 through G-6 🟡 findings from the redundant-write audit; reduces cloud API quota consumption for automation rules re-asserting the same state; G-5 setColor uses composite (hue + saturation + level + colorMode == "RGB") guard; G-6 setColorTemperature requires colorMode == "CT" before deduping; decision drop in inbox at tank-gemstone-yellows-batch.md
 

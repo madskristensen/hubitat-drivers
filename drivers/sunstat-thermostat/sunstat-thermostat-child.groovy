@@ -1,14 +1,12 @@
 /**
  * SunStat Connect Plus — Child Driver (Thermostat)
  * Author:  Mads Kristensen
- * Version: 0.1.7
- * License: MIT
- *
- * Per-thermostat capability surface for the Watts® Home SunStat Connect Plus
+ * Version: 0.1.8capability surface for the Watts® Home SunStat Connect Plus
  * electric floor heating thermostat. All API calls are delegated to the parent
  * driver (SunStat Connect Plus) via parent.sendDevicePatch(...).
  *
  * Changelog:
+ *   0.1.8 — 2026-05-18 — skip redundant PATCH calls when device already matches (audit SP-1, SC-1, SC-2, SC-3); SC-4 deferred
  *   0.1.7 — 2026-05-17 — lastActivity attribute (ISO 8601 timestamp of last successful API call)
  *   0.1.6 — 2026-05-17 — Pseudo-boost implementation (driver-managed temporary setpoint override)
  *   0.1.5 — 2026-05-17 — Version synced to parent (v0.1.5); no behavior change in child
@@ -25,7 +23,7 @@ import groovy.json.JsonSlurper
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION                    = "0.1.7"
+@Field static final String DRIVER_VERSION                    = "0.1.8"
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_F        = 110L
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_C        = 43L
 
@@ -174,10 +172,18 @@ void setLastActivity(String timestamp) {
 def setThermostatMode(String mode) {
     switch (mode?.toLowerCase()) {
         case "heat":
+            if (safeStr(device.currentValue("thermostatMode")) == "heat") {
+                debugLog "setThermostatMode: already 'heat' — skipping PATCH"
+                return
+            }
             sendEvt("thermostatMode", "heat", "heat")
             sendDevicePatch([Mode: "Heat"])
             break
         case "off":
+            if (safeStr(device.currentValue("thermostatMode")) == "off") {
+                debugLog "setThermostatMode: already 'off' — skipping PATCH"
+                return
+            }
             sendEvt("thermostatMode", "off", "off")
             sendDevicePatch([Mode: "Off"])
             break
@@ -205,6 +211,12 @@ def setHeatingSetpoint(temp) {
     BigDecimal step    = validStep(state.setpointStep)
     BigDecimal rounded = (Math.round((temp as BigDecimal) / step) * step).setScale(2, BigDecimal.ROUND_HALF_UP)
     BigDecimal clamped = clampSetpoint(rounded)
+    def raw = device.currentValue("heatingSetpoint")
+    Number current = (raw != null) ? (raw as BigDecimal) : null
+    if (current != null && current == (clamped as BigDecimal)) {
+        debugLog "setHeatingSetpoint: already ${clamped} — skipping PATCH"
+        return
+    }
     String descTxt = "${device.displayName} heatingSetpoint set to ${clamped}"
     sendEvent(name: "heatingSetpoint",   value: clamped, unit: location.temperatureScale, descriptionText: descTxt, type: "digital")
     sendEvent(name: "thermostatSetpoint", value: clamped, unit: location.temperatureScale,
@@ -331,11 +343,17 @@ def setScheduleEnabled(String enabled) {
         log.warn "[SunStat] ${device.displayName}: setScheduleEnabled('${enabled}') — value must be 'on' or 'off'; command ignored"
         return
     }
+    // Capture pre-event value for write-guard (must read before emitIfChanged may call sendEvent)
+    String currentSched = safeStr(device.currentValue("scheduleEnabled"))
     // Optimistic update before API call
     emitIfChanged("scheduleEnabled", lower, "${device.displayName} scheduleEnabled is ${lower}")
     String deviceId = device.getDataValue("wattsDeviceId")
     if (!deviceId) {
         log.error "[SunStat] ${device.displayName}: no wattsDeviceId — cannot send command. Run discoverDevices() on the parent."
+        return
+    }
+    if (currentSched == lower) {
+        debugLog "setScheduleEnabled: already '${lower}' — skipping PATCH"
         return
     }
     debugLog "setScheduleEnabled(${lower}) → wattsDeviceId=${deviceId}"
