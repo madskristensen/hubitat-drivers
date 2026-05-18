@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.22
+ * Version: 0.1.23
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.23 — 2026-05-18 — skip default DP writes during power-on when current attribute value already matches the configured default
  *   0.1.22 — 2026-05-18 — add traceEnable preference; demote heartbeat/refresh chatter and unchanged-DP echoes to trace level
  *   0.1.21 — 2026-05-17 — HealthCheck capability + lastActivity attribute
  *   0.1.20 — 2026-05-17 — active-TCP IP discovery (discover command) + improved DHCP connection-fail error
@@ -1147,11 +1148,17 @@ def applyOnPowerOnDefaults() {
     if (flameColor && FLAME_COLOR_TO_DP.containsKey(flameColor)) {
         Integer flameColorDp = dpFor("flameColor")
         if (flameColorDp != null) {
-            String flameColorDpValue = FLAME_COLOR_TO_DP[flameColor]
-            emitAttribute("flameColor", flameColor, "${device.displayName} default flame color set to ${flameColor}", "digital")
-            infoLog "Applied default: flameColor=${flameColor}"
-            sendDpWrite(flameColorDp.toString(), flameColorDpValue, "${POWER_ON_DEFAULT_REASON_PREFIX}flame color", WRITE_REFRESH_DELAY_SECONDS)
-            appliedAny = true
+            String currentFlameColor = device.currentValue("flameColor")
+            if (currentFlameColor != null && currentFlameColor == flameColor) {
+                traceLog "applyOnDefaults: skipping defaultFlameColor — already '${flameColor}'"
+            } else {
+                debugLog "applyOnDefaults: applying defaultFlameColor = '${flameColor}' (was '${currentFlameColor}')"
+                String flameColorDpValue = FLAME_COLOR_TO_DP[flameColor]
+                emitAttribute("flameColor", flameColor, "${device.displayName} default flame color set to ${flameColor}", "digital")
+                infoLog "Applied default: flameColor=${flameColor}"
+                sendDpWrite(flameColorDp.toString(), flameColorDpValue, "${POWER_ON_DEFAULT_REASON_PREFIX}flame color", WRITE_REFRESH_DELAY_SECONDS)
+                appliedAny = true
+            }
         } else {
             log.warn "[Touchstone] defaultFlameColor is set but flame color is not mapped for profile '${activeDeviceProfile()}'"
         }
@@ -1161,11 +1168,17 @@ def applyOnPowerOnDefaults() {
     if (flameBrightness && FLAME_BRIGHTNESS_TO_DP.containsKey(flameBrightness)) {
         Integer flameBrightnessDp = dpFor("flameBrightness")
         if (flameBrightnessDp != null) {
-            String flameBrightnessDpValue = FLAME_BRIGHTNESS_TO_DP[flameBrightness]
-            emitAttribute("flameBrightness", flameBrightness, "${device.displayName} default flame brightness set to ${flameBrightness}", "digital")
-            infoLog "Applied default: flameBrightness=${flameBrightness}"
-            sendDpWrite(flameBrightnessDp.toString(), flameBrightnessDpValue, "${POWER_ON_DEFAULT_REASON_PREFIX}flame brightness", WRITE_REFRESH_DELAY_SECONDS)
-            appliedAny = true
+            String currentFlameBrightness = device.currentValue("flameBrightness")
+            if (currentFlameBrightness != null && currentFlameBrightness == flameBrightness) {
+                traceLog "applyOnDefaults: skipping defaultFlameBrightness — already '${flameBrightness}'"
+            } else {
+                debugLog "applyOnDefaults: applying defaultFlameBrightness = '${flameBrightness}' (was '${currentFlameBrightness}')"
+                String flameBrightnessDpValue = FLAME_BRIGHTNESS_TO_DP[flameBrightness]
+                emitAttribute("flameBrightness", flameBrightness, "${device.displayName} default flame brightness set to ${flameBrightness}", "digital")
+                infoLog "Applied default: flameBrightness=${flameBrightness}"
+                sendDpWrite(flameBrightnessDp.toString(), flameBrightnessDpValue, "${POWER_ON_DEFAULT_REASON_PREFIX}flame brightness", WRITE_REFRESH_DELAY_SECONDS)
+                appliedAny = true
+            }
         } else {
             log.warn "[Touchstone] defaultFlameBrightness is set but flame brightness is not mapped for profile '${activeDeviceProfile()}'"
         }
@@ -1175,11 +1188,17 @@ def applyOnPowerOnDefaults() {
     if (flameSpeed && flameSpeed in FLAME_SPEED_OPTIONS) {
         Integer flameSpeedDp = dpFor("flameSpeed")
         if (flameSpeedDp != null) {
-            String flameSpeedDpValue = FLAME_SPEED_TO_DP[flameSpeed]
-            emitAttribute("flameSpeed", flameSpeed, "${device.displayName} default flame speed set to ${flameSpeed}", "digital")
-            infoLog "Applied default: flameSpeed=${flameSpeed}"
-            sendDpWrite(flameSpeedDp.toString(), flameSpeedDpValue, "${POWER_ON_DEFAULT_REASON_PREFIX}flame speed", WRITE_REFRESH_DELAY_SECONDS)
-            appliedAny = true
+            String currentFlameSpeed = device.currentValue("flameSpeed")
+            if (currentFlameSpeed != null && currentFlameSpeed == flameSpeed) {
+                traceLog "applyOnDefaults: skipping defaultFlameSpeed — already '${flameSpeed}'"
+            } else {
+                debugLog "applyOnDefaults: applying defaultFlameSpeed = '${flameSpeed}' (was '${currentFlameSpeed}')"
+                String flameSpeedDpValue = FLAME_SPEED_TO_DP[flameSpeed]
+                emitAttribute("flameSpeed", flameSpeed, "${device.displayName} default flame speed set to ${flameSpeed}", "digital")
+                infoLog "Applied default: flameSpeed=${flameSpeed}"
+                sendDpWrite(flameSpeedDp.toString(), flameSpeedDpValue, "${POWER_ON_DEFAULT_REASON_PREFIX}flame speed", WRITE_REFRESH_DELAY_SECONDS)
+                appliedAny = true
+            }
         } else {
             log.warn "[Touchstone] defaultFlameSpeed is set but flame speed is not mapped for profile '${activeDeviceProfile()}'"
         }
@@ -1189,11 +1208,17 @@ def applyOnPowerOnDefaults() {
     if (charcoalColor && CHARCOAL_COLOR_TO_DP.containsKey(charcoalColor)) {
         Integer charcoalColorDp = dpFor("charcoalColor")
         if (charcoalColorDp != null) {
-            String charcoalColorDpVal = CHARCOAL_COLOR_TO_DP[charcoalColor]
-            emitAttribute("charcoalColor", charcoalColor, "${device.displayName} default charcoal color set to ${charcoalColor}", "digital")
-            infoLog "Applied default: charcoalColor=${charcoalColor}"
-            sendDpWrite(charcoalColorDp.toString(), charcoalColorDpVal, "${POWER_ON_DEFAULT_REASON_PREFIX}charcoal color", WRITE_REFRESH_DELAY_SECONDS)
-            appliedAny = true
+            String currentCharcoalColor = device.currentValue("charcoalColor")
+            if (currentCharcoalColor != null && currentCharcoalColor == charcoalColor) {
+                traceLog "applyOnDefaults: skipping defaultCharcoalColor — already '${charcoalColor}'"
+            } else {
+                debugLog "applyOnDefaults: applying defaultCharcoalColor = '${charcoalColor}' (was '${currentCharcoalColor}')"
+                String charcoalColorDpVal = CHARCOAL_COLOR_TO_DP[charcoalColor]
+                emitAttribute("charcoalColor", charcoalColor, "${device.displayName} default charcoal color set to ${charcoalColor}", "digital")
+                infoLog "Applied default: charcoalColor=${charcoalColor}"
+                sendDpWrite(charcoalColorDp.toString(), charcoalColorDpVal, "${POWER_ON_DEFAULT_REASON_PREFIX}charcoal color", WRITE_REFRESH_DELAY_SECONDS)
+                appliedAny = true
+            }
         } else {
             log.warn "[Touchstone] defaultCharcoalColor is set but charcoal color is not mapped for profile '${activeDeviceProfile()}'"
         }
