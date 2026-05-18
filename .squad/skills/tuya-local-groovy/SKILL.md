@@ -269,10 +269,12 @@ def openSocket() {
 }
 ```
 
-### Heartbeat (10 s self-rescheduling)
+### Heartbeat (20 s self-rescheduling)
+
+> **Interval rationale:** Cypher's protocol research (`.squad/agents/cypher/history.md`) confirmed 20s is a verified-stable keep-alive interval for Tuya v3.3 Sideline hardware. Earlier guidance used 10s; bumping to 20s halves the scheduled-job + sendEvent load with no observed socket drops. Do not exceed 25s without hardware verification — Tuya idles connections at ~30s.
 
 ```groovy
-@Field static final Integer HEARTBEAT_INTERVAL_SECONDS = 10
+@Field static final Integer HEARTBEAT_INTERVAL_SECONDS = 20
 
 def sendHeartbeat() {
     if (!preferencesReady() || state.socketOpen != true) return
@@ -422,7 +424,7 @@ Mirror the auto-disable pattern: in `updated()`, schedule `runIn(1800, "traceOff
 ### What goes at each level
 
 **traceLog (firehose — off by default):**
-- "Heartbeat sent" (every 10 s on a persistent socket)
+- "Heartbeat sent" (every 20 s on a persistent socket)
 - Heartbeat ACK received (cmd == TUYA_CMD_HEARTBEAT path)
 - "Queued / Sent Tuya cmd N for refresh" — only when reason == "refresh" (periodic polling)
 - "Decoded Tuya payload: {...}" — raw wire dump; always trace, never debug
@@ -529,7 +531,7 @@ Some Tuya fireplace (and heater) models visibly flicker or emit an audible click
 - [ ] AES-ECB encrypt/decrypt helpers
 - [ ] request queue + one-in-flight guard
 - [ ] 5s / 15s / 30s retry backoff (command-level)
-- [ ] **Persistent socket:** `openSocket()` + 10 s self-rescheduling heartbeat + reconnect backoff [5s, 30s, 60s, 300s]
+- [ ] **Persistent socket:** `openSocket()` + 20 s self-rescheduling heartbeat + reconnect backoff [5s, 30s, 60s, 300s]
 - [ ] `socketState` attribute surfaced on dashboard
 - [ ] `intentionalCloseAt` timestamp guard in `closeSocket()` / `socketStatus()` to suppress spurious reconnects
 - [ ] delayed refresh after writes when the device has stale post-transition DPs

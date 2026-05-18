@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.26
+ * Version: 0.1.27
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.27 — 2026-05-18 — throttle lastActivity emit to ≥60s + raise heartbeat 10s→20s (Cypher-verified stable interval); cuts ~8400 sendEvent + 4300 scheduled-job ticks/day per device (perf audit fixes #1 + #3)
  *   0.1.26 — 2026-05-18 — skip redundant setFlameColor/Brightness/Speed/setCharcoalColor/setHeatLevel/setHeatingSetpoint/setChildLock DP writes when attribute already matches (audit T-4 through T-10)
  *   0.1.25 — 2026-05-18 — skip redundant on()/off() DP writes when switch is already in the requested state (audit T-2, T-3)
  *   0.1.24 — 2026-05-18 — close v0.1.23 gap: defaultHeatingSetpoint now also skips redundant DP write when device setpoint already matches
@@ -87,8 +88,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.26"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.26"
+@Field static final String DRIVER_VERSION = "0.1.27"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.27"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -107,7 +108,7 @@ import javax.crypto.spec.SecretKeySpec
 @Field static final Integer TUYA_CMD_CONTROL_NEW = 13
 @Field static final Integer DEFAULT_POLL_SECONDS = 300
 @Field static final Integer RESPONSE_TIMEOUT_SECONDS = 5
-@Field static final Integer HEARTBEAT_INTERVAL_SECONDS = 10
+@Field static final Integer HEARTBEAT_INTERVAL_SECONDS = 20
 @Field static final List<Integer> RECONNECT_DELAYS_SECONDS = [5, 30, 60, 300]
 @Field static final Integer WRITE_REFRESH_DELAY_SECONDS = 3
 @Field static final Integer POWER_REFRESH_DELAY_SECONDS = 8
@@ -864,9 +865,16 @@ def parse(String message) {
             updateOnlineStatus("online", "Device responded")
             pumpQueue()
             // Persistent socket: do NOT close after response — stay open for push frames.
-            String tsActivity = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
-            sendEvent(name: "lastActivity", value: tsActivity,
-                      descriptionText: "${device.displayName} last activity")
+            // Throttle lastActivity emit to ≥60s: every inbound frame (heartbeat ACK, push,
+            // command response) used to emit, producing ~4300 events/day at the 20s heartbeat
+            // interval. 60s preserves at-a-glance freshness without filling event-history DB.
+            Long lastEmittedAt = (state.lastActivityEmittedAt ?: 0L) as Long
+            if ((now() - lastEmittedAt) >= 60000L) {
+                state.lastActivityEmittedAt = now()
+                String tsActivity = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
+                sendEvent(name: "lastActivity", value: tsActivity,
+                          descriptionText: "${device.displayName} last activity")
+            }
             if (state.pingPending == true) {
                 state.pingPending = false
                 sendEvent(name: "healthStatus", value: "online",
