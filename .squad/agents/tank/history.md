@@ -1,9 +1,23 @@
-# Project Context
+# Tank — Driver Developer
 
-- **Owner:** Mads Kristensen
-- **Project:** hubitat-drivers — Groovy device drivers for Hubitat Elevation
-- **Stack:** Groovy (Hubitat sandbox), Hubitat platform APIs
-- **Created:** 2026-05-16
+**⚠️ SUMMARIZED 2026-05-18T01:41:11Z — Main history moved to `history-archive.md` (file was 20,381 bytes).**
+
+---
+
+## Current Active Work (2026-05-18)
+
+### Touchstone v0.1.18 — Persistent Socket + Tuya Push Subscriptions
+- **Shipped:** 2026-05-17 (Commit 67f905b)
+- **Status:** Pending Switch hardware validation
+
+### Gemstone v0.4.10 — Multi-Controller Zones / Named Controller Binding
+- **Shipped:** 2026-05-17 (Commit e35b666)
+- **Status:** Pending Switch hardware validation
+
+### Touchstone v0.1.11 — DP 105 Removal (Awaiting Mads Test)
+- **Investigation:** Mads tested setLogBrightness on real hardware — no response
+- **Conclusion:** DP 105 is read-only on Sideline Elite
+- **Action:** Removed command, attribute, and default preference
 
 ## Active Milestones Summary
 
@@ -154,4 +168,26 @@ Added in OPTIONS bounds-checks + log.warn + early bail in pplyDps() for enum DP
 
 
 - Touchstone DP 104 = 'Charcoal Color' in the Tuya app (not 'Log Color' — the driver historically used the wrong term). 12 palette values verified: 1=Orange (default), 2=Red, 3=Blue, 4=Yellow, 5=Green, 6=Purple, 7=Cyan, 8=Magenta, 9=White, 10=Pink, 11=Rainbow (8-segment), 12=Spotlight (best-guess; mostly-white circle with orange wedge in the app). Rename completed in v0.1.17 — breaking change, no alias.
+
+## Learnings (v0.1.18 — Persistent Socket)
+
+- 2026-05-17 — **Persistent socket lifecycle pattern:** use `interfaces.rawSocket.connect()` on `initialize()` and keep it open forever. Schedule a 10 s heartbeat via `runIn(HEARTBEAT_INTERVAL_SECONDS, "sendHeartbeat")` inside the `sendHeartbeat` handler itself — this is the Hubitat-safe alternative to sub-minute cron (`schedule()` can be unreliable for sub-60 s intervals on some hub versions). On success, `sendHeartbeat` reschedules itself; on send failure, it calls `scheduleReconnect()` and returns without rescheduling.
+
+- 2026-05-17 — **Tuya heartbeat (cmd 9) requires truly empty payload.** `buildTuyaFrame(TUYA_CMD_HEARTBEAT, "")` would AES-encrypt the empty string, producing 16 bytes of PKCS5 padding — that's NOT a valid Tuya heartbeat. Fix: add a special case in `encryptTuyaPayload()` that returns `new byte[0]` when `cmd == TUYA_CMD_HEARTBEAT`. The frame then has length=8 (crc+suffix only), matching the `b'\x00\x00\x55\xaa...\x00\x09\x00\x00\x00\x0c...'` reference bytes from TinyTuya.
+
+- 2026-05-17 — **intentionalCloseAt timestamp pattern for socketStatus suppression:** rather than a boolean `intentionalClose` flag (which has race conditions between `closeSocket()` → `initialize()` clearing it → `socketStatus()` firing), use a timestamp: `state.intentionalCloseAt = now()` in `closeSocket()`, and in `socketStatus()` check `(now() - intentionalAt) < 3000L`. Stale timestamps from previous sessions are safe — after a hub reboot, `now()` will be days/hours later, so `now() - oldTs >> 3000` and the guard never fires.
+
+- 2026-05-17 — **Push frame handling is free:** existing `parse()` → `consumeReceiveBuffer()` → `processFrame()` → `applyDps()` pipeline already handles any inbound Tuya STATUS frame (cmd 8) regardless of whether it was solicited. Push frames from the physical remote arrive on the same socket and get processed identically. No separate push handler needed — just don't close the socket after a response.
+
+- 2026-05-17 — **pumpQueue without ensureSocketConnected:** in the persistent socket model, `pumpQueue()` should check `state.socketOpen != true` and return early rather than trying to connect on-demand. The reconnect path (`scheduleReconnect` → `reconnectSocket` → `openSocket`) will pump the queue after it succeeds. This avoids a race where pumpQueue opens a second connection while reconnect is already in progress.
+
+- 2026-05-17 — **Do NOT close socket on responseTimeout in persistent model.** The old pattern (responseTimeout → closeSocket → scheduleRetry) was necessary when each poll opened a fresh connection. With a persistent socket, closing on timeout would tear down the connection unnecessarily. Instead: requeueInFlight + scheduleRetry only. If the socket is genuinely broken, `socketStatus()` will fire and trigger reconnect independently.
+
+- 2026-05-17 — **Poll interval reduction with persistent socket:** 5 minutes is the right default for the safety-net refresh poll when push updates are live. The old 60 s default was compensating for missed physical-remote events that are now handled by push frames. Reducing the default avoids unnecessary load on both the Hubitat hub and the Tuya device.
+
+- 2026-05-17 — **Multi-controller binding via blank-defaults preference (Gemstone v0.4.10):** The cleanest way to support "N physical devices, each bound to a different cloud entity" is a single `controllerName` text preference on the existing driver. Blank = first-found (100% backward compat). Non-blank = case-insensitive trim match against discovered device names. Graceful degradation: no-match logs available names and falls back to first device. Set `state.availableControllers` (sorted, comma-joined) after discovery so users can copy-paste exact spelling. Suppress the "multiple controllers" warning when `controllerName` is set — multiple devices is expected and the warn would be noise. This pattern is reusable for any cloud driver where the same API account can return multiple independently addressable devices.
+
+- 2026-05-17 — **Name-match sanitization idiom:** always do `settings.controllerName?.trim()?.toLowerCase()` and `safeString(it?.name).trim().toLowerCase()` before comparing. Guards against leading/trailing spaces in user preferences AND in cloud-returned names. Gemstone controller names come from a mobile app where users may accidentally add spaces.
+
+- 2026-05-17 — **Backward-compat-via-blank-preference idiom:** when adding a new binding preference to an existing driver, make the blank/null case reproduce the exact old behavior with zero code divergence. Use `?: ""` to normalize null/blank to empty string, then `if (wanted)` to branch. Users upgrading see no change unless they explicitly set the new preference.
 

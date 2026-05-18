@@ -33,6 +33,31 @@ QA and testing specialist for Hubitat drivers. Focuses on real-device validation
 
 ---
 
+### 2026-05-18T01:41:11Z — New Test Areas Queued for Hardware Validation
+
+**Two new test suites awaiting your hardware validation:**
+
+1. **Touchstone v0.1.18 persistent socket** — Tests 34–37 (TESTING.md)
+   - Test 34: Socket persistence (confirm `socketState = "open"` after 5+ min idle)
+   - Test 35: Heartbeat send (confirm no "Heartbeat failed" errors; device stays connected)
+   - Test 36: Reconnect backoff (simulate loss; verify 5s → 30s → 60s → 300s progression)
+   - Test 37: Push frames (press remote button; verify dashboard updates within 1 s, not waiting for 5-min poll)
+   - **Risks to watch:** Single TCP slot (Tuya enforces one connection); push/response ambiguity at protocol level; heartbeat format must be zero-byte payload
+   - **Pass criteria:** All four tests confirm or fail with clear symptom (e.g., "heartbeat timeout after X minutes")
+
+2. **Gemstone v0.4.10 multi-controller zones** — Tests 19–22 (TESTING.md)
+   - Test 19: Multiple controllers discovered (confirm `devices.size() > 1` from account)
+   - Test 20: Controller binding (create two Hubitat devices; set `controllerName` to "Front of House" and "Eaves"; verify each controls correct zone)
+   - Test 21: Graceful fallback (set `controllerName = "Nonexistent"`; verify warning logs but driver continues on first device)
+   - Test 22: Independent operation (toggle lights on two separate Hubitat devices; confirm each controls correct physical controller)
+   - **Risks to watch:** Controller naming stability (are names unique?); device group schema unconfirmed; per-zone effect catalog uniformity
+   - **Pass criteria:** All four tests confirm, including graceful fallback on no-match
+
+**Expectation:** Run both test suites on real hardware after Tank's commits land (Touchstone 67f905b, Gemstone e35b666). Report findings to team channel.
+
+---
+
 ## Team updates
 
 - 2026-05-17: Participated in top-3 driver improvements batch — sunstat v0.1.6, touchstone v0.1.6, gemstone v0.4.9.
+- 2026-05-18: Queued for validation: Touchstone v0.1.18 persistent socket (Tests 34–37) + Gemstone v0.4.10 multi-zones (Tests 19–22). Both ready for hardware testing.

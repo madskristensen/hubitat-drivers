@@ -28,6 +28,93 @@ Archived: Gemstone Lights v0.1.0–v0.3.0 development, detailed technical learni
 
 ---
 
+## 2026-05-17 Sessions Archived (tank-1, tank-2, tank-4 early)
+
+Archived at 2026-05-18T01:41:11Z when main history.md exceeded 15 KB (20,381 bytes).
+
+### Gemstone v0.4.9 — Multi-Effect Orchestration (Session tank-1, ~180 s)
+
+- Shipped next/previous effect buttons + effect carousel UI.
+- Built `effectNameForPatternId` and `effectIndexForPatternId` reverse lookup maps at catalog finalization (O(1) instead of O(n) linear scans on every effect activation).
+- Pattern: store effect metadata keyed by patternId; build reverse index maps at catalog refresh time; consume maps in command paths.
+
+### SunStat v0.1.5 / v0.1.6 — Async HTTP Migration (Session tank-2, ~240 s)
+
+- **Key finding:** Synchronous HTTP on hot paths (polling, token refresh) stalls the Hubitat hub thread.
+- **Migration pattern:** Replace blocking `httpGet` / `httpPost` with `asynchttpGet` / `asynchttpPatch`. Keep token refresh synchronous (`refreshTokensSync`) so caller always has valid token. Dispatch per-device polls via async with data map carrying `[childDni, deviceId, retry401: true]`.
+- **On 401 in callback:** Call `throttled401Refresh()` (rate-limited to once per 60 s) then re-issue as fresh `asynchttpGet` with `retry401: false`. NEVER nest a sync HTTP call inside an async callback.
+- **Duration:** 2 full rewrites of parent driver (v0.1.5 partial async + v0.1.6 complete async migration).
+
+### Cross-Driver Audit (Session tank-4 early, 2026-05-17 15:41 UTC)
+
+Scanned Gemstone, SunStat, Touchstone. Found 11 anti-patterns:
+
+1. Sync HTTP on hot paths → async + rate-limit
+2. Nested blocking HTTP → dispatch fresh async on error
+3. Frequent `state.rxBuffer` writes → only on partial frame remaining
+4. Dead state writes → audit and remove
+5. O(n) reverse lookups → build O(1) maps at init
+6. JSON round-trip for shallow clones → use `new LinkedHashMap(source)`
+7. Boxed Integer in loops → use `int` primitive
+8. Guard block duplication → extract helper
+9. Double-negative guards → prefer `== true`
+10. Missing `capability "Actuator"` on command parents
+11. `USER_AGENT` literal not synced to `DRIVER_VERSION` → add comment "keep in sync"
+
+**Init-time cleanup pattern:** Any `state.*InFlight` flag must reset to `false` in `initialize()` — hub reboot mid-operation leaves flags `true`.
+
+### Touchstone v0.1.4 — Safety + Sandbox Fixes (2026-05-17 12:22 UTC)
+
+- **v0.1.3 bundled with v0.1.4** (v0.1.3 never user-released; only v0.1.4 shipped).
+- **v0.1.3:** Added power-on defaults (flame color, log color, flame brightness, temp setpoint, heat level). Pattern: `runInMillis(1500, "applyOnPowerOnDefaults")` for firmware settle window.
+- **v0.1.4:** Removed `defaultHeatLevel` per Mads's safety directive (heater must never auto-toggle — radiant heat → fire/burn risk). Removed 2 executable `.getClass()` calls (Hubitat sandbox blocks reflection at runtime).
+- **Key decision:** Hardware safety > convenience. Added "Safety" README section: driver intentionally does NOT auto-start heater.
+
+### Touchstone v0.1.5 — App-only Preference UI Audit (2026-05-17 12:22 UTC)
+
+- **Learning:** Hubitat drivers must use only `input` fields; app UI helpers (`paragraph`, `section`, `href`, `app`, `mode`, `pageDefault`) are not allowed.
+- **Action:** Removed `paragraph` header; moved explanatory text into per-field `description:` text.
+- **Audit result:** No other app-only constructs found (`section`, `href`, `app`, `mode`, `pageDefault` all clean).
+
+### Touchstone v0.1.6 — Flame Speed + Enum Bounds-Check (2026-05-17 15:50 UTC)
+
+- **DP 103 (Flame Speed):** New command `setFlameSpeed(speed)` with enum ["Slow", "Medium", "Fast"]. (Switch to verify on hardware.)
+- **DP 105 (Log Brightness):** New command `setLogBrightness(level)` with numeric strings 1–12. (Unverified; paired with power-on default preference.)
+- **Removed:** `power` attribute (duplicate of `switch`). Internal DP role key `"power"` unchanged.
+- **Bounds-check hardening:** Added OPTIONS bounds-checks in `applyDps()` for all enum DPs (101, 102, 103, 104, 105). Prevents invalid device echoes from blanking the Hubitat UI.
+- **Commit:** 3fe727c
+
+### Touchstone v0.1.10 — Enum Bounds-Check Reinforcement (2026-05-17 17:39 UTC)
+
+- **Learning:** When user reports "display shows +1", bug is usually in the WRITE-side emit path (not parse-side). Both paths often reuse the same off-by-one math.
+- **Hubitat Commands-tab quirk:** Numeric-string ENUM parameters advance dropdown cosmetically but send correct value. Workaround: use `type: 'NUMBER'` with `range` instead.
+- **Status:** Awaiting Cypher's empirical test (DP 105/109 read-only confirmation) before final changelog.
+
+### Touchstone Color Palette Learnings
+
+- **DP 101 (Flame Color):** Verified labels from Tuya app screenshot: 1=Orange (default), 2=Blue, 3=White, 4=Orange+Blue, 5=Orange+White, 6=Blue+White.
+- **DP 104 (Charcoal Color):** Renamed from "Log Color" (a guess). Tuya app verified: 1=Orange, 2=Red, 3=Blue, 4=Yellow, 5=Green, 6=Purple, 7=Cyan, 8=Magenta, 9=White, 10=Pink, 11=Rainbow (8-segment), 12=Spotlight (best-guess).
+- **Future label verification:** Always request app screenshots before inventing labels. Hardware-independent labels (Dimmest, Dim, Medium, Brighter, Brightest) are safe; palette colors require verification.
+
+### Touchstone v0.1.17 — Charcoal Color Rename (2026-05-17 — Breaking Change)
+
+- **Commands:** `setLogColor(number)` → `setCharcoalColor("LabelName")`
+- **Attributes:** `logColor` → `charcoalColor`
+- **Preferences:** `defaultLogColor` → `defaultCharcoalColor`
+- **No backward-compat alias** (incompatible signatures: number → string enum).
+- **Existing numeric preferences silently skipped** on power-on; users must re-select.
+
+---
+
+## Status at Archive Time (2026-05-18T01:41:11Z)
+
+- **Shipped:** Touchstone v0.1.4–v0.1.17 (latest at archive time)
+- **In flight:** Touchstone v0.1.18 (persistent socket + Tuya push subscriptions), v0.1.11 (DP 105 removal)
+- **Pending Mads test:** DP 105 write-path confirmation; DP 109 ember brightness writable target
+- **Gemstone v0.4.10:** Multi-controller zones (controllerName preference, Option A-lite architecture) — shipped parallel to archive session
+- **Next wave:** Switch to run Tests 34–37 (Touchstone socket) and Tests 19–22 (Gemstone zones)
+
+
 ### 2026-05-16T14:08:16-07:00: Gemstone Lights driver scaffold (v0.1.0)
 
 **Status:** ARCHIVED

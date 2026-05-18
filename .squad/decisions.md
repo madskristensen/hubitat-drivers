@@ -1,5 +1,493 @@
 # Decisions
 
+
+# Decision Record — Touchstone v0.1.18: Persistent Socket Architecture
+
+**By:** Tank
+**Date:** 2026-05-17
+**Status:** Shipped — pending Switch hardware validation
+
+---
+
+## Context
+
+Prior to v0.1.18, the Touchstone driver used an open→send→wait 2s→close pattern for every Tuya command. This meant the socket was idle between polls, so spontaneous push frames emitted by the device (e.g., physical remote presses) were never received. Hubitat dashboards showed stale state between 60-second poll cycles.
+
+---
+
+## Decision: Replace ephemeral socket with persistent long-lived connection
+
+### What changed
+
+1. **Socket lifecycle:** `initialize()` calls `runIn(1, "openSocket")` which calls `interfaces.rawSocket.connect()` and never closes. Socket stays open indefinitely.
+2. **Heartbeat:** `sendHeartbeat()` fires every 10 s via self-rescheduling `runIn(HEARTBEAT_INTERVAL_SECONDS, "sendHeartbeat")`. Tuya devices time out idle connections after ~30 s.
+3. **Reconnect:** `scheduleReconnect()` / `reconnectSocket()` with backoff [5 s, 30 s, 60 s, 300 s]. Resets on successful open.
+4. **Intentional close suppression:** `closeSocket()` stamps `state.intentionalCloseAt = now()`. `socketStatus()` checks `(now() - intentionalAt) < 3000L` before triggering reconnect. Avoids spurious reconnect loops on `updated()` and `uninstalled()`.
+5. **Push frame handling:** No new code needed — existing `parse()` → `processFrame()` → `applyDps()` handles spontaneous STATUS frames (cmd 8) identically to polled responses.
+6. **pumpQueue:** Checks `state.socketOpen != true` and bails early; queued writes drain after reconnect via `retryPendingRequests()`.
+7. **responseTimeout:** No longer closes the socket — just requeues and retries via `scheduleRetry()`.
+8. **socketState attribute:** New `enum ["open","closed","reconnecting","error"]` — surfaces at info level, visible on dashboards.
+
+### Heartbeat frame format
+
+Tuya cmd 9 (HEART_BEAT) must have **truly empty payload** — zero bytes, no encryption. Added special case in `encryptTuyaPayload()`:
+```groovy
+if (cmd == TUYA_CMD_HEARTBEAT) {
+    return new byte[0]
+}
+```
+Without this, AES-PKCS5 of empty input produces 16 bytes of padding, which is not a valid Tuya heartbeat and may cause device-side errors.
+
+### Poll interval
+
+Default changed from 60 s → 300 s. Push frames now carry live state; polling is a safety net only.
+
+---
+
+## Risks / open items for Switch
+
+- **Single TCP slot:** Tuya v3.3 devices allow only one connection at a time. If Smart Life app is open on the same LAN, the persistent socket cannot connect. The driver retries with backoff — same behavior as before, but now more visible via `socketState = reconnecting`.
+- **Push frame correlation:** The driver cannot distinguish "response to my write" from "push from remote" at the protocol level (both arrive as cmd 8). It processes both via `applyDps()`. If a push frame arrives during an in-flight write, `awaitingResponse` is cleared early. This is acceptable — the write already happened; the next refresh reconciles if needed.
+- **Heartbeat format:** The reference bytes match the TinyTuya heartbeat. If the Sideline Elite firmware rejects cmd 9, Switch should look for `[Touchstone] Heartbeat failed` in logs and report back.
+- **readDelay: 150:** Kept from original. May need tuning if push frames are being missed.
+
+---
+
+## Alternatives considered
+
+- **runEvery1Minute for heartbeat:** Hubitat only supports 1-minute minimum for most `runEvery*` helpers. 10 s requires `runIn()` rescheduled inside the handler. Accepted approach.
+- **pauseExecution(600) in updated():** Rejected in favor of `runIn(1, "openSocket")` which gives OS 1 s to release the port without blocking the hub event thread.
+- **Correlated response tracking via seq numbers:** Deferred. The driver already uses seq numbers in frame headers, but doesn't verify that response seq matches request seq. Acceptable for now — push vs response ambiguity is benign.
+---
+
+# Decision: DP 105 (Log Brightness) Non-Writable on Sideline Elite — Command Removed
+
+**Date:** 2026-05-17  
+**Author:** Tank (Driver Developer)  
+**Driver version:** v0.1.11
+
+## Finding
+
+Mads tested `setLogBrightness("12")` directly from the Hubitat device page on the real
+Touchstone Sideline Elite. The fireplace logs did not respond. This was a direct call to the
+named command's send path — it bypassed `setRawDP` and its known coercion bug, refuting the
+earlier hypothesis that the failure was purely a type-coercion issue.
+
+Additionally, Cypher confirmed in the decisions log that DP 105 is string-typed per the
+device YAML, so a string → integer coercion issue in `setRawDP` would not have explained
+the named-command failure anyway.
+
+**Conclusion:** DP 105 is read-only or unimplemented on the Sideline Elite firmware. Writes
+are silently dropped regardless of value type or send path.
+
+## Action Taken
+
+- Removed `setLogBrightness` command from driver (v0.1.11)
+- Removed `logBrightness` attribute from driver metadata
+- Removed `defaultLogBrightness` power-on default preference
+- Removed `LOG_BRIGHTNESS_OPTIONS` constant
+- Removed `logBrightness: 105` from `SIDELINE_PROFILE_DPS`
+- DP 105 inbound status updates are now silently absorbed at debug level only (the device
+  does appear to send DP 105 in status responses, but the value is not actionable)
+
+## Pending
+
+The actual write target for log/ember brightness control on the Sideline Elite is unknown.
+DP 109 is under separate investigation by Cypher (ember brightness write target). If a
+confirmed writable DP is identified, the command may be re-added with the correct DP number.
+
+Do NOT re-add `setLogBrightness` pointed at DP 105 without hardware-confirmed write evidence.
+---
+
+# Decision: Touchstone DP 104 — Rename to "Charcoal Color" with Verified Labels
+
+**Date:** 2026-05-17  
+**Driver:** Touchstone / Tuya Fireplace  
+**Version:** v0.1.17  
+**Author:** Tank (Driver Developer)
+
+## Context
+
+The Touchstone Sideline Elite fireplace exposes DP 104 as an ember/log color picker with 12 palette slots. The driver historically called this feature "Log Color" (`setLogColor`, `logColor` attribute, `defaultLogColor` preference). This terminology was a guess.
+
+Mads Kristensen supplied a second Tuya app screenshot showing the actual label the Tuya app uses for this control: **"Charcoal"** (or "Charcoal Color"). This confirmed the internal name was wrong.
+
+## Decision
+
+Rename all driver references from "Log Color" to "Charcoal Color":
+
+| Old | New |
+|-----|-----|
+| `setLogColor(number)` | `setCharcoalColor("LabelName")` |
+| `attribute "logColor"` | `attribute "charcoalColor"` |
+| `defaultLogColor` preference | `defaultCharcoalColor` preference |
+| `LOG_COLOR_OPTIONS` (numeric strings) | `CHARCOAL_COLOR_OPTIONS` + lookup maps |
+
+## Authoritative Label Mapping (DP 104)
+
+Verified from Tuya app palette picker in app order (left-to-right, top-to-bottom):
+
+| DP value | Label       | Notes |
+|----------|-------------|-------|
+| "1"      | Orange      | Default selected in app |
+| "2"      | Red         | |
+| "3"      | Blue        | |
+| "4"      | Yellow      | |
+| "5"      | Green       | |
+| "6"      | Purple      | |
+| "7"      | Cyan        | |
+| "8"      | Magenta     | |
+| "9"      | White       | |
+| "10"     | Pink        | |
+| "11"     | Rainbow     | 8-segment multi-color pie chart |
+| "12"     | Spotlight   | ⚠️ Best-guess — mostly-white circle with small orange wedge in app |
+
+## Breaking Change
+
+This is a **breaking rename**. No backward-compat alias was added. Existing Rule Machine automations using `setLogColor(N)` must be migrated to `setCharcoalColor("LabelName")`.
+
+Existing `defaultLogColor` numeric preferences (saved from v0.1.14) will not match new label strings and are silently skipped on the next power-on. Users must re-select from the new ENUM dropdown.
+
+## Rationale
+
+- Naming commands to match the Tuya app reduces confusion when users cross-reference the app and the Hubitat driver.
+- Converting from NUMBER to named ENUM prevents invalid inputs and provides a user-friendly dropdown in the Hubitat UI.
+- "Spotlight" is acknowledged as a best-guess label; it will be updated if the real Tuya app label is supplied.
+- No alias was added because the old `setLogColor(number)` signature is incompatible with the new `setCharcoalColor(string)` signature.
+---
+
+# Tank Decisions — Gemstone v0.4.10 Multi-Zone
+
+**By:** Tank  
+**Date:** 2026-05-17  
+**Driver:** `drivers/gemstone-lights/gemstone-lights.groovy`  
+**Version shipped:** 0.4.10
+
+---
+
+## Decision 1: Architecture — Option A-lite adopted as specified
+
+Implemented Cypher's recommended Option A-lite (multi-instance with named controller preference). No parent/child, no new endpoints. One Hubitat device per Gemstone zone, each with its own `controllerName` preference.
+
+**Rationale:** Zero architecture changes. Backward compatible. Hubitat users already manage multiple devices natively. Rule Machine can group them trivially.
+
+---
+
+## Decision 2: `controllerName` preference placement
+
+Added as the **last** preference field (after `txtEnable`). All required/functional prefs come first; `controllerName` is optional and advanced, so it belongs at the bottom of the preferences block.
+
+---
+
+## Decision 3: Graceful degradation on no-match
+
+When `controllerName` is set but no controller matches: `log.warn` with the available names list, then fall back to `devices[0]`. The driver continues to function (does NOT leave `state.deviceId` unbound). This is better than failing silently or throwing an error.
+
+---
+
+## Decision 4: Suppress multi-controller warning when `controllerName` is set
+
+The pre-v0.4.10 warning ("Multiple Gemstone controllers were found — using first") was noise when the user intentionally has multiple controllers. v0.4.10 suppresses it when `controllerName` is non-blank and emits it only when `controllerName` is blank (user hasn't configured multi-zone yet).
+
+---
+
+## Decision 5: `state.availableControllers` as diagnostic state (not attribute)
+
+Stored in `state` (not as a device attribute). This keeps it out of the primary device tile UI while still being readable from the device page's **State Variables** section. Sorted alphabetically, comma-joined for readability.
+
+---
+
+## Decision 6: `USER_AGENT` synced to v0.4.10
+
+The USER_AGENT string was stale at `0.4.8` across multiple versions. Synced to `0.4.10`. Comment "keep in sync with DRIVER_VERSION" retained.
+
+---
+
+## Open items for Switch (hardware verification)
+
+1. Confirm `devices.size() > 1` for Mads's account from `GET /homegroup/devices`
+2. Verify `controllerName = "Eaves"` binds to the Eaves controller and that commands route there
+3. Verify graceful degradation: `controllerName = "Nonexistent"` → warn fires with name list, driver continues on fallback
+4. Verify two Hubitat devices with different `controllerName` values operate independently without interference
+5. Check `state.availableControllers` is populated after first successful auth+discovery
+
+See `drivers/gemstone-lights/TESTING.md` Tests 19–22 for the full test plan.
+---
+
+# Gemstone Zones / Segments — API Feasibility
+
+**By:** Cypher  
+**Date:** 2026-05-17  
+**Requested by:** Mads Kristensen  
+**Status:** Ready for Tank
+
+---
+
+## 1. Verdict
+
+✅ **Feasible — proceed.**
+
+The Gemstone cloud REST API fully supports independent per-zone control. The key finding: Gemstone's "zones" are **multiple physical controllers**, each with its own `deviceId`, targetable via the same API the driver already uses. No new endpoints are required. The primary driver change is relaxing the current "pick first device, ignore the rest" behavior and letting the user select which controller(s) to target.
+
+---
+
+## 2. Reference Implementation Found
+
+| Repo | URL | What it covers |
+|------|-----|----------------|
+| `sslivins/pygemstone` | https://github.com/sslivins/pygemstone | Low-level async client; all REST endpoints, all payload models, Cognito SRP auth |
+| `sslivins/hass-gemstone` | https://github.com/sslivins/hass-gemstone | HA integration layer; shows multi-device discovery and one-entity-per-controller pattern |
+
+Both repos updated **~1 day ago** at time of research. pygemstone README explicitly states the endpoint catalogue was derived from a `mitmproxy --mode wireguard` capture of the official iOS app (`com.gemstone.lights`, v0.6.03).
+
+---
+
+## 3. Protocol Spec
+
+### Auth (unchanged from current driver)
+
+Cognito USER_PASSWORD_AUTH, same as v0.4.9. No changes for zone support.
+
+```
+POST https://cognito-idp.us-west-2.amazonaws.com/
+Content-Type: application/x-amz-json-1.1
+X-Amz-Target: AWSCognitoIdentityProviderService.InitiateAuth
+
+{ "AuthFlow": "USER_PASSWORD_AUTH",
+  "ClientId": "2647t144niotrl53vvru0ivno7",
+  "AuthParameters": { "USERNAME": "<email>", "PASSWORD": "<password>" } }
+```
+
+Source: `pygemstone/src/pygemstone/const.py`
+
+---
+
+### Device Discovery
+
+Returns all physical controllers in a homegroup. This is where "zones" live.
+
+```
+GET https://mytpybpq12.execute-api.us-west-2.amazonaws.com/prod/homegroup/devices
+    ?homegroupId=<homegroupId>
+Authorization: Bearer <accessToken>
+
+Response:
+{
+  "data": [
+    { "id": "<uuid>", "name": "Front of House", "homegroupId": "<uuid>",
+      "firmware": "...", "disconnectReason": null, "lastUpdatedAt": 1716000000 },
+    { "id": "<uuid>", "name": "Eaves",           "homegroupId": "<uuid>", ... },
+    { "id": "<uuid>", "name": "Soffit",          "homegroupId": "<uuid>", ... }
+  ]
+}
+```
+
+Source: `pygemstone/src/pygemstone/client.py:devices()`, `models.py:Device.from_api()`
+
+The current driver already calls this endpoint (`/homegroup/devices`, action `discoverDevices`), but discards all entries after `devices[0]` — line 1288-1289 of the Groovy driver. It logs a warning when multiple are found.
+
+---
+
+### Get Device State (per zone)
+
+```
+GET /deviceControl/currentlyPlaying?deviceOrGroupId=<deviceId>
+Authorization: Bearer <accessToken>
+
+Response:
+{
+  "data": {
+    "id": "<deviceId>",
+    "onState": true,
+    "pattern": {
+      "id": "<uuid>", "name": "Pulse",
+      "colors": [4294902015],        // ABGR unsigned 32-bit ints
+      "animation": "motionless",
+      "brightness": 200,
+      "speed": 128,
+      "direction": 0,
+      "backgroundColor": 0,
+      "referencePatternId": "<uuid-or-null>"
+    },
+    "lastUpdatedAt": 1716000000
+  }
+}
+```
+
+Source: `pygemstone/src/pygemstone/client.py:device_state()`, `models.py:DeviceState.from_api()`
+
+---
+
+### Turn On/Off (per zone)
+
+```
+PUT /deviceControl/onState?deviceOrGroupId=<deviceId>
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+{ "onState": true }
+
+Response:
+{ "data": { "txId": "<uuid>" } }
+```
+
+Source: `pygemstone/src/pygemstone/client.py:set_on_state()`
+
+---
+
+### Play Pattern (per zone)
+
+```
+PUT /deviceControl/play/pattern?deviceOrGroupId=<deviceId>
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+{
+  "pattern": {
+    "id": "<uuid>",          // must be real UUID from a prior GET; do NOT synthesize
+    "name": "Hubitat Solid Color",
+    "colors": [4278190335],  // ABGR unsigned 32-bit, alpha=0xFF always
+    "animation": "motionless",
+    "brightness": 200,        // 0-255 wire scale
+    "speed": 128,
+    "direction": 0,
+    "backgroundColor": 0
+    // omit referencePatternId entirely (do not send null)
+  }
+}
+
+Response:
+{ "data": { "txId": "<uuid>" } }
+```
+
+Source: `pygemstone/src/pygemstone/client.py:play_pattern()`, `models.py:Pattern.to_api()`
+
+The `deviceOrGroupId` query param is the **only** thing that changes when targeting a different zone. All other payload fields are identical.
+
+---
+
+### Device Groups (multi-controller targeting — unconfirmed schema)
+
+```
+GET /deviceGroup/list?homegroupId=<homegroupId>
+Authorization: Bearer <accessToken>
+
+Response: { "data": [] }   // capture saw empty list; schema unknown
+```
+
+Source: `pygemstone/src/pygemstone/client.py:device_groups()` — docstring explicitly notes: *"The capture saw an empty list — the per-group schema is not yet known — so raw dicts are returned."*
+
+The `deviceOrGroupId` param naming implies group IDs from this endpoint can be passed to control endpoints, allowing one command to fan out across multiple physical controllers. **But this is speculative from the param name only; no group response payload has been captured.**
+
+---
+
+## 4. Zone Model
+
+### What a "zone" is
+
+A Gemstone "zone" is a **physical controller** — a separate hardware unit with its own LED string and its own cloud `id`. It is a server-side entity created when the user pairs a controller with the Gemstone mobile app.
+
+There is **no per-pixel segmentation** within a single controller exposed by the cloud API. The `Pattern.colors` array is a list of palette colors, not per-pixel addresses.
+
+### What a "device group" is
+
+A device group (`/deviceGroup/list`) is a user-defined grouping of multiple physical controllers. Commanding a group via `deviceOrGroupId=<groupId>` appears to fan out the command to all member controllers simultaneously. The schema is not confirmed from any non-empty capture.
+
+### Persistence
+
+Zones (devices) are server-side, stable, UUID-keyed, created in the Gemstone mobile app. They don't change without the user explicitly renaming or unpairing a controller. The device `id` is a UUID; stable for the lifetime of the pairing.
+
+### Discovery flow
+
+1. `GET /homegroup/list` → list of homegroup IDs
+2. For each homegroup: `GET /homegroup/devices?homegroupId=<id>` → list of Device records with id + name
+3. Store all `{id, name}` pairs
+
+The current Hubitat driver already performs steps 1–2 but discards all but the first device.
+
+---
+
+## 5. Recommended Architecture
+
+### **Recommended: Option A-lite — Multi-instance with named controller preference**
+
+Full parent/child adds Groovy complexity (addChildDevice, parent-child state passing, child component drivers) without meaningful benefit for the typical 2–4 controller case. The simpler path achieves the same result:
+
+**Add a `controllerName` preference to the existing driver.**  
+When `controllerName` is blank → keep current behavior (bind to first controller found — preserves backward compatibility).  
+When `controllerName` is a non-blank string → after discovery, bind to the controller whose `name` matches (case-insensitive). If not found, log which controllers were discovered and fall back to first-found.
+
+**User creates one Hubitat device per Gemstone zone:**
+- Device 1 `controllerName = "Front of House"` → binds to that device's UUID
+- Device 2 `controllerName = "Eaves"` → binds to that device's UUID
+- Device 3 `controllerName = "Soffit"` → binds to that device's UUID
+
+Each Hubitat device independently authenticates (shared Cognito client ID, separate token cache), independently polls, independently manages its effect catalog. No coordination needed between devices — each is fully self-contained.
+
+**Why this beats true parent/child for v1:**
+- Zero architecture changes — same single-driver model
+- Backward compatible (blank `controllerName` = current behavior)
+- M drivers means M auth flows, but Cognito token refresh is cheap and Gemstone doesn't impose per-token rate limits in the API
+- Hubitat users already manage multiple devices; Rule Machine can group them trivially
+
+### Option B — True parent/child
+
+Parent driver: auth only, discovery, stores full `state.deviceList`. Creates child devices via `addChildDevice()`. Children share nothing (Hubitat driver isolation means each child still needs its own token store or the parent must call a `setToken()` method on each child). Correct for large installs (>6 controllers) but over-engineered for the typical 2–4 zone case.
+
+### Option C — Scene-only (`setZoneColor(zoneId, hue, sat)`)
+
+Requires exposing device IDs to users, which are opaque UUIDs. Poor UX. Discard.
+
+---
+
+## 6. Implementation Work Breakdown (for Tank)
+
+**Dependency order:**
+
+1. **[S] Add `controllerName` preference** — `input name: "controllerName", type: "text", title: "Controller name"`. Empty = current first-device behavior.
+
+2. **[S] Update `handleDevicesResponse()`** — after receiving the device list, if `controllerName` is set, find the first device whose `name` case-insensitively equals the preference. If not found, log the available names and fall back to first device (with a `log.warn`). Assign `state.deviceId` and `state.deviceName` as before.
+
+3. **[S] Update authStatus message** — already shows `state.deviceName`, which is the selected controller's name. No change needed; users will see `"Authenticated: Eaves"` etc. already.
+
+4. **[S] Backward-compatibility guard** — when `controllerName` is blank/null, `handleDevicesResponse()` must continue to pick `devices[0]` and the warn-multiple log must be adjusted to only fire when `controllerName` is blank (otherwise multiple devices found is expected).
+
+5. **[M] Update README** — document the `controllerName` preference and the multi-instance pattern for zone control. Add a "Multiple zones / controllers" section.
+
+6. **[S] (Optional) Add `availableControllers` attribute** — after discovery, set `state.availableControllers = device names joined by comma`. Useful for debugging which names are available. Not user-facing in the main UI.
+
+**Total estimate:** S-M overall. No new API calls. No new driver architecture. The biggest risk is the case-insensitive name-match logic being fragile against leading/trailing spaces or emoji in Gemstone controller names — sanitize both sides with `.trim().toLowerCase()`.
+
+---
+
+## 7. Unknowns — What Switch Must Verify on Real Hardware
+
+1. **Multiple controller accounts confirmed?** — Switch should confirm Mads's account has `devices.size() > 1` returned from `GET /homegroup/devices`. The current driver logs `"Multiple Gemstone controllers were found..."` if so.
+
+2. **Device group schema** — Is `GET /deviceGroup/list?homegroupId=<id>` ever non-empty? If so, what fields does it return? Can a `groupId` actually be passed as `deviceOrGroupId` to control all member controllers simultaneously? If Mads has configured groups in the app, this endpoint would return data. **Capturing this response would unlock multi-zone simultaneous control** (one command, all zones together — useful for "all on/off" without N separate calls).
+
+3. **Controller naming stability** — Are controller names guaranteed unique per homegroup? The API returns an `id` (UUID) + `name`, but there's no uniqueness constraint evident in the schema. If two controllers have the same name, the `controllerName` preference match would be ambiguous; should fall back to an index preference or UUID preference as an advanced option.
+
+4. **Per-zone effect catalog** — Does each physical controller support the same full effect/pattern catalog? (Likely yes — patterns are account-level, not controller-level — but confirm.)
+
+5. **Polling rate per device** — With 3 Hubitat devices each polling at 5-minute intervals, that's 3× the cloud requests. Gemstone doesn't publish rate limits. Two iOS app captures showed no rate-limit responses; 30s polling in HA was fine. 5-minute intervals per device should be well within any undocumented budget.
+
+---
+
+## 8. Sources
+
+| Claim | Source |
+|-------|--------|
+| `deviceOrGroupId` query param used by all control endpoints | `pygemstone/src/pygemstone/client.py:set_on_state()`, `device_state()`, `play_pattern()` |
+| Device schema (id, name, homegroupId, firmware) | `pygemstone/src/pygemstone/models.py:Device.from_api()` |
+| Pattern schema (colors=ABGR list, no pixel-range fields) | `pygemstone/src/pygemstone/models.py:Pattern.from_api()` |
+| `device_groups()` returns empty list, schema unknown | `pygemstone/src/pygemstone/client.py:device_groups()` docstring |
+| hass-gemstone creates one HA entity per physical controller | `hass-gemstone/custom_components/gemstone/__init__.py:async_setup_entry()` lines enumerating all devices across all homegroups |
+| Current Hubitat driver discards all but first device | `drivers/gemstone-lights/gemstone-lights.groovy:handleDevicesResponse()` lines 1284-1289 |
+| `buildApiParams()` sets `query.deviceOrGroupId = state.deviceId` | `drivers/gemstone-lights/gemstone-lights.groovy` line 1619 |
+| iOS app capture source for endpoints | `pygemstone/src/pygemstone/const.py` header comment |
+---
+
 ## 2026-05-17T16:34:52-07:00 — Cypher — DP 105 / DP 109 real-hardware investigation
 
 **By:** Cypher
@@ -168,7 +656,8 @@ Confirmed Type-Coercion Bug (Hypothesis B) must ship as v0.1.10 regardless of Hy
 - Found 2 executable hits:
   1. parse() diagnostic logging (.getClass().getName()) at original v0.1.3 line 449
   2. dpValueType() fallback type-name logging (alue.getClass().getSimpleName().toLowerCase())
-- Confirmed no instance .class reads, no .metaClass, no method/field introspection calls, no Class.forName(), no espondsTo()/hasProperty(), and no method-pointer syntax in the driver.
+- Confirmed no instance .class reads, no .metaClass, no method/field introspection calls, no Class.forName(), no 
+espondsTo()/hasProperty(), and no method-pointer syntax in the driver.
 - Remaining getClass text is comments/changelog only; no executable reflection calls remain.
 
 ---
@@ -183,7 +672,8 @@ Confirmed Type-Coercion Bug (Hypothesis B) must ship as v0.1.10 regardless of Hy
 - Each default is independent: blank/unset preferences do nothing, so the fireplace keeps whatever value its firmware remembered.
 
 **Delay choice:**
-- Used unInMillis(1500, "applyOnPowerOnDefaults").
+- Used 
+unInMillis(1500, "applyOnPowerOnDefaults").
 - Rationale: Touchstone's off→on transition has a short settle window, and DP 14 / Fahrenheit setpoint was previously observed to revert briefly during that window. A 1500 ms delay is a conservative first pass that keeps the UI snappy while giving the firmware a beat before follow-up writes.
 - Follow-up writes still use the existing queued retry/backoff path, so Smart Life / Tuya single-client socket contention behavior is unchanged.
 
@@ -283,7 +773,8 @@ This pattern is applicable to future drivers controlling power-consuming or haza
 
 ---
 
-# Decisions
+
+# Decisions
 
 ## 2026-05-17T11:31:31-07:00 — Touchstone v0.1.2 CRC32 allowlist fix
 
@@ -838,15 +1329,20 @@ Tank needs the contract to implement setBoost / cancelBoost on SunStat v0.1.6. N
 
 Pattern: synchronous token refresh + async fan-out + 401 single-retry.
 
-1. **Token refresh stays synchronous** (efreshTokensSync()) — called before fan-out begins so all async calls share one valid token.
-2. **Polling and patching use synchttpGet / synchttpPatch** — each passes data map with childDni and etry401: true.
-3. **401 recovery uses 	hrottled401Refresh()** — rate-limits refreshes to one per 60 seconds, calls efreshTokensSync(), re-issues with etry401: false.
+1. **Token refresh stays synchronous** (
+efreshTokensSync()) — called before fan-out begins so all async calls share one valid token.
+2. **Polling and patching use synchttpGet / synchttpPatch** — each passes data map with childDni and 
+etry401: true.
+3. **401 recovery uses 	hrottled401Refresh()** — rate-limits refreshes to one per 60 seconds, calls 
+efreshTokensSync(), re-issues with 
+etry401: false.
 4. **429 rate-limit handling** — log warn once per 60 seconds, no retry.
 5. **Discovery stays synchronous** — user-triggered, sequential, not on hot path.
 
 ### Why
 
-Hub thread stall eliminated during polling cycles. Backward-compatible (removed etry401 parameter default, but children never passed it explicitly).
+Hub thread stall eliminated during polling cycles. Backward-compatible (removed 
+etry401 parameter default, but children never passed it explicitly).
 
 ### Caveats
 

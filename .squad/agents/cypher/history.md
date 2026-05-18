@@ -1,9 +1,28 @@
 # Cypher — Integration / Protocol Engineer
 
-Recent contributions documented in history-archive.md. Current session: SunStat v0.1.4 API diagnosis.
+**⚠️ SUMMARIZED 2026-05-18T01:41:11Z — Main history moved to `history-archive.md` (file was 19,042 bytes).**
 
-- 2026-05-17T04:24:00Z: SunStat v0.1.4 — diagnosed API envelope unwrap bug, shipped bootstrap script
-- 2026-05-16: SunStat Connect Plus API research complete (Azure AD B2C, token refresh documented)
+---
+
+## Current Active Work (2026-05-18)
+
+### Gemstone Zones / Segments — API Feasibility Research (Session cypher-3)
+- **Shipped:** 2026-05-17 
+- **Verdict:** ✅ Feasible via multi-instance + controllerName preference (Option A-lite)
+- **Reference impls:** sslivins/pygemstone + sslivins/hass-gemstone
+- **Duration:** 263s
+- **Deliverable:** `.squad/decisions/inbox/cypher-gemstone-zones-feasibility.md` (merged into decisions.md)
+
+### Key Findings
+- Gemstone zones = multiple physical controllers, each with own deviceId
+- Cloud API supports independent per-zone control via `deviceOrGroupId` query parameter
+- No new endpoints needed
+- Device groups may unlock simultaneous multi-zone control (schema unconfirmed)
+
+---
+
+## Archive
+**Previous sessions:** SunStat research, Bosch feasibility analysis, and detailed protocol learnings saved to `history-archive.md`
 
 ## 2026-05-17 (session cypher-3) — Gemstone setColor + setColorTemperature Both Broken
 
@@ -95,7 +114,48 @@ Full report at: `.squad/decisions/inbox/cypher-gemstone-color-ct-both-broken.md`
 
 ---
 
+## 2026-05-17 (session cypher-8) — Gemstone Zones / Segments API Feasibility
+
+**Full report:** `.squad/decisions/inbox/cypher-gemstone-zones-feasibility.md`
+
+**Verdict:** ✅ Feasible — proceed.
+
+### Key findings
+
+1. **Zones = multiple physical controllers.** The Gemstone cloud API does NOT expose per-pixel segmentation within a single controller. "Zones" in the Gemstone app are separate physical controllers (hardware units), each with its own UUID (`deviceId`). All control endpoints already accept any `deviceId` via the `deviceOrGroupId` query parameter.
+
+2. **No new API calls needed.** The current driver already calls `GET /homegroup/devices` and receives the full list of controllers; it silently discards all but `devices[0]`. The entire zone-support change is: stop discarding, let the user pick which controller to bind to via a new `controllerName` preference.
+
+3. **Device groups** (`GET /deviceGroup/list?homegroupId=<id>`) — the multi-controller group endpoint exists in the API but the iOS app capture saw only an empty list. Schema is unknown. The `deviceOrGroupId` param naming implies groups are targetable; unconfirmed.
+
+4. **pygemstone models confirm no segment fields.** `Pattern.from_api()` parses `colors` (a list of ABGR ints for the palette), `brightness`, `speed`, `direction`, `animation`, `backgroundColor` — no pixel-range, zone-id, or segment-index fields. Per-pixel addressing is not surfaced at all.
+
+5. **hass-gemstone architecture confirms one entity per device.** `async_setup_entry()` iterates all devices across all homegroups and creates one `GemstoneCoordinator` + one `GemstoneLight` entity per physical controller. Hubitat's analog is one driver instance per controller.
+
+### Recommended architecture
+
+**Option A-lite — multi-instance with `controllerName` preference.** Same driver, new optional preference. Blank = backward-compatible first-device behavior. Non-blank = bind to named controller. User creates one Hubitat device per zone. No parent/child needed for the typical 2–4 controller case.
+
+### Reference repos discovered
+
+- `sslivins/pygemstone` — https://github.com/sslivins/pygemstone (low-level client, all endpoint models)
+- `sslivins/hass-gemstone` — https://github.com/sslivins/hass-gemstone (HA integration, multi-device pattern)
+
+---
+
 ## Learnings Summary
+
+### 2026-05-17 — Gemstone zones: per-zone control is per-physical-controller
+
+**Definitive finding from pygemstone + hass-gemstone capture analysis:**
+- Gemstone "zones" = separate physical controllers (separate UUIDs). No per-pixel segmentation API exists.
+- All control endpoints (`/deviceControl/onState`, `/deviceControl/play/pattern`, `/deviceControl/currentlyPlaying`) accept `?deviceOrGroupId=<id>` where `id` can be any discovered controller's UUID.
+- The current driver already calls `GET /homegroup/devices` and receives all controllers; it only uses `devices[0]`.
+- `GET /deviceGroup/list?homegroupId=<id>` is real but returned empty in the capture; schema unknown. Potential fan-out command target.
+- `Pattern.colors` is a color palette list, not per-pixel addressing.
+- **Minimum viable zone support**: add `controllerName` preference, bind by name after discovery, keep backward compat.
+
+
 
 ### 2026-05-17 — Tuya Key-Extraction Landscape (Portal-Free Audit)
 
