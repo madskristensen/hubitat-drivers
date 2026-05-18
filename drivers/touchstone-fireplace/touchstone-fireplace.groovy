@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.17
+ * Version: 0.1.18
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.18 — 2026-05-17 — persistent socket + Tuya push subscriptions (physical remote now syncs in real time)
  *   0.1.17 — 2026-05-17 — rename setLogColor → setCharcoalColor with verified labels
  *   0.1.16 — 2026-05-17 — gate v0.1.15 diagnostic flame-color logs
  *   0.1.15 — 2026-05-17 — setFlameColor verified Tuya app labels + wire debug logging
@@ -78,8 +79,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.17"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.15"
+@Field static final String DRIVER_VERSION = "0.1.18"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.18"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -96,9 +97,10 @@ import javax.crypto.spec.SecretKeySpec
 @Field static final Integer TUYA_CMD_HEARTBEAT = 9
 @Field static final Integer TUYA_CMD_DP_QUERY = 10
 @Field static final Integer TUYA_CMD_CONTROL_NEW = 13
-@Field static final Integer DEFAULT_POLL_SECONDS = 60
+@Field static final Integer DEFAULT_POLL_SECONDS = 300
 @Field static final Integer RESPONSE_TIMEOUT_SECONDS = 5
-@Field static final Integer SOCKET_IDLE_CLOSE_SECONDS = 2
+@Field static final Integer HEARTBEAT_INTERVAL_SECONDS = 10
+@Field static final List<Integer> RECONNECT_DELAYS_SECONDS = [5, 30, 60, 300]
 @Field static final Integer WRITE_REFRESH_DELAY_SECONDS = 3
 @Field static final Integer POWER_REFRESH_DELAY_SECONDS = 8
 @Field static final Long POWER_TRANSITION_SETTLE_MILLIS = 10000L
@@ -189,6 +191,7 @@ metadata {
         attribute "heatLevel",        "enum",   ["off", "low", "high"]
         attribute "heatingSetpoint",  "number"
         attribute "online",           "enum",   ["online", "offline", "unknown"]
+        attribute "socketState",      "enum",   ["open", "closed", "reconnecting", "error"]
         attribute "dp103",            "string"
         attribute "dp107",            "string"
         attribute "dp108",            "string"
@@ -265,9 +268,9 @@ metadata {
               required: false
 
         input name: "pollInterval", type: "enum",
-              title: "Polling interval",
-              options: ["0": "Disabled", "30": "30 seconds", "60": "60 seconds (recommended)", "120": "2 minutes", "300": "5 minutes", "600": "10 minutes"],
-              defaultValue: "60",
+              title: "Polling interval (safety-net refresh; physical remote changes update instantly via push)",
+              options: ["0": "Disabled", "30": "30 seconds", "60": "60 seconds", "120": "2 minutes", "300": "5 minutes (recommended)", "600": "10 minutes"],
+              defaultValue: "300",
               required: true
 
         input name: "logEnable", type: "bool",
@@ -287,7 +290,7 @@ metadata {
 def installed() {
     log.info "Touchstone / Tuya Fireplace v${DRIVER_VERSION} installed"
     device.updateSetting("deviceProfile", [value: PROFILE_SIDELINE, type: "enum"])
-    device.updateSetting("pollInterval", [value: "60", type: "enum"])
+    device.updateSetting("pollInterval", [value: "300", type: "enum"])
     device.updateSetting("setpointUnit", [value: "F", type: "enum"])
     device.updateSetting("logEnable", [value: false, type: "bool"])
     device.updateSetting("txtEnable", [value: true, type: "bool"])
@@ -304,8 +307,11 @@ def updated() {
     state.retryIndex = 0
     state.statusCommand = null
     state.seqNo = 0L
-    state.manualSocketCloseAt = null
     state.remove("dpBaseline")
+
+    // Close existing socket before re-initializing; intentionalCloseAt suppresses the
+    // socketStatus() disconnect callback that fires after rawSocket.close().
+    closeSocket(false)
 
     if (settings.logEnable) {
         runIn(1800, "logsOff")
@@ -317,20 +323,29 @@ def updated() {
 
 def initialize() {
     debugLog "initialize() called"
-    unschedule("poll")
-    unschedule("retryPendingRequests")
-    unschedule("responseTimeout")
-    unschedule("closeSocketIfIdle")
+    unschedule()
     closeSocket(false)
+
+    state.pendingRequests = []
+    state.inFlight = null
+    state.awaitingResponse = false
+    state.rxBuffer = ""
+    state.retryIndex = 0
+    state.statusCommand = null
+    state.seqNo = 0L
+    state.socketOpen = false
+    state.reconnectAttempts = 0
 
     if (!preferencesReady()) {
         updateOnlineStatus("unknown", "Waiting for device IP, device ID, and a 16-character local key")
+        updateSocketState("closed")
         return
     }
 
     ensureDefaultAttributes()
     schedulePolling()
-    runIn(2, "refresh")
+    // 1-second delay gives the OS time to release the port from the just-closed socket.
+    runIn(1, "openSocket")
 }
 
 def uninstalled() {
@@ -543,25 +558,23 @@ def socketStatus(String message) {
         return
     }
 
-    debugLog "socketStatus: ${text}"
+    state.lastSocketEventTs = now()
 
-    Long manualCloseAt = safeLong(state.manualSocketCloseAt, null)
-    if (manualCloseAt != null && (now() - manualCloseAt) < 2000L) {
-        state.manualSocketCloseAt = null
+    // Suppress callbacks triggered by our own intentional close (updated/uninstalled/initialize).
+    Long intentionalAt = safeLong(state.intentionalCloseAt, 0L)
+    if ((now() - intentionalAt) < 3000L) {
+        debugLog "socketStatus (intentional close, suppressed): ${text}"
         return
     }
-    state.manualSocketCloseAt = null
+
+    debugLog "socketStatus: ${text}"
 
     String lower = text.toLowerCase()
     if (lower.contains("disconnect") || lower.contains("error") || lower.contains("reset") || lower.contains("broken pipe") || lower.contains("closed")) {
+        state.socketOpen = false
         requeueInFlight()
-        closeSocket(false)
-
-        if (hasPendingWork()) {
-            scheduleRetry("Socket closed before the fireplace answered. Another Tuya client may still own the single TCP slot (tinytuya 901 equivalent).")
-        } else {
-            updateOnlineStatus("offline", text)
-        }
+        updateOnlineStatus("offline", text)
+        scheduleReconnect()
     }
 }
 
@@ -571,6 +584,8 @@ def parse(String message) {
         debugLog "parse() received an empty/invalid payload"
         return
     }
+
+    state.lastSocketEventTs = now()
 
     try {
         String buffer = safeStr(state.rxBuffer) ?: ""
@@ -589,7 +604,7 @@ def parse(String message) {
             state.retryIndex = 0
             updateOnlineStatus("online", "Device responded")
             pumpQueue()
-            scheduleSocketClose(SOCKET_IDLE_CLOSE_SECONDS)
+            // Persistent socket: do NOT close after response — stay open for push frames.
         }
     } catch (Exception e) {
         log.warn "[Touchstone] parse() failed — ${e.message}"
@@ -653,8 +668,8 @@ private void pumpQueue() {
         return
     }
 
-    if (!ensureSocketConnected()) {
-        scheduleRetry("Unable to open the Tuya socket. Another client may be holding the single connection slot.")
+    if (state.socketOpen != true) {
+        debugLog "pumpQueue: socket not open; request will send after reconnect"
         return
     }
 
@@ -677,8 +692,8 @@ private void pumpQueue() {
         state.pendingRequests = retryQueue
         state.inFlight = null
         state.awaitingResponse = false
-        closeSocket(false)
-        scheduleRetry("Socket write failed. Another Tuya client may still own the single TCP slot.")
+        state.socketOpen = false
+        scheduleReconnect()
     }
 }
 
@@ -688,7 +703,6 @@ def responseTimeout() {
     }
 
     requeueInFlight()
-    closeSocket(false)
     updateOnlineStatus("offline", "No response within ${RESPONSE_TIMEOUT_SECONDS}s")
     scheduleRetry("No response from fireplace within ${RESPONSE_TIMEOUT_SECONDS}s. Backing off before retrying.")
 }
@@ -747,43 +761,85 @@ private List<Map> pendingRequestQueue() {
     return queue
 }
 
-private Boolean ensureSocketConnected() {
-    try {
-        if (interfaces.rawSocket.connected) {
-            return true
-        }
-    } catch (ignored) {
-        // fall through and reconnect
-    }
+// ---------------------------------------------------------------------------
+// Persistent socket lifecycle
+// ---------------------------------------------------------------------------
 
-    try {
-        state.manualSocketCloseAt = null
-        interfaces.rawSocket.connect(deviceIpValue(), TUYA_PORT, byteInterface: true, readDelay: 150)
-        debugLog "Opened raw socket to ${deviceIpValue()}:${TUYA_PORT}"
-        return true
-    } catch (Exception e) {
-        debugLog "rawSocket.connect failed: ${e.message}"
-        updateOnlineStatus("offline", "Connect failed")
-        return false
-    }
-}
-
-private void scheduleSocketClose(Integer delaySeconds) {
-    unschedule("closeSocketIfIdle")
-    runIn(delaySeconds, "closeSocketIfIdle")
-}
-
-def closeSocketIfIdle() {
-    if (state.awaitingResponse == true || pendingRequestQueue()) {
+def openSocket() {
+    if (!preferencesReady()) {
         return
     }
-    closeSocket(false)
+    try {
+        interfaces.rawSocket.connect(deviceIpValue(), TUYA_PORT, byteInterface: true, readDelay: 150)
+        state.socketOpen = true
+        state.reconnectAttempts = 0
+        state.lastSocketEventTs = now()
+        updateSocketState("open")
+        log.info "[Touchstone] Socket opened to ${deviceIpValue()}:${TUYA_PORT}"
+        unschedule("sendHeartbeat")
+        runIn(HEARTBEAT_INTERVAL_SECONDS, "sendHeartbeat")
+        runIn(2, "refresh")
+    } catch (Exception e) {
+        state.socketOpen = false
+        updateSocketState("error")
+        log.warn "[Touchstone] openSocket failed: ${e.message}"
+        scheduleReconnect()
+    }
+}
+
+def sendHeartbeat() {
+    if (!preferencesReady() || state.socketOpen != true) {
+        return
+    }
+    try {
+        byte[] frame = buildTuyaFrame(TUYA_CMD_HEARTBEAT, "")
+        String hex = hubitat.helper.HexUtils.byteArrayToHexString(frame)
+        interfaces.rawSocket.sendMessage(hex)
+        debugLog "Heartbeat sent"
+    } catch (Exception e) {
+        log.warn "[Touchstone] Heartbeat failed: ${e.message}"
+        state.socketOpen = false
+        unschedule("sendHeartbeat")
+        scheduleReconnect()
+        return
+    }
+    runIn(HEARTBEAT_INTERVAL_SECONDS, "sendHeartbeat")
+}
+
+def reconnectSocket() {
+    if (state.socketOpen == true) {
+        debugLog "reconnectSocket() called but socket already open"
+        return
+    }
+    Integer attempt = safeInt(state.reconnectAttempts, 0)
+    log.info "[Touchstone] Reconnecting socket (attempt ${attempt})"
+    openSocket()
+}
+
+private void scheduleReconnect() {
+    Integer attempt = safeInt(state.reconnectAttempts, 0)
+    Integer delay = RECONNECT_DELAYS_SECONDS[Math.min(attempt, RECONNECT_DELAYS_SECONDS.size() - 1)]
+    state.reconnectAttempts = (attempt + 1)
+    updateSocketState("reconnecting")
+    unschedule("reconnectSocket")
+    runIn(delay, "reconnectSocket")
+    log.warn "[Touchstone] Socket disconnected; reconnecting in ${delay}s (attempt ${attempt + 1})"
+}
+
+private void updateSocketState(String value) {
+    String current = safeStr(device.currentValue("socketState"))
+    if (current != value) {
+        log.info "[Touchstone] socketState → ${value}"
+        sendEvent(name: "socketState", value: value, descriptionText: "${device.displayName} socket state is ${value}")
+    }
 }
 
 private void closeSocket(Boolean markOffline) {
-    unschedule("closeSocketIfIdle")
+    // Stamp the intentional-close time so socketStatus() suppresses the resulting callback.
+    state.intentionalCloseAt = now()
+    state.socketOpen = false
+    unschedule("sendHeartbeat")
     try {
-        state.manualSocketCloseAt = now()
         interfaces.rawSocket.close()
     } catch (ignored) {
         // socket may already be closed
@@ -792,6 +848,7 @@ private void closeSocket(Boolean markOffline) {
     if (markOffline) {
         updateOnlineStatus("offline", "Socket closed")
     }
+    updateSocketState("closed")
 }
 
 private void queueDelayedRefresh(Integer delaySeconds) {
@@ -929,6 +986,10 @@ private byte[] buildTuyaFrame(Integer cmd, String payloadJson) {
 }
 
 private byte[] encryptTuyaPayload(Integer cmd, byte[] payloadBytes) {
+    // Heartbeat (cmd 9) must have a truly empty payload — skip AES to produce 0 bytes.
+    if (cmd == TUYA_CMD_HEARTBEAT) {
+        return new byte[0]
+    }
     byte[] encrypted = aesEncrypt(payloadBytes, localKeyBytes())
     if (!commandNeedsVersionHeader(cmd)) {
         return encrypted
@@ -1489,6 +1550,9 @@ private void ensureDefaultAttributes() {
     }
     if (device.currentValue("tempUnit") == null) {
         emitAttribute("tempUnit", preferredTempUnit(), "${device.displayName} preferred temperature unit is ${preferredTempUnit()}")
+    }
+    if (device.currentValue("socketState") == null) {
+        sendEvent(name: "socketState", value: "closed", descriptionText: "${device.displayName} socket state is closed")
     }
 }
 

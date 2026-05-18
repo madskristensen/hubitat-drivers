@@ -4,9 +4,9 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: v0.1.17 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
+> **Status: v0.1.18 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
 >
-> **Latest: v0.1.17** — `setLogColor` renamed to `setCharcoalColor` with 12 verified labels from the Tuya app charcoal/log color picker (Orange / Red / Blue / Yellow / Green / Purple / Cyan / Magenta / White / Pink / Rainbow / Spotlight). Converted from NUMBER input to named ENUM dropdown. **⚠️ Breaking change** — see [Breaking Changes](#breaking-changes) below.
+> **Latest: v0.1.18** — **Persistent socket + real-time push updates.** The driver now keeps the Tuya TCP socket open continuously, sends a heartbeat every ~10 s to hold the connection, and receives spontaneous push frames from the device (e.g., physical remote presses). Hubitat attributes now update within ~2 s of any physical remote action — no more stale dashboard values between poll cycles. A new `socketState` attribute (`open` / `closed` / `reconnecting` / `error`) is visible on dashboards. If the network drops or the device reboots, the driver reconnects automatically with backoff (5 s → 30 s → 60 s → 5 min cap). The safety-net poll interval is reduced to 5 minutes (was 60 s) since push frames now carry live state.
 >
 > **Killer feature:** Works out-of-the-box for Touchstone Sideline Elite; adapts to other Touchstone models (Steel, Forte, Onyx, etc.) and generic Tuya WiFi fireplaces via configurable Device Profiles and in-driver discovery — no Python, no manual tinytuya wizard needed.
 
@@ -23,8 +23,9 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 - **Switch** — Turn the fireplace on and off
 - **Refresh** — Poll device status on demand
-- **Initialize** — Establish socket connection on hub startup
-- **Polling** — Scheduled status updates (configurable interval)
+- **Initialize** — Open the persistent socket and rebuild schedules (called on hub startup)
+- **Polling** — Scheduled safety-net status poll (default 5 minutes; push updates from physical remote arrive instantly)
+- **Real-time push updates** — Physical remote button presses sync to Hubitat attributes within ~2 s via the persistent Tuya socket
 - **TemperatureMeasurement** — Read current room temperature
 - **Optional power-on defaults** — Flame color, charcoal color, flame brightness, temperature setpoint (heater intentionally excluded — see Safety)
 
@@ -40,6 +41,7 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 - **`flameSpeed`** — Flame animation speed: `Slow` / `Medium` / `Fast` (Sideline Elite DP 103)
 - **`charcoalColor`** — Charcoal/log color palette (Sideline Elite DP 104; 12 named labels verified from Tuya app)
 - **`online`** — Connection status (`online` / `offline` / `unknown`)
+- **`socketState`** — Persistent socket state (`open` / `closed` / `reconnecting` / `error`); visible on dashboards for at-a-glance connectivity health
 
 > **Breaking change (v0.1.6):** The `power` attribute has been removed. It was an exact duplicate of `switch` and emitted two identical events per state change. Use `switch` for all on/off automations.
 

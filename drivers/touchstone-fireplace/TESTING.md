@@ -1101,7 +1101,142 @@ Known mappings (verify on hardware):
 
 ---
 
-## Validation Criteria Summary
+## Test Area: Persistent Socket (v0.1.18)
+
+> **Pre-conditions for all tests in this area:** Driver v0.1.18 installed. Smart Life / Tuya app **closed** on all devices. Physical fireplace powered on.
+
+---
+
+### Test 34: Initial Socket Open — socketState and online on Initialize
+
+**What:** Verify the driver opens the persistent socket on `initialize()` and surfaces the correct attributes.
+
+**Pre-conditions:** Device is configured with valid IP, device ID, and local key.
+
+**Steps:**
+
+1. On the device page, click **Initialize** (or save Preferences to trigger `updated()` → `initialize()`).
+2. Watch the Logs page for 5–10 seconds.
+3. Observe the `socketState` and `online` attributes.
+
+**Expected:**
+
+- Logs show `[Touchstone] Socket opened to <ip>:6668` at info level.
+- `socketState` attribute transitions to `open` within ~2 seconds.
+- `online` transitions to `online` within ~5 seconds (after the post-connect refresh poll returns).
+- Logs show `Heartbeat sent` (debug level) approximately 10 seconds after the socket opened.
+- No `MissingMethodException`, `NullPointerException`, or `ClosedChannelException` in logs.
+- `socketState` attribute is visible on the Hubitat device page (not blank).
+
+**Actual:**
+(Fill in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 35: Heartbeat Survival — Socket Stays Open After 5 Minutes
+
+**What:** Verify the ~10 s heartbeat prevents the Tuya device from closing the idle connection.
+
+**Pre-conditions:** `socketState = open`. Debug logging enabled.
+
+**Steps:**
+
+1. Enable debug logging (Preferences → Enable debug logging → Save).
+2. Open the Logs page.
+3. Wait 5 minutes without sending any commands.
+4. Every ~10 seconds, confirm `Heartbeat sent` appears in debug logs.
+5. After 5 minutes, run `refresh()` manually.
+
+**Expected:**
+
+- `Heartbeat sent` appears in debug logs approximately every 10 seconds throughout the 5-minute window.
+- `socketState` remains `open` for the entire 5 minutes (never transitions to `reconnecting` or `error`).
+- After 5 minutes, `refresh()` succeeds: `online` remains `online` and attributes update.
+- Hub memory / state size does not grow noticeably (no log entries about state overflow).
+- `state.seqNo` visible in **Current States** increments with each sent frame (heartbeats + commands).
+
+**Actual:**
+(Fill in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+### Test 36: Push-Update Round Trip — Physical Remote → Hubitat Within 2 s
+
+**What:** Verify that pressing the physical remote triggers a Tuya push frame that the driver receives and applies to attributes — without waiting for the next poll.
+
+**Pre-conditions:** `socketState = open`. `online = online`. Physical remote available.
+
+**Steps:**
+
+1. Note the current `flameColor` (or any other DP-mapped attribute) in Hubitat.
+2. Press a physical remote button that changes that setting (e.g., press the flame color cycle button once).
+3. Watch the Hubitat Logs page and the device attribute panel simultaneously.
+4. Observe whether the attribute updates without any manual command or poll.
+
+**Expected:**
+
+- Within ~2 seconds of the remote button press, the relevant attribute (e.g., `flameColor`) updates in Hubitat.
+- Logs (debug) show a `Received Tuya cmd 8` (STATUS) or `cmd 7` frame decoded with the new DP values.
+- `applyDps` processes the incoming DP and emits a `physical` event (or at minimum updates the attribute value).
+- `online` remains `online`.
+- No `responseTimeout` or retry log lines triggered by the unsolicited frame.
+- The `switch` attribute correctly reflects `on`/`off` if the power button on the remote is pressed.
+
+**Actual:**
+(Fill in during testing — critical: confirm which remote buttons emit DP push frames)
+
+**Status:**
+(Pending — requires hardware with physical remote)
+
+---
+
+### Test 37: Auto-Reconnect After Network Blip / Device Reboot
+
+**What:** Verify the driver automatically reconnects when the TCP connection is dropped, and resumes normal operation.
+
+**Pre-conditions:** `socketState = open`. `online = online`.
+
+**Steps — Method A (unplug and replug device):**
+
+1. Note `socketState = open`.
+2. Physically unplug the fireplace's power cord for 5 seconds, then plug it back in.
+3. Watch the Logs page.
+4. Wait up to 5 minutes.
+
+**Steps — Method B (hub network drop simulation — no physical access to device):**
+
+1. On your router, temporarily block the Hubitat hub's access to the fireplace IP (or unplug the hub's Ethernet for 10 s, then reconnect).
+2. Watch the Logs page.
+3. After reconnecting, wait for the driver to reconnect.
+
+**Expected (both methods):**
+
+- Shortly after the disconnect, logs show `socketStatus: ...` with an error/disconnect message.
+- `socketState` transitions to `reconnecting`.
+- `online` transitions to `offline`.
+- Logs show `Socket disconnected; reconnecting in 5s (attempt 1)` (first attempt uses 5 s delay).
+- After the device comes back online, logs show `[Touchstone] Socket opened to <ip>:6668`.
+- `socketState` transitions back to `open`.
+- `online` transitions back to `online` after the post-reconnect refresh completes.
+- Heartbeat resumes (debug logs show `Heartbeat sent` within 10 s of reconnect).
+- Any commands issued during the disconnect window (queued in `state.pendingRequests`) are sent after reconnect.
+- No tight reconnect loop — wait times between attempts should be 5 s, then 30 s, then 60 s if the device stays down.
+
+**Actual:**
+(Fill in during testing)
+
+**Status:**
+(Pending)
+
+---
+
+
 
 Use this checklist to declare the driver "works" before recommending it to other community members.
 
@@ -1135,7 +1270,14 @@ Use this checklist to declare the driver "works" before recommending it to other
 - [ ] Power-on defaults apply ~1.5s after `on()`
 - [ ] Calling `off()` within 1.5s after `on()` cancels the pending defaults
 
-**Recovery**
+**Persistent Socket (v0.1.18)**
+
+- [ ] `socketState` attribute is visible and transitions to `open` within ~2 s of `initialize()`
+- [ ] `Heartbeat sent` debug log appears every ~10 s; socket stays open after 5+ minutes idle
+- [ ] Physical remote button press updates Hubitat attribute within ~2 s (push frame)
+- [ ] Network blip / device reboot → driver reconnects automatically; `socketState` recovers to `open`
+- [ ] No regression: `setFlameColor`, `setCharcoalColor`, `setFlameBrightness`, `setFlameSpeed`, `setHeatLevel` still work after v0.1.18 update
+
 
 - [ ] Network loss causes retry with 5s/15s/30s backoff (not a tight loop)
 - [ ] Smart Life app collision is detected; driver recovers when app closes
