@@ -852,3 +852,28 @@ Hub thread stall eliminated during polling cycles. Backward-compatible (removed 
 
 - Callback closures cannot capture live objects; use childDni string + getChildDevice() at callback time.
 - httpMethod() shim retained for setAwayModeInternal.
+
+---
+
+## 2026-05-17T17:48:55-07:00 — Tank — Touchstone v0.1.15 flame color authoritative labels (DP 101)
+
+**By:** Tank (Driver Developer)
+
+**Decision:** Use the following authoritative DP 101 flame color labels from Tuya app screenshot (Mads Kristensen):
+
+| DP value | Label         |
+|----------|---------------|
+| `"1"`    | Orange        |
+| `"2"`    | Blue          |
+| `"3"`    | White         |
+| `"4"`    | Orange+Blue   |
+| `"5"`    | Orange+White  |
+| `"6"`    | Blue+White    |
+
+Orange (`"1"`) is the app default.
+
+**Background:** v0.1.13 invented labels (Red, Orange, Yellow, …) without hardware verification, causing "set flame color doesn't work" report (UI Orange → DP `"2"` = Blue). v0.1.14 safely reverted to NUMBER. v0.1.15 restores named ENUM with verified labels.
+
+**Log color (DP 104):** 12-value palette labels unknown. `setLogColor` remains NUMBER (1–12) until hardware owner provides Tuya app screenshot. Do NOT invent log color labels.
+
+**Lesson:** Always request Tuya app screenshot from hardware owner before assigning human-readable labels to enum DPs. Owner-verified screenshots are the only trustworthy source.
