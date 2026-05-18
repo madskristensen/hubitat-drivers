@@ -95,7 +95,50 @@ A healthy first-time setup looks like:
 - the driver logs which Gemstone cloud device it bound to
 - **Refresh** pulls switch/level/color state without stack traces
 
-## Signature feature: favorites-first named effects
+## Multiple Zones / Controllers
+
+Gemstone installations often have multiple physical controllers — for example, *Front of House*, *Eaves*, and *Soffit*. Each controller is an independent zone with its own LED string. The v0.4.10 driver supports this with the **Controller name** preference.
+
+### How it works
+
+The new **Controller name (zone)** preference (in **Devices → your Gemstone device → Preferences**) tells this Hubitat device which physical controller to bind to.
+
+- **Blank (default):** Preserves v0.4.9 behavior — binds to the first controller found. Single-zone users do not need to change anything.
+- **Set to a name (e.g., `Eaves`):** After discovery, the driver binds to the controller whose name matches (case-insensitive, leading/trailing spaces trimmed). All commands — on/off, brightness, color, effects — route exclusively to that controller.
+
+### Multi-zone setup (one Hubitat device per controller)
+
+1. **Create a Hubitat virtual device** for each Gemstone controller:
+   - Device 1 — name it `Gemstone Front of House`, set **Controller name** to `Front of House`
+   - Device 2 — name it `Gemstone Eaves`, set **Controller name** to `Eaves`
+   - Device 3 — name it `Gemstone Soffit`, set **Controller name** to `Soffit`
+2. Each device uses the **same Gemstone account email/password**. Each authenticates independently and caches its own Cognito tokens.
+3. Each device polls the Gemstone cloud on its own schedule (default: every 5 minutes). With 3 devices that is 3× the cloud requests, still well within Gemstone's undocumented rate budget.
+
+### Finding your controller names
+
+The exact spelling must match the name configured in the Gemstone mobile app. Two ways to find it:
+
+- **Gemstone mobile app:** Open the app → your home → each zone/controller name appears in the UI.
+- **Install once without Controller name:** Save Preferences, let auth complete, then open the device page and inspect **State Variables** → `availableControllers`. This field lists all controller names for your account (comma-joined, alphabetically sorted). Copy the exact spelling from there into the **Controller name** preference.
+
+### What happens if the name doesn't match
+
+If **Controller name** is set but no controller with that name is found after discovery, the driver:
+
+1. Logs a `log.warn` that lists all available controller names.
+2. Falls back to the first controller found (graceful degradation — the driver continues to work, just bound to the wrong controller).
+3. Updates `state.availableControllers` so you can see the correct spelling.
+
+Correct the **Controller name** preference spelling and click **Save Preferences** to rebind.
+
+### Backward compatibility
+
+Upgrading from v0.4.9 with **Controller name** left blank is a no-op. The blank-preference path is identical to the old first-device behavior. No action is required for single-zone users.
+
+---
+
+
 
 `refreshEffectCatalog()` builds the two state structures that make named effects and dashboard effect pickers work together:
 
@@ -164,8 +207,8 @@ Rule Machine and Hubitat rules can use either `setEffect("Pulse")` or `playEffec
 
 ## Current Limitations
 
-- **Cloud-only:** v0.4.1 does not use Gemstone's local HTTP path
-- **One controller per Hubitat device:** the driver auto-selects the first Gemstone controller found in the first home group with devices
+- **Cloud-only:** v0.4.10 does not use Gemstone's local HTTP path
+- **One controller per Hubitat device:** create one device per zone and set the **Controller name** preference; see [Multiple Zones / Controllers](#multiple-zones--controllers) above
 - **ColorTemperature is an RGB fallback:** the Gemstone cloud spec still exposes no native Kelvin/CCT endpoint
 - **Favorites require a catalog refresh:** the driver auto-refreshes on demand, but manual `refreshEffectCatalog()` is still the fastest way to pick up newly starred/unstarred patterns
 - **Cloud lag exists:** Gemstone's `currentlyPlaying` endpoint can trail a just-sent command by roughly 30–60 seconds, so an immediate manual refresh may briefly show stale state
@@ -213,9 +256,11 @@ See `TESTING.md` for the manual plan covering:
 - Increase **HTTPS request timeout** if your WAN path is slow
 
 ### The wrong Gemstone controller was selected
-- v0.4.0 still binds to the first controller discovered in the first home group with devices
-- Check the logs for the device name the driver selected
-- Multi-controller targeting needs a future revision
+
+- Set the **Controller name** preference to the exact name of the controller you want (e.g., `Eaves`). Spelling is case-insensitive and leading/trailing spaces are trimmed.
+- Leave **Controller name** blank to use the first controller found (v0.4.9 behavior).
+- After saving preferences, check `state.availableControllers` on the device page to see the names discovered for your account.
+- If you have multiple zones, create one Hubitat device per controller and set a different **Controller name** on each.
 
 ### Refresh shows old state right after a command
 - This is a Gemstone cloud behavior, not a local parsing bug
@@ -229,6 +274,7 @@ This driver was informed by the Gemstone cloud API reverse engineering in:
 
 ## Changelog
 
+- **v0.4.10 (2026-05-17):** Multi-zone / multi-controller support via new `controllerName` preference. Blank = first-controller behavior (backward compatible). `state.availableControllers` lists all discovered controller names. USER_AGENT version string synced to driver version.
 - **v0.4.1 (2026-05-16):** Added `playEffectByName(String)` — separate command for WebCoRE users (WebCoRE doesn't see custom String overloads of capability methods).
 - **v0.4.0** — LightEffects with favorites, ColorTemperature RGB fallback, refresh optimizations.
 

@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.9
+ * Version: 0.4.10
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,14 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.10 — 2026-05-17 — multi-zone / multi-controller support
+ *     - New 'controllerName' preference: binds this Hubitat device to a specific Gemstone physical controller by name (case-insensitive, trimmed)
+ *     - Blank controllerName preserves v0.4.9 behavior (bind to first controller found)
+ *     - Create one Hubitat device per Gemstone zone/controller; each instance independently authenticates and controls its own controller
+ *     - state.availableControllers now lists all discovered controller names (comma-joined) for easy reference
+ *     - No-match graceful degradation: if controllerName is set but not found, log.warn lists available names and falls back to first device
+ *     - "Multiple controllers found" warning suppressed when controllerName is configured (multiple devices is expected)
+ *     - USER_AGENT version string brought in sync with DRIVER_VERSION (was stale at 0.4.8)
  *   0.4.9 — 2026-05-17 — reliability fixes for catalog & in-flight state
  *     - Stale in-flight flags (effectCatalogRefreshInFlight, discoveryInFlight, authInFlight) now cleared on initialize() — fixes silent no-op state after hub reboot mid-operation
  *     - Effect catalog is no longer wiped on every preference save — only when credentials change (previously forced a full re-fetch on any pref toggle)
@@ -38,7 +46,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.9"
+@Field static final String DRIVER_VERSION = "0.4.10"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -58,7 +66,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.8"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.10"
 
 metadata {
     definition(
@@ -104,6 +112,9 @@ metadata {
               defaultValue: false
         input name: "txtEnable",       type: "bool",     title: "Enable descriptionText (info) logging",
               defaultValue: true
+        input name: "controllerName",  type: "text",     title: "Controller name (zone)",
+              description: "Name of the Gemstone controller to bind to (case-insensitive). Leave blank to use the first controller found. Use this when you have multiple controllers (zones) — create one Hubitat device per controller.",
+              required: false
     }
 }
 
@@ -1281,11 +1292,25 @@ private void handleDevicesResponse(Map payload) {
     state.discoveryInFlight = false
     state.discoveryHomegroups = []
 
-    if (devices.size() > 1) {
-        log.warn "[Gemstone] Multiple Gemstone controllers were found in '${state.homegroupName}'. Using the first cloud device for this Hubitat driver."
+    List allNames = devices.collect { safeString(it?.name) }.findAll { it }
+    state.availableControllers = allNames.sort().join(", ")
+
+    String wanted = settings.controllerName?.trim()?.toLowerCase() ?: ""
+    Map selectedDevice
+
+    if (wanted) {
+        selectedDevice = devices.find { safeString(it?.name).trim().toLowerCase() == wanted } as Map
+        if (!selectedDevice) {
+            log.warn "[Gemstone] No controller named '${settings.controllerName}' was found in '${state.homegroupName}'. Available controllers: ${state.availableControllers}. Falling back to first controller."
+            selectedDevice = devices[0] as Map
+        }
+    } else {
+        if (devices.size() > 1) {
+            log.warn "[Gemstone] Multiple Gemstone controllers were found in '${state.homegroupName}'. Using the first cloud device for this Hubitat driver. Set the 'Controller name' preference to pick a specific one."
+        }
+        selectedDevice = devices[0] as Map
     }
 
-    Map selectedDevice = devices[0] as Map
     state.deviceId = safeString(selectedDevice?.id)
     state.deviceName = safeString(selectedDevice?.name, device.displayName)
 

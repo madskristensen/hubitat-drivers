@@ -494,3 +494,107 @@ input, so `playEffectByName` is added as a discrete command that delegates to `s
 ---
 
 **Once all items are checked, v0.4.1 is ready for beta testing.**
+
+---
+
+## Tests 19–22: Multi-Zone / Multi-Controller (v0.4.10)
+
+These tests cover the new `controllerName` preference added in v0.4.10.  
+**Prerequisite:** Mads's account must have `devices.size() > 1` returned from `GET /homegroup/devices` (Switch to confirm). If the account has only one controller, skip to Test 22.
+
+---
+
+## Test 19: Blank controllerName — v0.4.9 backward compatibility
+
+**What:** Verify that leaving **Controller name** blank preserves exact v0.4.9 behavior.
+
+**Steps:**
+
+1. Open the device page → **Preferences**.
+2. Ensure **Controller name** is blank (empty).
+3. Click **Save Preferences**.
+4. Watch `authStatus` and logs.
+
+**Expected:**
+
+- `authStatus` becomes **Authenticated: <first-controller-name>** (same as v0.4.9).
+- If the account has multiple controllers, the driver logs: `Multiple Gemstone controllers were found ... Set the 'Controller name' preference to pick a specific one.`
+- `state.availableControllers` lists all controller names (comma-joined, alphabetically sorted).
+- No stack traces. No behavioral difference from v0.4.9 for a blank controllerName.
+
+**Pass/Fail:** PASS if behavior is identical to pre-v0.4.10 for blank controllerName.
+
+---
+
+## Test 20: Named controller binding — happy path
+
+**What:** Verify that setting **Controller name** to `Eaves` (or another real controller name) binds to that specific controller.
+
+**Setup:** Account has at least two controllers. Know the exact names (check `state.availableControllers` from Test 19 or the Gemstone mobile app).
+
+**Steps:**
+
+1. Open the device page → **Preferences**.
+2. Set **Controller name** to `Eaves` (or the actual second controller name).
+3. Click **Save Preferences**.
+4. Watch `authStatus` and logs.
+5. Run **ON**, **OFF**, and **setEffect(0)**.
+6. Observe the physical lights on the Eaves controller.
+
+**Expected:**
+
+- `authStatus` becomes **Authenticated: Eaves** (the matched controller's name).
+- Logs confirm: `bound to Gemstone cloud device 'Eaves'`
+- No "Multiple controllers" warning (multiple is expected when controllerName is set).
+- Physical Eaves lights respond; other controllers are unaffected.
+- `state.availableControllers` still lists all discovered names.
+
+**Pass/Fail:** PASS if `authStatus` shows the named controller and that controller responds to commands.
+
+---
+
+## Test 21: Case-insensitive / whitespace-tolerant matching
+
+**What:** Verify that `controllerName = "eaves "` (lowercase + trailing space) matches the controller named `Eaves`.
+
+**Steps:**
+
+1. Set **Controller name** to `eaves ` (lowercase, trailing space).
+2. Click **Save Preferences**.
+3. Check `authStatus` and logs.
+
+**Expected:**
+
+- `authStatus` becomes **Authenticated: Eaves** (driver matched and used the real name from the API).
+- No "No controller named" warning.
+- Behavior identical to Test 20.
+
+**Pass/Fail:** PASS if case and trailing-space differences are tolerated. FAIL if a "not found" warning fires for `eaves ` when `Eaves` exists.
+
+---
+
+## Test 22: Non-existent controller name — graceful degradation
+
+**What:** Verify that a `controllerName` that matches nothing produces a helpful warning and falls back gracefully.
+
+**Steps:**
+
+1. Set **Controller name** to `Nonexistent Controller XYZ`.
+2. Click **Save Preferences**.
+3. Watch the Logs and `authStatus`.
+4. Attempt **ON** and **OFF**.
+
+**Expected:**
+
+- Logs show: `log.warn` stating no controller named 'Nonexistent Controller XYZ' was found, followed by the list of available controller names from `state.availableControllers`.
+- The driver falls back to the first controller (graceful degradation — does not leave `state.deviceId` unbound).
+- `authStatus` still becomes **Authenticated: <first-controller-name>**.
+- Commands work on the fallback controller (no silent no-op or crash).
+- `state.availableControllers` correctly lists the real controller names so the user can pick the right one.
+
+**Pass/Fail:** PASS if the warn fires with the name list AND the driver continues to work on the fallback controller.
+
+---
+
+**Once Tests 19–22 pass, v0.4.10 multi-zone support is validated.**
+
