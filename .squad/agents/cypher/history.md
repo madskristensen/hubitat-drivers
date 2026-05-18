@@ -360,3 +360,17 @@ coerceRawValue() corrupts string-typed DPs. When called with numeric-looking str
 - Merged investigation into .squad/decisions.md with full YAML excerpts, hypothesis verdict, sources
 - Assigned v0.1.10 fixes to Tank
 - Pending Mads's empirical test to confirm/refute Hypothesis C
+
+---
+
+## Team Update — 2026-05-18
+
+### ⚠️ System.arraycopy is Sandbox-Blocked on Hubitat
+
+**Alert for Tuya/protocol work:** `java.lang.System.arraycopy` is on the Hubitat driver sandbox's MethodCallExpression blocklist (same as `java.util.zip.CRC32` import block + reflection API block).
+
+- **Example error:** `Expression [MethodCallExpression] is not allowed: java.lang.System.arraycopy(...) at line N`
+- **Implication:** Perf-todo #7 (Touchstone byte-copy optimization) is permanently unachievable on Hubitat. Use primitive `int`-counter `for` loops instead.
+- **Rule:** Never use `System.arraycopy` in any Hubitat Groovy driver. Add to code review checklist.
+- **Fixed in:** Touchstone v0.1.30 hotfix (reverted v0.1.29 optimization)
+- **Decision:** `.squad/decisions/decisions.md::tank-touchstone-v130-arraycopy-fix` (status: done)

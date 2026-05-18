@@ -3,7 +3,7 @@ name: "tuya-local-groovy"
 description: "Implement Tuya Local v3.3 Groovy drivers on Hubitat using rawSocket, AES-128-ECB, queued retries, and defensive frame parsing."
 domain: "hubitat-drivers"
 confidence: "high"
-source: "earned — Touchstone v0.1.2 verified the Hubitat import-allowlist CRC32 fix pattern on 2026-05-17; Touchstone v0.1.29 validated byte-helper primitive optimization on 2026-05-18; protocol cross-checked against tinytuya XenonDevice/message_helper/header and qwerk's Hubitat Tuya RGBW driver."
+source: "earned — Touchstone v0.1.2 verified the Hubitat import-allowlist CRC32 fix pattern on 2026-05-17; Touchstone v0.1.29 validated byte-helper primitive optimization on 2026-05-18; Touchstone v0.1.30 confirmed System.arraycopy is on the Hubitat sandbox blocklist (2026-05-18); protocol cross-checked against tinytuya XenonDevice/message_helper/header and qwerk's Hubitat Tuya RGBW driver."
 ---
 
 ## When to Use
@@ -148,6 +148,10 @@ Hubitat driver failures cluster into three verified sandbox families. Audit all 
 ### 1. Import allowlist
 
 Hubitat rejects many JDK imports in drivers, including `java.util.zip.*`, `ByteArrayOutputStream`, and large parts of `java.io.*`, `java.nio.*`, and `java.security.*`.
+
+Additionally, certain `java.lang.*` method calls are blocked at runtime even though `java.lang` is normally auto-imported. **Confirmed blocked method calls:**
+- `java.lang.System.arraycopy(...)` — blocked (Hubitat sandbox expression blocklist; confirmed v0.1.30 sandbox rejection)
+- `java.util.zip.CRC32` — blocked via import allowlist (confirmed v0.1.2)
 
 For Tuya v3.3 CRC32, keep the implementation in pure Groovy:
 - build a 256-entry lookup table once with `@Field static final long[] CRC32_TABLE`
@@ -600,15 +604,28 @@ When Tuya v3.3 drivers assemble or slice frames on every send/receive cycle, kee
 
 ### Preferred pattern
 
-- Use `System.arraycopy(...)` for contiguous copies (`concatBytes`, `sliceBytes`, protocol header prepend).
-- Reserve manual loops for byte-by-byte comparisons only, and make the counter a primitive `int`.
+- Use primitive `for (int i = 0; ...)` loops for all byte copies (`concatBytes`, `sliceBytes`, protocol header prepend).
+- **Do NOT use `System.arraycopy(...)`** — it is on the Hubitat sandbox MethodCallExpression blocklist and will cause a sandbox rejection at install time (confirmed v0.1.30).
 - Do **not** swap to `ByteArrayOutputStream`, `java.nio`, or reflection-based helpers; the Hubitat sandbox/import allowlist makes the simple `byte[]` helpers the safest portable choice.
 
 ```groovy
 private byte[] sliceBytes(byte[] source, int start, int length) {
     byte[] copy = new byte[length]
-    System.arraycopy(source, start, copy, 0, length)
+    for (int i = 0; i < length; i++) { copy[i] = source[start + i] }
     return copy
+}
+
+private byte[] concatBytes(byte[]... arrays) {
+    int totalLength = 0
+    for (byte[] part : arrays) { totalLength += part == null ? 0 : part.length }
+    byte[] combined = new byte[totalLength]
+    int offset = 0
+    for (byte[] part : arrays) {
+        if (part == null || part.length == 0) { continue }
+        for (int i = 0; i < part.length; i++) { combined[offset + i] = part[i] }
+        offset += part.length
+    }
+    return combined
 }
 
 private Boolean startsWithBytes(byte[] data, byte[] prefix) {
@@ -624,8 +641,14 @@ private Boolean startsWithBytes(byte[] data, byte[] prefix) {
 }
 ```
 
-### 2026-05-18 Validation: Touchstone v0.1.29
+### ⚠️ Perf Todo #7 — Permanently Closed
 
-Refactored `concatBytes()`, `sliceBytes()`, `startsWithBytes()`, and `protocol33HeaderBytes()` to replace boxed `Integer i` loop counters with primitive `int`. Changed `concatBytes()` to use `System.arraycopy` for the head copy instead of manual loop. Result: zero behavioral change, reduced autoboxing on every frame send/receive cycle.
+`System.arraycopy` was introduced in v0.1.29 as a performance optimisation (perf todo #7). It was rejected by the Hubitat sandbox at install time with:
 
-**Measurement:** Per-frame byte-copy overhead reduced from ~12 Integer allocations per 1 KB frame to 0. Persistent socket drivers with 20-second heartbeat send ~4320 frames/day; savings are ~52K avoided allocations daily per device.
+> `Expression [MethodCallExpression] is not allowed: java.lang.System.arraycopy(...)`
+
+This is the same class of restriction as `java.util.zip.CRC32`. **Perf todo #7 is permanently unachievable on Hubitat.** The primitive for-loop pattern above is the correct and final implementation.
+
+### 2026-05-18 Validation: Touchstone v0.1.29 → v0.1.30
+
+v0.1.29 refactored `concatBytes()`, `sliceBytes()`, `startsWithBytes()`, and `protocol33HeaderBytes()` to replace boxed `Integer i` loop counters with primitive `int`, and changed contiguous copies to `System.arraycopy`. The primitive-int counter change was correct and retained; however, `System.arraycopy` triggered a Hubitat sandbox rejection. v0.1.30 reverted the three `System.arraycopy` calls (lines 1428, 1452, 1472) back to primitive for-loops while keeping the primitive `int` counters.

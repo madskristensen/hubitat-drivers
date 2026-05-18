@@ -993,3 +993,95 @@ subject: Cloud driver metadata — add Polling/Actuator capabilities (final perf
 - No explicit `command "poll"` declarations were added; `capability "Polling"` already defines that contract.
 - `capability "Actuator"` is treated as marker-only; no duplicate commands were introduced.
 - SunStat child behavior is unchanged in `0.1.11`; the child bump is version-sync only.
+
+---
+
+## tank-touchstone-v130-arraycopy-fix
+
+---
+author: tank
+date: 2026-05-18T11:30:22-07:00
+status: done
+subject: System.arraycopy is Sandbox-Blocked on Hubitat — Touchstone v0.1.30 hotfix
+---
+
+# Decision: System.arraycopy is Sandbox-Blocked on Hubitat
+
+**Date:** 2026-05-18  
+**Driver:** Touchstone / Tuya Fireplace  
+**Versions affected:** v0.1.29 (broken), v0.1.30 (fixed)  
+**Author:** Tank
+
+---
+
+## Sandbox Restriction
+
+`java.lang.System.arraycopy` is on the Hubitat driver sandbox's MethodCallExpression blocklist. The Hubitat sandbox rejected v0.1.29 at install time with:
+
+> `Expression [MethodCallExpression] is not allowed: java.lang.System.arraycopy(part, 0, combined, offset, part.length) at line number 1428`
+
+This is the same class of restriction as `java.util.zip.CRC32` (blocked via import allowlist, confirmed v0.1.2) and the reflection API block. The Hubitat sandbox enforces **both** import-level and expression-level restrictions.
+
+---
+
+## Three Blocked Call Sites (v0.1.29)
+
+All three were introduced in v0.1.29 as part of perf todo #7:
+
+| Location | Line (v0.1.29) | Call |
+|---|---|---|
+| `concatBytes(byte[]... arrays)` | 1428 | `System.arraycopy(part, 0, combined, offset, part.length)` |
+| `sliceBytes(byte[] source, int start, int length)` | 1452 | `System.arraycopy(source, start, copy, 0, length)` |
+| `protocol33HeaderBytes()` | 1472 | `System.arraycopy(versionBytes, 0, header, 0, versionBytes.length)` |
+
+---
+
+## Revert Pattern (v0.1.30)
+
+Each `System.arraycopy(src, srcOff, dest, destOff, length)` was replaced with a primitive for-loop:
+
+```groovy
+for (int i = 0; i < length; i++) { dest[destOff + i] = src[srcOff + i] }
+```
+
+The primitive `int` loop counters introduced in v0.1.29 were **retained** — only the `arraycopy` calls were reverted.
+
+Specific replacements:
+
+**concatBytes** (was line 1428):
+```groovy
+// before (blocked):
+System.arraycopy(part, 0, combined, offset, part.length)
+// after (safe):
+for (int i = 0; i < part.length; i++) { combined[offset + i] = part[i] }
+```
+
+**sliceBytes** (was line 1452):
+```groovy
+// before (blocked):
+System.arraycopy(source, start, copy, 0, length)
+// after (safe):
+for (int i = 0; i < length; i++) { copy[i] = source[start + i] }
+```
+
+**protocol33HeaderBytes** (was line 1472):
+```groovy
+// before (blocked):
+System.arraycopy(versionBytes, 0, header, 0, versionBytes.length)
+// after (safe):
+for (int i = 0; i < versionBytes.length; i++) { header[i] = versionBytes[i] }
+```
+
+---
+
+## Perf Todo #7 — PERMANENTLY CLOSED
+
+Perf todo #7 ("switch hot byte-copy helpers to `System.arraycopy()`") is **permanently unachievable on Hubitat**. The sandbox blocks the call expression regardless of import status. Do not attempt to re-open or re-approach this todo.
+
+The primitive for-loop pattern is the correct and final implementation for all byte-copy helpers in Hubitat Groovy drivers. The autoboxing improvement from primitive `int` counters (also part of todo #7) was safe and is retained in v0.1.30.
+
+---
+
+## Rule Going Forward
+
+**Never use `System.arraycopy` in Hubitat Groovy drivers.** Add to the driver review checklist alongside CRC32 and reflection API checks. When reviewing any new byte-copy helper, require a primitive `for` loop.

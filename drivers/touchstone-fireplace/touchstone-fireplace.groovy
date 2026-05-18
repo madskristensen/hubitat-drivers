@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.29
+ * Version: 0.1.30
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.30 — 2026-05-18 — fix sandbox-blocked System.arraycopy in concatBytes/sliceBytes/protocol33HeaderBytes (revert perf todo #7 — Hubitat blocklist)
  *   0.1.29 — 2026-05-18 — drop dead `lastDps` state writes from `processFrame()` after confirming the driver has no readers to migrate (perf todo #6)
  *   0.1.29 — 2026-05-18 — switch hot byte-copy helpers to primitive `int` counters + `System.arraycopy()` where copies are contiguous (perf todo #7)
  *   0.1.28 — 2026-05-18 — persist only leftover partial-frame data in `state.rxBuffer` after `consumeReceiveBuffer()` so fully-consumed chunks stop writing state (perf todo #2)
@@ -92,7 +93,7 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.29"
+@Field static final String DRIVER_VERSION = "0.1.30"
 @Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.29"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
@@ -1425,7 +1426,7 @@ private byte[] concatBytes(byte[]... arrays) {
         if (part == null || part.length == 0) {
             continue
         }
-        System.arraycopy(part, 0, combined, offset, part.length)
+        for (int i = 0; i < part.length; i++) { combined[offset + i] = part[i] }
         offset += part.length
     }
     return combined
@@ -1449,7 +1450,7 @@ private Long readUInt32(byte[] data, Integer offset) {
 
 private byte[] sliceBytes(byte[] source, int start, int length) {
     byte[] copy = new byte[length]
-    System.arraycopy(source, start, copy, 0, length)
+    for (int i = 0; i < length; i++) { copy[i] = source[start + i] }
     return copy
 }
 
@@ -1469,7 +1470,7 @@ private Boolean startsWithBytes(byte[] data, byte[] prefix) {
 private byte[] protocol33HeaderBytes() {
     byte[] versionBytes = TUYA_VERSION.getBytes("UTF-8")
     byte[] header = new byte[versionBytes.length + 12]
-    System.arraycopy(versionBytes, 0, header, 0, versionBytes.length)
+    for (int i = 0; i < versionBytes.length; i++) { header[i] = versionBytes[i] }
     return header
 }
 
