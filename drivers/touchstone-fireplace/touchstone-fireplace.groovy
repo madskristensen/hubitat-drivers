@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.18
+ * Version: 0.1.21
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.21 — 2026-05-17 — HealthCheck capability + lastActivity attribute
  *   0.1.20 — 2026-05-17 — active-TCP IP discovery (discover command) + improved DHCP connection-fail error
  *   0.1.19 — 2026-05-17 — child lock command (DP 108): setChildLock on/off locks physical buttons
  *   0.1.18 — 2026-05-17 — persistent socket + Tuya push subscriptions (physical remote now syncs in real time)
@@ -81,8 +82,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.20"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.20"
+@Field static final String DRIVER_VERSION = "0.1.21"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.21"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -170,6 +171,7 @@ metadata {
         capability "Initialize"
         capability "Polling"
         capability "TemperatureMeasurement"
+        capability "HealthCheck"
 
         // TODO (Switch): verify these community-derived raw Tuya enum ranges on real Touchstone hardware.
         // Keep the command inputs as raw strings for now so the driver does not pretend to know labels it has not verified.
@@ -202,6 +204,8 @@ metadata {
         attribute "childLock",        "enum",   ["on", "off"]
         attribute "networkAddress",    "string"
         attribute "tempUnit",         "enum",   ["F", "C"]
+        attribute "healthStatus",     "enum",   ["online", "offline", "unknown"]
+        attribute "lastActivity",     "string"
     }
 
     preferences {
@@ -313,6 +317,7 @@ def updated() {
     state.retryIndex = 0
     state.statusCommand = null
     state.seqNo = 0L
+    state.pingPending = false
     state.remove("dpBaseline")
 
     // Close existing socket before re-initializing; intentionalCloseAt suppresses the
@@ -341,6 +346,8 @@ def initialize() {
     state.seqNo = 0L
     state.socketOpen = false
     state.reconnectAttempts = 0
+    state.pingPending = false
+    state.pingRequestedAt = 0L
 
     if (!preferencesReady()) {
         updateOnlineStatus("unknown", "Waiting for device IP, device ID, and a 16-character local key")
@@ -784,6 +791,17 @@ def parse(String message) {
             updateOnlineStatus("online", "Device responded")
             pumpQueue()
             // Persistent socket: do NOT close after response — stay open for push frames.
+            String tsActivity = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
+            sendEvent(name: "lastActivity", value: tsActivity,
+                      descriptionText: "${device.displayName} last activity")
+            if (state.pingPending == true) {
+                state.pingPending = false
+                sendEvent(name: "healthStatus", value: "online",
+                          descriptionText: "${device.displayName} responded to ping")
+            } else if (safeStr(device.currentValue("healthStatus")) != "online") {
+                sendEvent(name: "healthStatus", value: "online",
+                          descriptionText: "${device.displayName} health status is online")
+            }
         }
     } catch (Exception e) {
         log.warn "[Touchstone] parse() failed — ${e.message}"
@@ -996,6 +1014,35 @@ def sendHeartbeat() {
     runIn(HEARTBEAT_INTERVAL_SECONDS, "sendHeartbeat")
 }
 
+def ping() {
+    infoLog "${device.displayName} ping() requested"
+    state.pingPending = true
+    state.pingRequestedAt = now()
+    if (state.socketOpen == true) {
+        // Immediately send a heartbeat; the next inbound frame clears pingPending within 5s.
+        sendHeartbeat()
+    } else {
+        // Socket is down — attempt reconnect; a successful frame on open clears pingPending.
+        openSocket()
+    }
+    unschedule("pingTimeout")
+    runIn(5, "pingTimeout")
+}
+
+def pingTimeout() {
+    if (state.pingPending != true) {
+        return
+    }
+    Long requestedAt = safeLong(state.pingRequestedAt, 0L)
+    Long lastEvent   = safeLong(state.lastSocketEventTs, 0L)
+    if (lastEvent < requestedAt) {
+        log.warn "[Touchstone] ping timed out — no response from device within 5s"
+        sendEvent(name: "healthStatus", value: "offline",
+                  descriptionText: "${device.displayName} did not respond to ping within 5s")
+    }
+    state.pingPending = false
+}
+
 def reconnectSocket() {
     if (state.discoveryMode == true) {
         debugLog "reconnectSocket() skipped — discovery in progress"
@@ -1014,6 +1061,10 @@ private void scheduleReconnect() {
     Integer attempt = safeInt(state.reconnectAttempts, 0)
     Integer delay = RECONNECT_DELAYS_SECONDS[Math.min(attempt, RECONNECT_DELAYS_SECONDS.size() - 1)]
     state.reconnectAttempts = (attempt + 1)
+    if (safeInt(state.reconnectAttempts, 0) >= 2 && safeStr(device.currentValue("healthStatus")) != "offline") {
+        sendEvent(name: "healthStatus", value: "offline",
+                  descriptionText: "${device.displayName} health status is offline (consecutive connection failures)")
+    }
     updateSocketState("reconnecting")
     unschedule("reconnectSocket")
     runIn(delay, "reconnectSocket")
@@ -1755,6 +1806,12 @@ private void ensureDefaultAttributes() {
     }
     if (device.currentValue("socketState") == null) {
         sendEvent(name: "socketState", value: "closed", descriptionText: "${device.displayName} socket state is closed")
+    }
+    if (device.currentValue("healthStatus") == null) {
+        sendEvent(name: "healthStatus", value: "unknown", descriptionText: "${device.displayName} health status is unknown")
+    }
+    if (device.currentValue("lastActivity") == null) {
+        sendEvent(name: "lastActivity", value: "", descriptionText: "${device.displayName} no activity yet")
     }
 }
 

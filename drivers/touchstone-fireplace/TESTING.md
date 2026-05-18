@@ -1358,3 +1358,52 @@ Use this checklist to declare the driver "works" before recommending it to other
 - If the smart ±20 range contains the new IP, discovery completes in well under 1 minute.
 - If the router assigns an IP outside the ±20 range, the full sweep will find it eventually.
 - If discovery completes with no match, logs show `[Touchstone] Discovery complete -- no matching device found`.
+
+---
+
+### Test 40: HealthCheck — ping() on a Working Device
+
+**What:** Invoke `ping()` while the device is online; verify `healthStatus` transitions to `online` within 2 s.
+
+**Pre-conditions:** Driver configured. Fireplace powered and reachable. `socketState = open`. Smart Life app closed.
+
+**Steps:**
+
+1. Confirm `socketState = open` and `healthStatus = online` (or `unknown` on a fresh device).
+2. On the Hubitat device page, press **`ping()`**.
+3. Watch **Logs** and the device **Current States** panel.
+
+**Expected:**
+
+- Logs show `[Touchstone] ping() requested`.
+- Driver sends a heartbeat frame immediately.
+- Within ~2 s (before the 5 s timeout fires), the device responds with a heartbeat ack.
+- `lastActivity` updates to the current ISO 8601 timestamp.
+- `healthStatus` changes to `online`.
+- No `pingTimeout` warning appears in logs.
+
+**Pass criteria:** `healthStatus = online` within 2 s of pressing `ping()`; `lastActivity` timestamp advances.
+
+---
+
+### Test 41: HealthCheck Offline — Unplug Device, Verify healthStatus Goes Offline
+
+**What:** Physically disconnect or power-off the fireplace; verify `healthStatus` transitions to `offline` after consecutive heartbeat failures.
+
+**Pre-conditions:** Driver configured and running. Fireplace powered on and `socketState = open`. Smart Life app closed.
+
+**Steps:**
+
+1. Confirm `socketState = open`, `healthStatus = online`, and heartbeat logging is visible (debug logging on).
+2. Physically unplug or power-off the fireplace at the wall (or disable its network access via router).
+3. Wait for the driver to detect the disconnect (~10–30 s depending on timing).
+4. Watch Logs and `Current States` panel.
+
+**Expected:**
+
+- Logs show `[Touchstone] Socket disconnected; reconnecting in ...s (attempt 1)`.
+- After the first attempt, `socketState = reconnecting`; `healthStatus` stays at `online` (no flicker on first miss).
+- After the second consecutive failure, logs show another reconnect entry and `healthStatus` transitions to `offline`.
+- `online` attribute also transitions to `offline` (driven by existing logic).
+
+**Pass criteria:** `healthStatus = offline` after 2 consecutive reconnect failures; does NOT flip on the very first miss.

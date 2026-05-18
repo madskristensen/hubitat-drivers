@@ -4,7 +4,7 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: v0.1.20 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
+> **Status: v0.1.21 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
 >
 > **Killer feature:** Works out-of-the-box for Touchstone Sideline Elite; adapts to other Touchstone models (Steel, Forte, Onyx, etc.) and generic Tuya WiFi fireplaces via configurable Device Profiles and in-driver discovery — no Python, no manual tinytuya wizard needed.
 
@@ -40,6 +40,8 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 - **`charcoalColor`** — Charcoal/log color palette (Sideline Elite DP 104; 12 named labels verified from Tuya app)
 - **`online`** — Connection status (`online` / `offline` / `unknown`)
 - **`socketState`** — Persistent socket state (`open` / `closed` / `reconnecting` / `error`); visible on dashboards for at-a-glance connectivity health
+- **`healthStatus`** — HealthCheck status (`online` / `offline` / `unknown`); updated by `ping()` probes and on every inbound push frame
+- **`lastActivity`** — ISO 8601 timestamp of the last successful inbound frame (heartbeat ack, push frame, or command response)
 - **`childLock`** — Physical button lock state (`on` / `off`); `on` means physical buttons on the unit are locked (Sideline Elite DP 108)
 - **`networkAddress`** — Last discovered IP address (set by the `discover` command when it finds the device at a new IP)
 
@@ -53,6 +55,7 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 | **`off()`** | none | Turn the fireplace off |
 | **`refresh()`** | none | Poll device status immediately |
 | **`initialize()`** | none | Reconnect socket and rebuild schedules (called on hub startup) |
+| **`ping()`** | none | Probe the device immediately and update `healthStatus` |
 
 ### Heating & Temperature Commands
 
