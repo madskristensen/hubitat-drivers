@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.16
+ * Version: 0.1.17
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.17 — 2026-05-17 — rename setLogColor → setCharcoalColor with verified labels
  *   0.1.16 — 2026-05-17 — gate v0.1.15 diagnostic flame-color logs
  *   0.1.15 — 2026-05-17 — setFlameColor verified Tuya app labels + wire debug logging
  *   0.1.14 — 2026-05-17 — colors back to NUMBER; drop setDpRaw legacy alias
@@ -39,7 +40,8 @@
 //           (Orange/Blue/White/Orange+Blue/Orange+White/Blue+White). DP 101 value "1" = Orange (app default);
 //           v0.1.13's invented labels were wrong — picking "Orange" sent DP=2 which is actually Blue.
 //           Also added unconditional log.info in setFlameColor (write) and applyDps DP 101 (echo) so
-//           Mads can confirm wire values and device echo in Hubitat logs. setLogColor (DP 104) stays NUMBER.
+//           Mads can confirm wire values and device echo in Hubitat logs. setLogColor (DP 104) was NUMBER at this point;
+//           renamed setCharcoalColor with verified Tuya labels in v0.1.17.
 // v0.1.14 — Reverted setFlameColor and setLogColor from v0.1.13's named ENUM back to NUMBER input
 //           (ranges 1-6 and 1-12). The invented color labels (Red, Orange, ..., Crimson, Coral, ...)
 //           were guesses without hardware verification; numeric input is honest about the fact that
@@ -76,7 +78,7 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.16"
+@Field static final String DRIVER_VERSION = "0.1.17"
 @Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.15"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
@@ -125,12 +127,25 @@ import javax.crypto.spec.SecretKeySpec
 ]
 @Field static final List<String> FLAME_BRIGHTNESS_OPTIONS = ["Dimmest", "Dim", "Medium", "Brighter", "Brightest"]
 @Field static final List<String> FLAME_SPEED_OPTIONS = ["Slow", "Medium", "Fast"]
-@Field static final List<String> LOG_COLOR_OPTIONS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
+@Field static final List<String> CHARCOAL_COLOR_OPTIONS = [
+    "Orange", "Red", "Blue", "Yellow", "Green", "Purple",
+    "Cyan", "Magenta", "White", "Pink", "Rainbow", "Spotlight"
+]
+@Field static final Map<String, String> CHARCOAL_COLOR_TO_DP = [
+    "Orange": "1",  "Red": "2",     "Blue": "3",    "Yellow": "4",
+    "Green": "5",   "Purple": "6",  "Cyan": "7",    "Magenta": "8",
+    "White": "9",   "Pink": "10",   "Rainbow": "11","Spotlight": "12"
+]
+@Field static final Map<String, String> DP_TO_CHARCOAL_COLOR = [
+    "1": "Orange",  "2": "Red",     "3": "Blue",    "4": "Yellow",
+    "5": "Green",   "6": "Purple",  "7": "Cyan",    "8": "Magenta",
+    "9": "White",   "10": "Pink",   "11": "Rainbow","12": "Spotlight"
+]
 @Field static final List<String> HEAT_LEVEL_OPTIONS = ["off", "low", "high"]
 @Field static final List<String> BASE_STATUS_DPS = ["1", "2", "3", "5", "13", "14", "15"]
 @Field static final List<String> SIDELINE_DISCOVERY_DPS = ["101", "102", "103", "104", "105", "107", "108"]
-@Field static final Map<String, Integer> SIDELINE_PROFILE_DPS = [power: 1, tempSetC: 2, heatLevel: 5, tempSetF: 14, flameColor: 101, flameBrightness: 102, flameSpeed: 103, logColor: 104]
-@Field static final Map<String, String> CUSTOM_DP_SETTING_NAMES = [power: "powerDp", flameColor: "flameColorDp", flameBrightness: "flameBrightnessDp", logColor: "logColorDp", heatLevel: "heatLevelDp", tempSetF: "tempSetFDp", tempSetC: "tempSetCDp"]
+@Field static final Map<String, Integer> SIDELINE_PROFILE_DPS = [power: 1, tempSetC: 2, heatLevel: 5, tempSetF: 14, flameColor: 101, flameBrightness: 102, flameSpeed: 103, charcoalColor: 104]
+@Field static final Map<String, String> CUSTOM_DP_SETTING_NAMES = [power: "powerDp", flameColor: "flameColorDp", flameBrightness: "flameBrightnessDp", charcoalColor: "charcoalColorDp", heatLevel: "heatLevelDp", tempSetF: "tempSetFDp", tempSetC: "tempSetCDp"]
 @Field static final Map<String, String> HEAT_LEVEL_TO_DP = ["off": "0", "low": "1", "high": "2"]
 @Field static final Map<String, String> DP_TO_HEAT_LEVEL = ["0": "off", "1": "low", "2": "high"]
 @Field static final Map<String, String> FLAME_BRIGHTNESS_TO_DP = ["Dimmest": "1", "Dim": "2", "Medium": "3", "Brighter": "4", "Brightest": "5"]
@@ -158,7 +173,7 @@ metadata {
         command "setFlameBrightness", [[name: "level", type: "ENUM", description: "Flame brightness (DP 102)", constraints: FLAME_BRIGHTNESS_OPTIONS]]
         command "setFlameSpeed", [[name: "speed*", type: "ENUM", constraints: FLAME_SPEED_OPTIONS,
             description: "Flame animation speed (Sideline Elite DP 103). Slow/Medium/Fast — verify labels on real hardware."]]
-        command "setLogColor", [[name: "color", type: "NUMBER", description: "Log/ember color palette (DP 104, 1–12)", range: "1..12"]]
+        command "setCharcoalColor", [[name: "color", type: "ENUM", description: "Charcoal/log color palette (verified Tuya app)", constraints: CHARCOAL_COLOR_OPTIONS]]
         command "setHeatLevel", [[name: "level*", type: "ENUM", constraints: HEAT_LEVEL_OPTIONS]]
         command "setHeatingSetpoint", [[name: "temperature*", type: "NUMBER", description: "Writes the mapped Fahrenheit or Celsius setpoint DP based on the preferred unit preference."]]
         command "setRawDP", [[name: "dpId*", type: "NUMBER"], [name: "value*", type: "STRING",
@@ -170,7 +185,7 @@ metadata {
         attribute "flameColor",       "string"
         attribute "flameBrightness",  "string"
         attribute "flameSpeed",       "enum",   FLAME_SPEED_OPTIONS
-        attribute "logColor",         "string"
+        attribute "charcoalColor",    "enum",   CHARCOAL_COLOR_OPTIONS
         attribute "heatLevel",        "enum",   ["off", "low", "high"]
         attribute "heatingSetpoint",  "number"
         attribute "online",           "enum",   ["online", "offline", "unknown"]
@@ -205,7 +220,7 @@ metadata {
         if (settings?.deviceProfile == "Custom") {
             input name: "flameColorDp", type: "number", title: "Flame Color DP", defaultValue: 101
             input name: "flameBrightnessDp", type: "number", title: "Flame Brightness DP", defaultValue: 102
-            input name: "logColorDp", type: "number", title: "Log Color DP", defaultValue: 104
+            input name: "charcoalColorDp", type: "number", title: "Charcoal Color DP", defaultValue: 104
             input name: "heatLevelDp", type: "number", title: "Heat Level DP", defaultValue: 5
             input name: "tempSetFDp", type: "number", title: "Temperature Setpoint (°F) DP", defaultValue: 14
             input name: "tempSetCDp", type: "number", title: "Temperature Setpoint (°C) DP", defaultValue: 2
@@ -237,10 +252,10 @@ metadata {
                   options: FLAME_SPEED_OPTIONS,
                   required: false
 
-            input name: "defaultLogColor", type: "number",
-                  title: "Default log color (optional)",
-                  description: "Applied ~1.5s after Hubitat turns the fireplace on. Enter a palette index 1–12. Leave blank to keep the fireplace firmware's last-known log color.",
-                  range: "1..12",
+            input name: "defaultCharcoalColor", type: "enum",
+                  title: "Default charcoal color (optional)",
+                  description: "Applied ~1.5s after Hubitat turns the fireplace on. Leave blank to keep the fireplace firmware's last-known charcoal color.",
+                  options: CHARCOAL_COLOR_OPTIONS,
                   required: false
         }
 
@@ -428,22 +443,23 @@ def setFlameBrightness(level) {
     sendDpWrite(flameBrightnessDp.toString(), dpValue, "flame brightness", WRITE_REFRESH_DELAY_SECONDS)
 }
 
-def setLogColor(color) {
-    Integer num = safeInt(color, null)
-    if (num == null || num < 1 || num > 12) {
-        log.warn "[Touchstone] setLogColor: invalid color '${color}' — must be 1–12"
+def setCharcoalColor(color) {
+    String label = safeStr(color)?.trim()
+    if (!(CHARCOAL_COLOR_TO_DP.containsKey(label))) {
+        log.warn "[Touchstone] setCharcoalColor: invalid color '${color}' — use ${CHARCOAL_COLOR_OPTIONS.join(', ')}"
         return
     }
 
-    Integer logColorDp = mappedCommandDp("logColor", "Log color")
-    if (logColorDp == null) {
+    Integer charcoalColorDp = mappedCommandDp("charcoalColor", "Charcoal color")
+    if (charcoalColorDp == null) {
         return
     }
 
-    String dpValue = num.toString()
-    infoLog "${device.displayName} log color → ${dpValue}"
-    emitAttribute("logColor", dpValue, "${device.displayName} log color set to ${dpValue}", "digital")
-    sendDpWrite(logColorDp.toString(), dpValue, "log color", WRITE_REFRESH_DELAY_SECONDS)
+    String dpValue = CHARCOAL_COLOR_TO_DP[label]
+    debugLog "setCharcoalColor: sending DP ${charcoalColorDp} = '${dpValue}' (label '${label}') to device"
+    infoLog "${device.displayName} charcoal color → ${label}"
+    emitAttribute("charcoalColor", label, "${device.displayName} charcoal color set to ${label}", "digital")
+    sendDpWrite(charcoalColorDp.toString(), dpValue, "charcoal color", WRITE_REFRESH_DELAY_SECONDS)
 }
 
 // DP 103 — flame animation speed (Slow="1", Medium="2", Fast="3").
@@ -844,16 +860,17 @@ def applyOnPowerOnDefaults() {
         }
     }
 
-    String logColor = safeStr(settings.defaultLogColor)?.trim()
-    if (logColor && (logColor in LOG_COLOR_OPTIONS)) {
-        Integer logColorDp = dpFor("logColor")
-        if (logColorDp != null) {
-            emitAttribute("logColor", logColor, "${device.displayName} default log color set to ${logColor}", "digital")
-            infoLog "Applied default: logColor=${logColor}"
-            sendDpWrite(logColorDp.toString(), logColor, "${POWER_ON_DEFAULT_REASON_PREFIX}log color", WRITE_REFRESH_DELAY_SECONDS)
+    String charcoalColor = safeStr(settings.defaultCharcoalColor)?.trim()
+    if (charcoalColor && CHARCOAL_COLOR_TO_DP.containsKey(charcoalColor)) {
+        Integer charcoalColorDp = dpFor("charcoalColor")
+        if (charcoalColorDp != null) {
+            String charcoalColorDpVal = CHARCOAL_COLOR_TO_DP[charcoalColor]
+            emitAttribute("charcoalColor", charcoalColor, "${device.displayName} default charcoal color set to ${charcoalColor}", "digital")
+            infoLog "Applied default: charcoalColor=${charcoalColor}"
+            sendDpWrite(charcoalColorDp.toString(), charcoalColorDpVal, "${POWER_ON_DEFAULT_REASON_PREFIX}charcoal color", WRITE_REFRESH_DELAY_SECONDS)
             appliedAny = true
         } else {
-            log.warn "[Touchstone] defaultLogColor is set but log color is not mapped for profile '${activeDeviceProfile()}'"
+            log.warn "[Touchstone] defaultCharcoalColor is set but charcoal color is not mapped for profile '${activeDeviceProfile()}'"
         }
     }
 
@@ -1058,7 +1075,7 @@ private List<String> statusDpIds() {
     if (activeDeviceProfile() == PROFILE_SIDELINE) {
         ids.addAll(SIDELINE_DISCOVERY_DPS)
     }
-    ["power", "heatLevel", "tempSetF", "tempSetC", "flameColor", "flameBrightness", "logColor"].each { String role ->
+    ["power", "heatLevel", "tempSetF", "tempSetC", "flameColor", "flameBrightness", "charcoalColor"].each { String role ->
         String dpId = dpIdFor(role)
         if (dpId) {
             ids << dpId
@@ -1271,13 +1288,14 @@ private void applyDps(Map<String, Object> dps) {
         }
     }
 
-    String logColorDpId = dpIdFor("logColor")
-    if (logColorDpId && dps.containsKey(logColorDpId)) {
-        String logColorVal = safeStr(dps[logColorDpId])
-        if (logColorVal in LOG_COLOR_OPTIONS) {
-            emitAttribute("logColor", logColorVal, "${device.displayName} log color is ${logColorVal}")
+    String charcoalColorDpId = dpIdFor("charcoalColor")
+    if (charcoalColorDpId && dps.containsKey(charcoalColorDpId)) {
+        String charcoalColorVal = safeStr(dps[charcoalColorDpId])
+        String label = DP_TO_CHARCOAL_COLOR[charcoalColorVal]
+        if (label) {
+            emitAttribute("charcoalColor", label, "${device.displayName} charcoal color is ${label}")
         } else {
-            log.warn "[Touchstone] applyDps: ignoring unrecognised logColor DP value '${logColorVal}'"
+            log.warn "[Touchstone] applyDps: ignoring unrecognised charcoalColor DP value '${charcoalColorVal}'"
         }
     }
 
