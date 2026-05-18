@@ -1,0 +1,19 @@
+{
+  "packageName": "Daikin WiFi Thermostat",
+  "author": "Mads Kristensen",
+  "minimumHEVersion": "2.3.0",
+  "dateReleased": "2026-05-18",
+  "version": "0.1.0",
+  "communityLink": "",
+  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/daikin-wifi/README.md",
+  "drivers": [
+    {
+      "id": "9623d574-3167-4cfb-b442-9e056e02f276",
+      "name": "Daikin WiFi Thermostat",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/daikin-wifi/daikin-wifi.groovy",
+      "required": true,
+      "version": "0.1.0"
+    }
+  ]
+}
