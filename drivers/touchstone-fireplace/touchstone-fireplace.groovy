@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.23
+ * Version: 0.1.24
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.24 — 2026-05-18 — close v0.1.23 gap: defaultHeatingSetpoint now also skips redundant DP write when device setpoint already matches
  *   0.1.23 — 2026-05-18 — skip default DP writes during power-on when current attribute value already matches the configured default
  *   0.1.22 — 2026-05-18 — add traceEnable preference; demote heartbeat/refresh chatter and unchanged-DP echoes to trace level
  *   0.1.21 — 2026-05-17 — HealthCheck capability + lastActivity attribute
@@ -84,8 +85,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.22"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.22"
+@Field static final String DRIVER_VERSION = "0.1.24"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.24"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -1230,10 +1231,17 @@ def applyOnPowerOnDefaults() {
         Integer setpointDp = dpFor(unit == "F" ? "tempSetF" : "tempSetC")
         Integer clampedSetpoint = clampSetpoint(requestedSetpoint, unit)
         if (setpointDp != null) {
-            emitAttribute("heatingSetpoint", clampedSetpoint, "${device.displayName} default heating setpoint set to ${clampedSetpoint}°${unit}", "digital", unit)
-            infoLog "Applied default: heatingSetpoint=${clampedSetpoint}°${unit}"
-            sendDpWrite(setpointDp.toString(), clampedSetpoint, "${POWER_ON_DEFAULT_REASON_PREFIX}heating setpoint", WRITE_REFRESH_DELAY_SECONDS)
-            appliedAny = true
+            def currentSetpointRaw = device.currentValue("heatingSetpoint")
+            Integer currentSetpoint = (currentSetpointRaw != null) ? (currentSetpointRaw as Integer) : null
+            if (currentSetpoint != null && currentSetpoint == clampedSetpoint) {
+                traceLog "applyOnPowerOnDefaults: skipping defaultHeatingSetpoint — already ${clampedSetpoint}"
+            } else {
+                debugLog "applyOnPowerOnDefaults: applying defaultHeatingSetpoint = ${clampedSetpoint} (was ${currentSetpoint})"
+                emitAttribute("heatingSetpoint", clampedSetpoint, "${device.displayName} default heating setpoint set to ${clampedSetpoint}°${unit}", "digital", unit)
+                infoLog "Applied default: heatingSetpoint=${clampedSetpoint}°${unit}"
+                sendDpWrite(setpointDp.toString(), clampedSetpoint, "${POWER_ON_DEFAULT_REASON_PREFIX}heating setpoint", WRITE_REFRESH_DELAY_SECONDS)
+                appliedAny = true
+            }
         } else {
             log.warn "[Touchstone] defaultHeatingSetpoint is set but the preferred-unit setpoint DP is not mapped for profile '${activeDeviceProfile()}'"
         }

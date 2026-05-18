@@ -534,3 +534,60 @@ Some Tuya fireplace (and heater) models visibly flicker or emit an audible click
 - [ ] `intentionalCloseAt` timestamp guard in `closeSocket()` / `socketStatus()` to suppress spurious reconnects
 - [ ] delayed refresh after writes when the device has stale post-transition DPs
 - [ ] **Idempotent defaults:** guard each `defaultFoo` DP write with a `currentValue` check (skip-if-match + traceLog)
+
+---
+
+## Write-Idempotency Audit Checklist
+
+Apply this checklist when reviewing any Hubitat driver for redundant device writes. Earned from 2026-05-18 4-driver audit (Touchstone, Gemstone, SunStat parent+child).
+
+### Questions to ask for every device-write path
+
+1. **Is the write lifecycle-driven or user-explicit?**  
+   Lifecycle writes (power-on defaults, timer callbacks, initialize recovery) fire without direct user intent. These are 🔴 candidates. User-explicit commands (setFlameColor, setHeatingSetpoint) are 🟡 — the user asked for it, but automation loops can still cause repetition.
+
+2. **Does the driver check `device.currentValue()` or `state.*` before sending?**  
+   If not: flag as redundant. The check must gate the actual device write, not just the `sendEvent` call.
+
+3. **Is `emitIfChanged` present but the write below it unconditional?**  
+   `emitIfChanged` deduplicates Hubitat events. It does NOT skip the device write. Both guards must be present independently. SunStat child `setScheduleEnabled` is the canonical example of the half-fix.
+
+4. **Does the device produce a visible or audible side effect on receiving a no-op write?**  
+   - Tuya local: yes — fireplaces click on any DP write regardless of value match → 🔴  
+   - Cloud REST: usually no visible artifact → 🟡 (API quota only)  
+   - Exception: `PUT /play/pattern` on Gemstone restarts animation → 🔴
+
+5. **Is the non-idempotent write intentional (state-assertion)?**  
+   "Restore after override" paths (boost cancel, reconnect recovery, asserting state after cloud drift) are BY-DESIGN. The write must happen unconditionally because the point is to defeat drift. Do not flag as a bug; document as BY-DESIGN.
+
+6. **Does the path fire on every poll or periodic schedule?**  
+   Periodic refresh handlers that *write* state (not just *read* it) are always 🔴 — they generate constant traffic. Refresh handlers that only call `sendEvent` based on read data are fine (Hubitat deduplicates events).
+
+7. **For composite writes (pattern, color), can you check a single attribute?**  
+   Some writes bundle multiple values (Gemstone pattern = colors + brightness + animation). A single `currentValue` check may not be sufficient. Options: compare `effectName` attribute, compare `state.lastPattern.id`, or accept 🟡 and skip the guard.
+
+### Severity classification
+
+| Signal | Severity |
+|---|---|
+| Tuya DP write causes audible click or visible artifact | 🔴 |
+| Cloud API `play/pattern` restarts animation | 🔴 |
+| Lifecycle-driven path (fires automatically, not on explicit user command) | 🔴 |
+| Cloud REST call consumes API quota; no visible device effect | 🟡 |
+| Explicit user command; user intent is clear | 🟡 |
+| `sendEvent` without `emitIfChanged` (Hubitat event flood only; no device write) | 🟢 |
+| Write is intentional state-assertion to defeat drift or recovery | BY-DESIGN |
+
+### Fix pattern (skip-if-match)
+
+```groovy
+// Example: guard a user command before the device write
+String current = safeStr(device.currentValue("flameColor"))
+if (current != null && current == label) {
+    debugLog "setFlameColor: already '${label}' — skipping DP write"
+    return
+}
+// proceed with sendDpWrite(...)
+```
+
+Null-current rule: `device.currentValue()` returns `null` when the driver has no prior observation. Treat `null` as "state unknown → apply the write." Only skip when current matches the target.
