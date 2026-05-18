@@ -2,6 +2,26 @@
 
 ---
 
+## 2026-05-18: Touchstone Driver Log Hygiene — trace vs debug taxonomy
+
+**Date:** 2026-05-18  
+**Author:** Tank  
+**Driver:** touchstone-fireplace.groovy  
+**Version introduced:** 0.1.22
+
+Add a `traceEnable` preference (bool, default false, auto-off after 30 min) alongside the existing `logEnable`. Introduce a `traceLog()` helper gated on `traceEnable` / `log.trace`. Demote protocol-level firehose lines from `debugLog` to `traceLog`.
+
+This matches the community pattern (e.g. kkossev Zigbee drivers) and keeps `logEnable=true` readable in production.
+
+**Taxonomy:**
+- **traceLog** (firehose, off by default): Heartbeat sent/ACK, refresh queue/send, decoded Tuya payload (raw wire dump), DP 105 echo, unchanged DP echoes
+- **debugLog** (stays at debug): Non-heartbeat cmd received, user-initiated writes (power, setFlameColor), changed DP echoes, socket lifecycle, errors
+- **"Log only on change" rule for DP echoes:** Before `debugLog` in `applyDps`, compare decoded label against `device.currentValue(attributeName)`. If equal → `traceLog`. If changed → `debugLog`.
+
+Implementation: `traceOff()` mirrors `logsOff()` (30-min auto-disable). `updated()` schedules `traceOff` independently. `installed()` writes `traceEnable = false`. `traceLog()` is `private void` at file bottom. Protocol behavior (heartbeat timing, refresh cadence, DP map, command dispatch) unchanged.
+
+---
+
 ## 2026-05-17: README Pre-Release Scrub (Tank-16)
 
 **Date:** 2026-05-17  
@@ -39,9 +59,6 @@ Touchstone: local LAN TCP (free, no rate limits). The persistent socket can sile
 Gemstone + SunStat: API calls consume cloud quota. lastActivity is a passive timestamp — advances automatically on every successful 2xx response.
 
 Implementation: Touchstone v0.1.21 has capability HealthCheck with ping(). Gemstone v0.4.11 + SunStat v0.1.7 have lastActivity attribute hooked into all successful API response paths. New reusable pattern documented in .squad/skills/hubitat-healthcheck-vs-lastactivity/SKILL.md.
-
----
-# Decisions
 
 ---
 

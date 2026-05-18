@@ -1,57 +1,52 @@
 # Tank — Driver Developer
 
-**⚠️ SUMMARIZED 2026-05-18T13:19:11Z — Detailed history moved to `history-archive-2026-05-18.md` (file was 29,359 bytes).**
+**⚠️ SUMMARIZED 2026-05-17T20:29:23Z — Detailed history moved to `history-archive-2026-05-17.md` (file was 28,580 bytes).**
 
 ---
 
-## Latest Work (2026-05-18)
+## Current Active Work (2026-05-17)
 
-### Touchstone v0.1.22 — Log Hygiene (trace/debug split)
-- **Shipped:** 2026-05-18 (Commit f53312c)
-- **Status:** Delivered
-- **Changes:**
-  - Added `traceEnable` preference (bool, default off, 30-min auto-disable)
-  - Created `traceLog()` helper for protocol firehose (heartbeat ACK, refresh queue/send, raw dumps, unchanged DP echoes)
-  - Demoted heartbeat/refresh/echo noise from `debugLog` to `traceLog`
-  - Matches kkossev Zigbee driver pattern (community standard)
-  - Protocol behavior unchanged; purely additive logging layer
-- **Skill:** tuya-local-groovy/SKILL.md updated with "Log Hygiene" section
+### Touchstone v0.1.20 — Active-TCP IP Discovery + Child Lock
+- **Shipped:** 2026-05-17 (Commits ffbfd08 + 3a59f04)
+- **Status:** Pending Switch hardware validation (Tests 38–39)
+- **Changes:** 
+  - v0.1.19: Added `setChildLock(on|off)` command + `childLock` attribute (DP 108)
+  - v0.1.20: Added `discover` command + `networkAddress` attribute; active TCP /24 scan state machine; DHCP-renewal recovery
+- **Skills:** hubitat-active-tcp-discovery (new), hubitat-healthcheck-vs-lastactivity (confidence bumped medium→high)
 
----
+### HPM Multi-Driver Bundle v1.0.0
+- **Shipped:** 2026-05-17 (Commit a0e695d)
+- **Status:** Pending Switch validation (HPM install test)
+- **Changes:** Root `packageManifest.json` (all 4 drivers, `required: false`); `release.yml` bundle tag generation
+- **Skill:** hpm-bundle-manifest (new)
 
-## Summary of Shipped Drivers (Prior Sessions)
+### Gemstone v0.4.10 — Multi-Controller Zones / Named Controller Binding
+- **Shipped:** 2026-05-17 (Commit e35b666)
+- **Status:** Pending Switch hardware validation (Tests 19–22)
 
-**Touchstone Fireplace (Latest: v0.1.22)**
-- v0.1.1–0.1.5: Core scaffold, safety hardening, reflection fixes
-- v0.1.18: Persistent socket + heartbeat + push subscriptions
-- v0.1.19: Child lock (DP 108)
-- v0.1.20: Active TCP discovery + DHCP recovery
-- v0.1.22: Log hygiene (trace/debug split)
-
-**Gemstone Smart Heater (Latest: v0.4.10)**
-- Multi-controller zone support with named controller binding
-- lastActivity attribute for passive monitoring
-
-**SunStat Solar Control (Latest: v0.1.7)**
-- lastActivity attribute integration
-
-**HPM Bundle (v1.0.0)**
-- Root packageManifest.json with all 4 drivers
-- release.yml bundle tag generation
+### Touchstone v0.1.18 — Persistent Socket + Tuya Push Subscriptions
+- **Shipped:** 2026-05-17 (Commit 67f905b)
+- **Status:** Pending Switch hardware validation (Tests 34–37)
 
 ---
 
-## Key Learnings Archive
+## Touchstone Fireplace Driver — Progression
 
-See `history-archive-2026-05-18.md` for detailed learnings on:
-- Persistent socket lifecycle and heartbeat patterns
-- Tuya protocol nuances (empty heartbeat payload, frame handling)
-- Multi-controller binding with blank-preference idiom
-- Active TCP discovery state machines
-- HPM bundle assembly and versioning
-- DP 108 child lock boolean wiring
-- And more...
+**Latest:** v0.1.20 (active TCP discovery + child lock)
 
+**Key releases:**
+- v0.1.4: Power-on defaults + safety hardening (heater never auto-starts) + Hubitat sandbox reflection fixes
+- v0.1.5: Removed `paragraph()` from preferences (app-only Hubitat restriction)
+- v0.1.18: Persistent socket architecture + heartbeat + push frame handling
+- v0.1.19: Child lock (DP 108 boolean)
+- v0.1.20: Active TCP /24 scan discovery for DHCP renewal recovery
+
+**Key learnings:**
+- Power-on defaults: use runInMillis() for async delay (1500ms) to allow firmware settle post-power-on
+- Heater safety: never auto-toggle hazardous hardware; keep behind explicit user commands
+- Hubitat sandbox: blocks reflection (.getClass(), .metaClass, etc.) at runtime, not just imports
+- Persistent socket: heartbeat every 10s, reconnect backoff [5s, 30s, 60s, 300s], push frame handling for real-time state
+- Discovery state machine: sequential rawSocket connects, gwId matching, coordinated guards to avoid interference with normal ops
 
 ---
 
