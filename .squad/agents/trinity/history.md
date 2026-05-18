@@ -153,3 +153,15 @@ Earlier memo stated: *"asynchttpGet is for cloud HTTPS calls."*
 Tank-4 completed a full rewrite of Daikin WiFi v0.1.2 (commit e45967e) replacing all Map-based HubAction LAN calls with asynchttpGet, eliminating the constructor instability that plagued both v0.1.0 (3-arg) and v0.1.1 (2-arg). **Future drivers (Sunstat, Gemstone cloud calls, any new LAN HTTP driver) should use asynchttpGet by default.**
 
 See decision `tank-daikin-wifi-v012-asynchttp` in decisions.md and skills `hubitat-asynchttpget-pattern` for the canonical send-helper + AsyncResponse callback template.
+
+### Daikin v0.1.3 Swing Mode + v0.1.0 Capability Memo Correction (Tank-5, 2026-05-18)
+
+**CORRECTION to Trinity's v0.1.0 capability gap memo:**
+
+Earlier memo (Section "Daikin capability gap analysis > Top capability gaps observed") stated: *"`fanDirection` was parsed into custom attribute."*
+
+**This was incorrect for v0.1.0–v0.1.2.** Tank-5's clean-room v0.1.3 audit found that the BRP069B `f_dir` field was **not being parsed at all** in the driver's original form. No `fanDirection` attribute existed, and no parse path was wired. Tank-5 added both the **read path** (`handleControlInfo` → `swingMode` attribute emission) and **write path** (`setSwingMode` command → `set_control_info` write) fresh in v0.1.3 (commit 665e968).
+
+**Implication:** The memo's capability gap assessment was built on incomplete observations. While the underlying fork-is-sound verdict still holds, this particular gap was understated in the original analysis. Future audits should validate that attributes are actually being parsed in current driver builds, not assumed from metadata inspection alone.
+
+Trinity's history-archive.md has a snapshot of the original memo for reference; this note serves as the live correction.
