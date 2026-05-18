@@ -2,7 +2,7 @@
 
 Community Hubitat Elevation drivers by Mads Kristensen.
 
-> **Current status:** Four beta drivers available — **Daikin WiFi Thermostat** v0.1.5 (LAN local API, Daikin BRP069B series), **Gemstone Lights** v0.4.8 (cloud REST, working in production), **SunStat Connect Plus** v0.1.4 (cloud REST, energy monitoring and schedule control), and **Touchstone / Tuya Fireplace** v0.1.5 (LAN integration, now ready for first public release).
+> **Current status:** Four beta drivers available — **Daikin WiFi Thermostat** v0.1.6 (LAN local API, Daikin BRP069B series), **Gemstone Lights** v0.4.8 (cloud REST, working in production), **SunStat Connect Plus** v0.1.4 (cloud REST, energy monitoring and schedule control), and **Touchstone / Tuya Fireplace** v0.1.5 (LAN integration, now ready for first public release).
 
 ## Install all drivers via one URL (HPM bundle)
 

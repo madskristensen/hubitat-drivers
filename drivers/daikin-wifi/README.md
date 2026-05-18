@@ -45,7 +45,7 @@ The three *Default … on power-on* preferences let you choose a mode, setpoint,
 
 Both schedules are registered in `initialize()` and survive hub reboots.
 
-## Known Limitations (v0.1.4)
+## Known Limitations (v0.1.6)
 
 - **No on-device timer** — `get_program` / `set_program` not implemented (use Hubitat rules instead).
 - **Setpoint unity** — Daikin's local API exposes a single setpoint register (`stemp`) shared across modes. The driver writes it to both `heatingSetpoint` and `coolingSetpoint` on refresh. You can set them independently via Hubitat commands; the driver uses the mode-appropriate value on each write.
