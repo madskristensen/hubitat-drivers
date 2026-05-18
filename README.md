@@ -8,19 +8,17 @@ Community Hubitat Elevation drivers by Mads Kristensen.
 
 ### 🌡️ Climate Control
 
-| Driver                     | Type     | Key Features                                                                 | Docs                                         |
-| -------------------------- | -------- | ---------------------------------------------------------------------------- | -------------------------------------------- |
-| **Daikin WiFi Thermostat** | 🌐 Local | No cloud required • Indoor/outdoor temp • Humidity • Energy meter • HTTP API | [Docs](drivers/daikin-wifi/README.md)        |
-| **SunStat Connect Plus**   | ☁️ Cloud | Floor heating • Auto-discovery • Parent/child • Watts® Home API              | [Docs](drivers/sunstat-thermostat/README.md) |
+| Driver                     | Type  | Key Features                                                                 | Docs                                         |
+| -------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------- |
+| **Daikin WiFi Thermostat** | Local | No cloud required • Indoor/outdoor temp • Humidity • Energy meter • HTTP API | [Docs](drivers/daikin-wifi/README.md)        |
+| **SunStat Connect Plus**   | Cloud | Floor heating • Auto-discovery • Parent/child • Watts® Home API              | [Docs](drivers/sunstat-thermostat/README.md) |
 
 ### 🏠 Home Ambiance
 
-| Driver                          | Type     | Key Features                                                                   | Docs                                           |
-| ------------------------------- | -------- | ------------------------------------------------------------------------------ | ---------------------------------------------- |
-| **Gemstone Lights**             | ☁️ Cloud | Permanent outdoor lighting • Named effects • Favorites support • Color control | [Docs](drivers/gemstone-lights/README.md)      |
-| **Touchstone / Tuya Fireplace** | 🌐 Local | Flame & log colors • Brightness • Heater • DP discovery • No cloud required    | [Docs](drivers/touchstone-fireplace/README.md) |
-
-**Legend:** 🌐 Local LAN = Runs entirely on your network • ☁️ Cloud API = Requires internet connection
+| Driver                          | Type  | Key Features                                                                   | Docs                                           |
+| ------------------------------- | ----- | ------------------------------------------------------------------------------ | ---------------------------------------------- |
+| **Gemstone Lights**             | Cloud | Permanent outdoor lighting • Named effects • Favorites support • Color control | [Docs](drivers/gemstone-lights/README.md)      |
+| **Touchstone / Tuya Fireplace** | Local | Flame & log colors • Brightness • Heater • DP discovery • No cloud required    | [Docs](drivers/touchstone-fireplace/README.md) |
 
 ## Quick Start
 
@@ -70,12 +68,12 @@ For advanced users or offline installations:
 
 **Network Requirement| :**
 
-| Driver       | Network  | Type                                                                  | Details |
-| ------------ | -------- | --------------------------------------------------------------------- | ------- |
-| Daikin Wi-fi | 🌐 Local | Direct IP access to BRP069B adapter • No cloud account needed         |         |
-| Gemstone     | ☁️ Cloud | Outbound HTTPS to Gemstone cloud                                      |         |
-| SunStat      | ☁️ Cloud | Outbound HTTPS to Watts® Home cloud                                   |         |
-| Touchston    | 🌐 Local | Direct IP access to device • Requires Tuya local key (one-time setup) |         |
+| Driver       | Network | Details                                                               |
+| ------------ | ------- | --------------------------------------------------------------------- |
+| Daikin Wi-fi | Local   | Direct IP access to BRP069B adapter • No cloud account needed         |
+| Gemstone     | Cloud   | Outbound HTTPS to Gemstone cloud                                      |
+| SunStat      | Cloud   | Outbound HTTPS to Watts® Home cloud                                   |
+| Touchston    | Local   | Direct IP access to device • Requires Tuya local key (one-time setup) |
 
 ## Contributing
 

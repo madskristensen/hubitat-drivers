@@ -89,6 +89,41 @@
 
 ## Learnings
 
+### Irrigation Driver Use-Case Evaluation Pattern (Trinity)
+
+**Date:** 2026-05-18T15:44:37-07:00
+
+**Pattern:** Evaluating user demand for device-class drivers reveals a common archetype — the **Stateful Multi-Input Compositor** — that justifies higher effort than generic device drivers.
+
+**Rainbird WiFi case study:**
+- **Stateful:** irrigation schedule + zone state (on/off, duration) persists across API calls
+- **Multi-input:** composes with NOAA (rain forecast), PurpleAir (air quality), motion sensors (presence), leak sensors (safety), Rule Machine (conditional logic)
+- **No conditional logic native:** Rainbird app is calendar + simple "skip if it rained" detector; lacks threshold conditions, cross-device awareness
+- **Geographically context-heavy:** rain-skip + smoke-pause + seasonal time-shift are PNW-specific values; less relevant in high-desert or tropics
+
+**Criterion #4 refinement (User Demand Signal):**
+
+When evaluating a device-class driver, score demand as *high* (13–15 pts) if:
+1. Device is stateful & long-lived (HVAC, irrigation, lights, locks — not one-off sensors)
+2. Hubitat's composability unlocks 3+ concrete automation rules Rainbird's app cannot do
+3. Device lacks native conditional logic (calendar-based or hardwired rules only)
+4. Use case has geographically or seasonally meaningful variability (not uniform across all climates)
+
+**Scoring impact:**
+- All four criteria met = prioritize (75–85 rubric score, conditional-fit-high)
+- Three criteria met = standard (65–75, conditional-fit-medium)
+- Two criteria met = defer (50–65, weak fit)
+
+**Examples:**
+- ✅ Rainbird irrigation (4/4) → 78/100 → prioritize
+- ✅ Daikin HVAC (3/4: stateful, multi-input, no conditional, but thermal needs are geographically uniform) → 85/100 → prioritize  
+- ✅ Gemstone lights (2/4: stateful, multi-input, but lighting lacks heavy seasonal logic in most climates) → 72/100 → conditional
+- ❌ Generic temp/humidity sensor (1/4: not stateful in interesting way) → 45/100 → skip
+
+**Filing:** Rainbird use-case essay at `.squad/decisions/inbox/trinity-rainbird-use-cases.md`.
+
+---
+
 ### Driver Fit Rubric & House Style Distillation (Trinity)
 
 **Date:** 2026-05-18T15:28:26-07:00
