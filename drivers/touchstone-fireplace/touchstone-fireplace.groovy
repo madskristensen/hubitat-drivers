@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.27
+ * Version: 0.1.28
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,8 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.28 — 2026-05-18 — persist only leftover partial-frame data in `state.rxBuffer` after `consumeReceiveBuffer()` so fully-consumed chunks stop writing state (perf todo #2)
+ *   - 0.1.28 — 2026-05-18 — dedupe unchanged parse/push events for flameColor/flameBrightness/charcoalColor/flameSpeed/heatLevel/heatingSetpoint/temperature while preserving digital command echoes (perf todo #4)
  *   0.1.27 — 2026-05-18 — throttle lastActivity emit to ≥60s + raise heartbeat 10s→20s (Cypher-verified stable interval); cuts ~8400 sendEvent + 4300 scheduled-job ticks/day per device (perf audit fixes #1 + #3)
  *   0.1.26 — 2026-05-18 — skip redundant setFlameColor/Brightness/Speed/setCharcoalColor/setHeatLevel/setHeatingSetpoint/setChildLock DP writes when attribute already matches (audit T-4 through T-10)
  *   0.1.25 — 2026-05-18 — skip redundant on()/off() DP writes when switch is already in the requested state (audit T-2, T-3)
@@ -88,8 +90,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.27"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.27"
+@Field static final String DRIVER_VERSION = "0.1.28"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.28"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -850,9 +852,8 @@ def parse(String message) {
             int keepFrom = Math.max(buffer.lastIndexOf("000055AA"), buffer.size() - 8192)
             buffer = keepFrom > 0 ? buffer.substring(keepFrom) : buffer
         }
-        state.rxBuffer = buffer
 
-        Integer processed = consumeReceiveBuffer()
+        Integer processed = consumeReceiveBuffer(buffer)
         if ((processed ?: 0) > 0) {
             if (state.discoveryMode == true) {
                 // discoveryHandleResponse() has already handled routing; skip normal post-processing.
@@ -1562,8 +1563,8 @@ private String buildStatusPayloadJson(List<String> requestedDps = null) {
 // Tuya frame parsing
 // ---------------------------------------------------------------------------
 
-private Integer consumeReceiveBuffer() {
-    String buffer = safeStr(state.rxBuffer) ?: ""
+private Integer consumeReceiveBuffer(String buffer) {
+    buffer = safeStr(buffer) ?: ""
     Integer processed = 0
 
     while (buffer.size() >= 32) {
@@ -1592,7 +1593,11 @@ private Integer consumeReceiveBuffer() {
         }
     }
 
-    state.rxBuffer = buffer
+    if (buffer) {
+        state.rxBuffer = buffer
+    } else {
+        state.remove("rxBuffer")
+    }
     return processed
 }
 
@@ -1693,7 +1698,7 @@ private void applyDps(Map<String, Object> dps) {
     String heatLevelDpId = dpIdFor("heatLevel")
     if (heatLevelDpId && dps.containsKey(heatLevelDpId)) {
         String heatLevel = DP_TO_HEAT_LEVEL[safeStr(dps[heatLevelDpId])] ?: safeStr(dps[heatLevelDpId])
-        emitAttribute("heatLevel", heatLevel, "${device.displayName} heat level is ${heatLevel}")
+        emitParsedAttributeIfChanged("heatLevel", heatLevel, "${device.displayName} heat level is ${heatLevel}")
     }
 
     String flameColorDpId = dpIdFor("flameColor")
@@ -1701,12 +1706,13 @@ private void applyDps(Map<String, Object> dps) {
         String flameColorVal = safeStr(dps[flameColorDpId])
         String label = DP_TO_FLAME_COLOR[flameColorVal]
         if (label) {
-            if (device.currentValue("flameColor") != label) {
+            Boolean isStateChange = attributeValueChanged("flameColor", label)
+            if (isStateChange) {
                 debugLog "applyDps: received DP 101 = '${flameColorVal}' → '${label}' (changed)"
+                emitAttribute("flameColor", label, "${device.displayName} flame color is ${label}")
             } else {
                 traceLog "applyDps: received DP 101 = '${flameColorVal}' → '${label}' (unchanged)"
             }
-            emitAttribute("flameColor", label, "${device.displayName} flame color is ${label}")
         } else {
             log.warn "[Touchstone] applyDps: ignoring unrecognised flameColor DP value '${flameColorVal}'"
         }
@@ -1717,7 +1723,7 @@ private void applyDps(Map<String, Object> dps) {
         String flameBrightnessVal = safeStr(dps[flameBrightnessDpId])
         String flameBrightnessLabel = DP_TO_FLAME_BRIGHTNESS[flameBrightnessVal]
         if (flameBrightnessLabel) {
-            emitAttribute("flameBrightness", flameBrightnessLabel, "${device.displayName} flame brightness is ${flameBrightnessLabel}")
+            emitParsedAttributeIfChanged("flameBrightness", flameBrightnessLabel, "${device.displayName} flame brightness is ${flameBrightnessLabel}")
         } else {
             log.warn "[Touchstone] applyDps: ignoring unrecognised flameBrightness DP value '${flameBrightnessVal}'"
         }
@@ -1728,7 +1734,7 @@ private void applyDps(Map<String, Object> dps) {
         String charcoalColorVal = safeStr(dps[charcoalColorDpId])
         String label = DP_TO_CHARCOAL_COLOR[charcoalColorVal]
         if (label) {
-            emitAttribute("charcoalColor", label, "${device.displayName} charcoal color is ${label}")
+            emitParsedAttributeIfChanged("charcoalColor", label, "${device.displayName} charcoal color is ${label}")
         } else {
             log.warn "[Touchstone] applyDps: ignoring unrecognised charcoalColor DP value '${charcoalColorVal}'"
         }
@@ -1740,7 +1746,7 @@ private void applyDps(Map<String, Object> dps) {
             emitAttribute("dp103", rawSpeed, "${device.displayName} DP 103 is ${rawSpeed}")
             String speedLabel = DP_TO_FLAME_SPEED[rawSpeed]
             if (speedLabel) {
-                emitAttribute("flameSpeed", speedLabel, "${device.displayName} flame speed is ${speedLabel}")
+                emitParsedAttributeIfChanged("flameSpeed", speedLabel, "${device.displayName} flame speed is ${speedLabel}")
             } else {
                 log.warn "[Touchstone] applyDps: ignoring unrecognised flameSpeed DP 103 value '${rawSpeed}'"
             }
@@ -1766,13 +1772,13 @@ private void applyDps(Map<String, Object> dps) {
         if (shouldSuppressSetpointUpdate(dps)) {
             debugLog "Skipping setpoint update during power-transition settle window"
         } else {
-            emitAttribute("heatingSetpoint", setpoint, "${device.displayName} heating setpoint is ${setpoint}°${preferredTempUnit()}", null, preferredTempUnit())
+            emitParsedAttributeIfChanged("heatingSetpoint", setpoint, "${device.displayName} heating setpoint is ${setpoint}°${preferredTempUnit()}", preferredTempUnit())
         }
     }
 
     Integer currentTemp = extractCurrentTemperature(dps)
     if (currentTemp != null) {
-        emitAttribute("temperature", currentTemp, "${device.displayName} temperature is ${currentTemp}°${preferredTempUnit()}", null, preferredTempUnit())
+        emitParsedAttributeIfChanged("temperature", currentTemp, "${device.displayName} temperature is ${currentTemp}°${preferredTempUnit()}", preferredTempUnit())
     }
 }
 
@@ -1960,6 +1966,27 @@ private void emitAttribute(String name, Object value, String descriptionText, St
     sendEvent(event)
 }
 
+private Boolean emitParsedAttributeIfChanged(String name, Object value, String descriptionText, String unit = null) {
+    if (!attributeValueChanged(name, value)) {
+        return false
+    }
+    emitAttribute(name, value, descriptionText, null, unit)
+    return true
+}
+
+private Boolean attributeValueChanged(String name, Object value) {
+    def currentRaw = device.currentValue(name)
+    if (value instanceof Number || currentRaw instanceof Number) {
+        BigDecimal current = safeBigDecimal(currentRaw, null)
+        BigDecimal next = safeBigDecimal(value, null)
+        if (current != null && next != null) {
+            return current.compareTo(next) != 0
+        }
+        return current != next
+    }
+    return safeStr(currentRaw) != safeStr(value)
+}
+
 private void markPowerTransitionIfChanged(Boolean requestedPower) {
     String currentSwitch = safeStr(device.currentValue("switch"))
     String newSwitch = requestedPower ? "on" : "off"
@@ -2131,6 +2158,23 @@ private Long safeLong(Object value, Long fallback = null) {
         } catch (ignoredToo) {
             return fallback
         }
+    }
+}
+
+private BigDecimal safeBigDecimal(Object value, BigDecimal fallback = null) {
+    if (value == null) {
+        return fallback
+    }
+    if (value instanceof BigDecimal) {
+        return (BigDecimal) value
+    }
+    if (value instanceof Number) {
+        return new BigDecimal(value.toString())
+    }
+    try {
+        return new BigDecimal(value.toString().trim())
+    } catch (ignored) {
+        return fallback
     }
 }
 

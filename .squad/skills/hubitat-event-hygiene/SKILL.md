@@ -1,7 +1,7 @@
 # Skill: Hubitat Event Hygiene
 
-**Confidence:** medium  
-**Source:** gemstone-lights.groovy v0.4.8
+**Confidence:** high
+**Source:** gemstone-lights.groovy v0.4.8 + touchstone-fireplace.groovy v0.1.27 + gemstone-lights.groovy v0.4.14 + sunstat-thermostat-parent/child.groovy v0.1.9
 
 ## Problem
 
@@ -65,6 +65,73 @@ grep -n "sendEvent(" *.groovy | grep -v "descriptionText:"
 ```
 
 That command should produce **zero output** for a hygiene-clean driver.
+
+## Coarse Timestamp Events: Throttle, Don't Spam
+
+Some attributes are intentionally **coarse** signals, not high-resolution telemetry. `lastActivity` is the canonical example: users need an at-a-glance "did this driver talk to the device recently?" timestamp, not a new event on every heartbeat ACK, poll callback, or child fan-out.
+
+Pattern:
+
+```groovy
+private void touchActivity() {
+    Long lastEmittedAt = (state.lastActivityEmittedAt ?: 0L) as Long
+    if ((now() - lastEmittedAt) < 60000L) {
+        return
+    }
+    state.lastActivityEmittedAt = now()
+    String ts = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
+    sendEvent(name: "lastActivity", value: ts,
+              descriptionText: "${device.displayName} last activity")
+}
+```
+
+Use this when the attribute is a freshness marker rather than a per-packet metric. The 60-second floor keeps dashboards and Rule Machine useful while avoiding hundreds or thousands of low-information events per day.
+
+## Numeric Telemetry Dedupe
+
+Polling drivers should not emit unchanged numeric attributes on every poll. For temperatures, setpoints, and energy counters, compare the current attribute and incoming value numerically (`BigDecimal`) before calling `sendEvent`, otherwise harmless scale differences like `68` vs `68.0` create false-positive events.
+
+```groovy
+private void emitIfChanged(String name, value, String descTxt, String unit = null) {
+    def current = device.currentValue(name)
+    boolean changed
+    if (current instanceof Number || value instanceof Number) {
+        changed = safeBigDecimal(current, null) != safeBigDecimal(value, null)
+    } else {
+        changed = current?.toString() != value?.toString()
+    }
+    if (!changed) {
+        return
+    }
+    Map evt = [name: name, value: value, descriptionText: descTxt]
+    if (unit) {
+        evt.unit = unit
+    }
+    sendEvent(evt)
+}
+```
+
+Use this in poll/parse paths; keep explicit user-command paths separate if you intentionally want a digital event for the command itself.
+
+## Parse/Push Dedupe vs Command Echoes
+
+Some drivers intentionally emit a **digital** event immediately after a successful outbound write so dashboards and automations reflect the command before the device's next poll/push echo arrives. Keep that command path separate from parse/poll dedupe helpers.
+
+```groovy
+private Boolean emitParsedAttributeIfChanged(String name, value, String descTxt, String unit = null) {
+    if (!attributeValueChanged(name, value)) {
+        return false
+    }
+    Map evt = [name: name, value: value, descriptionText: descTxt]
+    if (unit) {
+        evt.unit = unit
+    }
+    sendEvent(evt)
+    return true
+}
+```
+
+Use this split when the same state can surface twice: once from the command handler (digital echo) and again from the device's refresh/push response. Dedupe only the parse/push copy; do **not** route user-command events through the same skip-if-match helper unless you explicitly want to suppress those digital echoes.
 
 ## Relationship to Log Hygiene
 

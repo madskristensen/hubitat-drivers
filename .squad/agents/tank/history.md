@@ -287,3 +287,15 @@ Added in OPTIONS bounds-checks + log.warn + early bail in pplyDps() for enum DP
 - 2026-05-17 — Fail-closed devId match: only accept match if response.devId == storedDevId. If no devId in response (heartbeat echo, wrong-key garbage), log warn and skip. Prevents wrong Tuya device being accepted.
 - 2026-05-17 — parse() post-processing guard: during discovery, consumeReceiveBuffer() routes to discoveryHandleResponse() via processFrame(). Add discoveryMode guard after consumeReceiveBuffer() in parse() to skip pumpQueue() and other normal-mode operations.
 - 2026-05-17 — Timeout-based fallback for unreachable IPs: Hubitat rawSocket does not guarantee synchronous failure. Always schedule runIn(3, "discoveryProbeTimeout") after each connect. Cancel with unschedule("discoveryProbeTimeout") when discoveryHandleResponse fires. Timeout moves to next IP.
+
+### 2026-05-18 — Pending perf/quality todo sweep
+
+- Repo-backed audit status: Trinity's redundant-write audit is effectively closed except **SC-4** (`setFloorMinTemp` still lacks a cached-current-value guard). The later perf audit is only partially recoverable from commit history: fixes **#1** (lastActivity throttling), **#3** (Touchstone heartbeat 10s→20s), and **#5** (SunStat child telemetry dedupe) are documented in shipped commits, but the underlying specs for **#2** and **#4** were not preserved in current `.squad/decisions*` files.
+- Highest-value still-open Touchstone perf items are all in the hot parse path: stop persisting `state.rxBuffer` on every chunk when no partial frame remains, remove dead `state.lastDps` writes, and replace byte-copy helper loops with primitive/System.arraycopy-style copies. These are pure driver-internal optimizations in `drivers/touchstone-fireplace/touchstone-fireplace.groovy`.
+- The next Gemstone wins are cache-shape and event-hygiene work in `drivers/gemstone-lights/gemstone-lights.groovy`: add reverse lookup maps for `patternId -> name/index`, replace `cloneMap()` JSON round-trips with a lighter copy strategy, and gate unchanged refresh telemetry (`switch`/`level`/`hue`/`saturation`) behind change checks.
+- SunStat's remaining repo-backed audit item is still `setFloorMinTemp()` in `drivers/sunstat-thermostat/sunstat-thermostat-child.groovy`: cache the parsed `Schedule.Floor.W` value alongside `state.floorAway`, then skip the read-modify-write PATCH when the requested warmth value already matches.
+
+## Learnings (v0.1.28 — 2026-05-18)
+
+- 2026-05-18 — Touchstone parse-path buffer hygiene: build the concatenated socket hex in a local variable, feed it through `consumeReceiveBuffer(buffer)`, and persist `state.rxBuffer` only when a partial Tuya frame remains; fully-consumed chunks should remove the state key instead of rewriting it.
+- 2026-05-18 — Parse/poll event dedupe in Hubitat should be path-aware: compare inbound telemetry against `device.currentValue(...)` (numeric attrs via `BigDecimal`) and skip unchanged `sendEvent`s on the parse path, while leaving user-command handlers free to emit immediate digital events after real outbound writes.
