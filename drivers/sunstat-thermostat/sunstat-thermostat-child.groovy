@@ -1,11 +1,15 @@
 /**
  * SunStat Connect Plus — Child Driver (Thermostat)
  * Author:  Mads Kristensen
- * Version: 0.1.8capability surface for the Watts® Home SunStat Connect Plus
+ * Version: 0.1.9
+ * License: MIT
+ *
+ * Hubitat capability surface for the Watts® Home SunStat Connect Plus
  * electric floor heating thermostat. All API calls are delegated to the parent
  * driver (SunStat Connect Plus) via parent.sendDevicePatch(...).
  *
  * Changelog:
+ *   0.1.9 — 2026-05-18 — funnel poll telemetry through emitIfChanged (temperature/setpoints/energy/floor); dedupes event history on unchanged polls (perf audit fix #5)
  *   0.1.8 — 2026-05-18 — skip redundant PATCH calls when device already matches (audit SP-1, SC-1, SC-2, SC-3); SC-4 deferred
  *   0.1.7 — 2026-05-17 — lastActivity attribute (ISO 8601 timestamp of last successful API call)
  *   0.1.6 — 2026-05-17 — Pseudo-boost implementation (driver-managed temporary setpoint override)
@@ -23,7 +27,7 @@ import groovy.json.JsonSlurper
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION                    = "0.1.8"
+@Field static final String DRIVER_VERSION                    = "0.1.9"
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_F        = 110L
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_C        = 43L
 
@@ -448,9 +452,9 @@ private void parseDeviceStateInternal(Map body) {
         def outdoorRaw = outdoorMap?.Val
         if (outdoorStatus == "Okay" && outdoorRaw != null) {
             BigDecimal outdoorTemp = convertTemp(safeBigDecimal(outdoorRaw, 0.0), apiUnit, hubScale)
-            String descTxtO = "${device.displayName} outdoorTemperature is ${outdoorTemp} °${hubScale}"
-            sendEvent(name: "outdoorTemperature", value: outdoorTemp, unit: hubScale, descriptionText: descTxtO, type: "digital")
-            if (settings.txtEnable) { log.info descTxtO }
+            emitIfChanged("outdoorTemperature", outdoorTemp,
+                          "${device.displayName} outdoorTemperature is ${outdoorTemp} °${hubScale}",
+                          hubScale)
             emitIfChanged("outdoorSensorStatus", "okay",
                           "${device.displayName} outdoorSensorStatus is okay")
         } else {
@@ -463,9 +467,9 @@ private void parseDeviceStateInternal(Map body) {
     def roomRaw = data?.Sensors?.Room?.Val
     if (roomRaw != null) {
         BigDecimal roomTemp = convertTemp(safeBigDecimal(roomRaw, 0.0), apiUnit, hubScale)
-        String descTxt = "${device.displayName} temperature is ${roomTemp} °${hubScale}"
-        sendEvent(name: "temperature", value: roomTemp, unit: hubScale, descriptionText: descTxt, type: "digital")
-        if (settings.txtEnable) { log.info descTxt }
+        emitIfChanged("temperature", roomTemp,
+                      "${device.displayName} temperature is ${roomTemp} °${hubScale}",
+                      hubScale)
     }
 
     // Floor temperature — guard against disconnected probe sentinel
@@ -480,9 +484,9 @@ private void parseDeviceStateInternal(Map body) {
             device.deleteCurrentState("floorTemperature")
         } else {
             BigDecimal floorTemp = convertTemp(safeBigDecimal(floorRaw, 0.0), apiUnit, hubScale)
-            String descTxt = "${device.displayName} floorTemperature is ${floorTemp} °${hubScale}"
-            sendEvent(name: "floorTemperature", value: floorTemp, unit: hubScale, descriptionText: descTxt, type: "digital")
-            if (settings.txtEnable) { log.info descTxt }
+            emitIfChanged("floorTemperature", floorTemp,
+                          "${device.displayName} floorTemperature is ${floorTemp} °${hubScale}",
+                          hubScale)
         }
     }
 
@@ -518,19 +522,21 @@ private void parseDeviceStateInternal(Map body) {
     def heatRaw = data?.Target?.Heat
     if (heatRaw != null) {
         BigDecimal heatSetpoint = convertTemp(safeBigDecimal(heatRaw, 68.0), apiUnit, hubScale)
-        String descTxt = "${device.displayName} heatingSetpoint is ${heatSetpoint} °${hubScale}"
-        sendEvent(name: "heatingSetpoint",    value: heatSetpoint, unit: hubScale, descriptionText: descTxt, type: "digital")
-        sendEvent(name: "thermostatSetpoint", value: heatSetpoint, unit: hubScale,
-                  descriptionText: "${device.displayName} thermostatSetpoint is ${heatSetpoint} °${hubScale}", type: "digital")
-        if (settings.txtEnable) { log.info descTxt }
+        emitIfChanged("heatingSetpoint", heatSetpoint,
+                      "${device.displayName} heatingSetpoint is ${heatSetpoint} °${hubScale}",
+                      hubScale)
+        emitIfChanged("thermostatSetpoint", heatSetpoint,
+                      "${device.displayName} thermostatSetpoint is ${heatSetpoint} °${hubScale}",
+                      hubScale)
     }
 
     // Cooling setpoint (store but don't surface as active for heat-only device)
     def coolRaw = data?.Target?.Cool
     if (coolRaw != null) {
         BigDecimal coolSetpoint = convertTemp(safeBigDecimal(coolRaw, 100.0), apiUnit, hubScale)
-        sendEvent(name: "coolingSetpoint", value: coolSetpoint, unit: hubScale,
-                  descriptionText: "${device.displayName} coolingSetpoint is ${coolSetpoint} °${hubScale}", type: "digital")
+        emitIfChanged("coolingSetpoint", coolSetpoint,
+                      "${device.displayName} coolingSetpoint is ${coolSetpoint} °${hubScale}",
+                      hubScale)
     }
 
     // Hold mode  (data.Target.Hold)
@@ -570,27 +576,27 @@ private void parseDeviceStateInternal(Map body) {
         List monthlyList = energyBlock?.Heat?.Monthly instanceof List ? energyBlock.Heat.Monthly as List : []
         if (dailyList.size() >= 1) {
             BigDecimal energyToday = roundEnergy(dailyList[0])
-            String descTxtE = "${device.displayName} energy (today) is ${energyToday} kWh"
-            sendEvent(name: "energy", value: energyToday, unit: "kWh", descriptionText: descTxtE, type: "digital")
-            if (settings.txtEnable) { log.info descTxtE }
+            emitIfChanged("energy", energyToday,
+                          "${device.displayName} energy (today) is ${energyToday} kWh",
+                          "kWh")
         }
         if (dailyList.size() >= 2) {
             BigDecimal energyYest = roundEnergy(dailyList[1])
-            String descTxtEY = "${device.displayName} energyYesterday is ${energyYest} kWh"
-            sendEvent(name: "energyYesterday", value: energyYest, unit: "kWh", descriptionText: descTxtEY, type: "digital")
-            if (settings.txtEnable) { log.info descTxtEY }
+            emitIfChanged("energyYesterday", energyYest,
+                          "${device.displayName} energyYesterday is ${energyYest} kWh",
+                          "kWh")
         }
         if (monthlyList.size() >= 1) {
             BigDecimal energyMon = roundEnergy(monthlyList[0])
-            String descTxtEM = "${device.displayName} energyMonth is ${energyMon} kWh"
-            sendEvent(name: "energyMonth", value: energyMon, unit: "kWh", descriptionText: descTxtEM, type: "digital")
-            if (settings.txtEnable) { log.info descTxtEM }
+            emitIfChanged("energyMonth", energyMon,
+                          "${device.displayName} energyMonth is ${energyMon} kWh",
+                          "kWh")
         }
         if (monthlyList.size() >= 2) {
             BigDecimal energyLastMon = roundEnergy(monthlyList[1])
-            String descTxtELM = "${device.displayName} energyLastMonth is ${energyLastMon} kWh"
-            sendEvent(name: "energyLastMonth", value: energyLastMon, unit: "kWh", descriptionText: descTxtELM, type: "digital")
-            if (settings.txtEnable) { log.info descTxtELM }
+            emitIfChanged("energyLastMonth", energyLastMon,
+                          "${device.displayName} energyLastMonth is ${energyLastMon} kWh",
+                          "kWh")
         }
     }
 
@@ -682,14 +688,22 @@ private void sendEvt(String name, value, String descValue) {
     if (settings.txtEnable) { log.info descTxt }
 }
 
-private void emitIfChanged(String name, value, String descTxt) {
-    String current = safeStr(device.currentValue(name))
-    String newVal  = safeStr(value)
-    if (current == newVal) {
-        debugLog "emitIfChanged: ${name} unchanged (${newVal}) — skipping"
+private void emitIfChanged(String name, value, String descTxt, String unit = null) {
+    def currentRaw = device.currentValue(name)
+    boolean unchanged
+    if (value instanceof Number && currentRaw instanceof Number) {
+        // Numeric compare avoids false positives from scale differences (e.g. 68 vs 68.0).
+        unchanged = ((currentRaw as BigDecimal) == (value as BigDecimal))
+    } else {
+        unchanged = (safeStr(currentRaw) == safeStr(value))
+    }
+    if (unchanged) {
+        debugLog "emitIfChanged: ${name} unchanged (${value}) — skipping"
         return
     }
-    sendEvent(name: name, value: value, descriptionText: descTxt, type: "digital")
+    Map evt = [name: name, value: value, descriptionText: descTxt, type: "digital"]
+    if (unit) { evt.unit = unit }
+    sendEvent(evt)
     if (settings.txtEnable) { log.info descTxt }
 }
 

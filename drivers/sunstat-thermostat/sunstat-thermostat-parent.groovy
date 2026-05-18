@@ -1,7 +1,10 @@
 /**
  * SunStat Connect Plus — Parent Driver
  * Author:  Mads Kristensen
- * Version: 0.1.8, device discovery, polling, and command routing for the
+ * Version: 0.1.9
+ * License: MIT
+ *
+ * Token-based device discovery, polling, and command routing for the
  * Watts® Home API (home.watts.com). Creates one child device per thermostat
  * found in the Watts account.
  *
@@ -10,6 +13,7 @@
  * command on the parent device. The driver rotates the token automatically after that.
  *
  * Changelog:
+ *   0.1.9 — 2026-05-18 — throttle lastActivity emit + child fan-out to ≥60s; cuts unchanged-event DB churn on polls (perf audit fix #1)
  *   0.1.8 — 2026-05-18 — skip redundant PATCH calls when device already matches (audit SP-1, SC-1, SC-2, SC-3); SC-4 deferred
  *   0.1.7 — 2026-05-17 — lastActivity attribute (ISO 8601 timestamp of last successful API call)
  *   0.1.6 — 2026-05-17 — Pseudo-boost implementation in child driver (driver-managed temporary setpoint override; no native boost API)
@@ -29,7 +33,7 @@ import groovy.json.JsonSlurper
 // Constants — all literals; NO cross-@Field references (Hubitat sandbox rule)
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION               = "0.1.8"
+@Field static final String DRIVER_VERSION               = "0.1.9"
 @Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.8"
 @Field static final String WATTS_API_BASE               = "https://home.watts.com/api"
 @Field static final String WATTS_TOKEN_URL              = "https://login.watts.io/tfp/wattsb2cap02.onmicrosoft.com/B2C_1A_Residential_UnifiedSignUpOrSignIn/oauth2/v2.0/token"
@@ -682,6 +686,15 @@ private void scheduleProactiveRefresh() {
 // ---------------------------------------------------------------------------
 
 private void touchActivity() {
+    // Throttle to ≥60s between emissions: lastActivity is a coarse "last successful
+    // API call" timestamp; emitting it on every poll/refresh produces ~1440 events/day
+    // per device with no information gain. The 60s floor preserves at-a-glance
+    // freshness without filling Hubitat's event-history DB.
+    Long lastEmittedAt = (state.lastActivityEmittedAt ?: 0L) as Long
+    if ((now() - lastEmittedAt) < 60000L) {
+        return
+    }
+    state.lastActivityEmittedAt = now()
     String ts = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
     sendEvent(name: "lastActivity", value: ts, descriptionText: "${device.displayName} last activity")
     childDevices.each { child ->
