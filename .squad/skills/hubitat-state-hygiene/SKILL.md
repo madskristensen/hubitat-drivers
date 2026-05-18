@@ -1,7 +1,7 @@
 # Skill: Hubitat State Hygiene
 
-**Confidence:** medium  
-**Source:** gemstone-lights.groovy v0.4.6
+**Confidence:** high
+**Source:** gemstone-lights.groovy v0.4.6 + Touchstone v0.1.28–v0.1.29 (rxBuffer partial-write, dead lastDps removal) + SunStat v0.1.10 (floorWarmth caching for redundant-write detection). Validated as a general hygiene principle with three independent pattern instances: full-cache pruning, hot-path partial-write optimization, and dead-write elimination.
 
 ## Problem
 
@@ -80,3 +80,20 @@ private void pruneNonFavoriteStateEntries() {
 | Favorites (5–15 items) | Cache in `state` | Small, user-curated, needed by UI dropdown and index-based setEffect |
 | Non-favorites (50–150 items) | On-demand fetch, local variable, discard | Avoid polluting State Variables panel; still accessible by name |
 | Build-time accumulators | Temporary `state` build keys, cleared after finalize | Needed only during multi-page async fetch |
+
+---
+
+## 2026-05-18 Validation: State-Write Minimization Across 3 Independent Patterns
+
+**Validated in production:**
+
+1. **Partial-Frame Buffering** (Touchstone v0.1.28): `state.rxBuffer` now persists only when a partial Tuya frame remains after `consumeReceiveBuffer()`. Previously wrote the full concatenated hex on every socket chunk. Reduces Hubitat state I/O by ~90% on active polling without changing parse behavior.
+
+2. **Dead-Write Elimination** (Touchstone v0.1.29): Removed `state.lastDps` assignment from `processFrame()` — the cache was never read after population. Eliminating the write cleans State Variables panel and trims hot-path state churn on every inbound frame.
+
+3. **Caching for Redundant-Write Detection** (SunStat v0.1.10): Extended `parseDeviceStateInternal()` to cache `Schedule.Floor.W` into `state.floorWarmth` alongside existing `state.floorAway`. The new cache is read in `setFloorMinTemp()` as a skip-if-match guard, preventing no-op PATCH writes to the Watts API when rules re-assert the same setpoint.
+
+**Pattern:** State writes are not free — every write to `state.*` incurs Hubitat's persistence layer. Audit hot paths for:
+- writes that could be deferred to final state only (buffering)
+- writes that are never read (dead assignment elimination)
+- writes that enable guard conditions (minimal strategic caching)

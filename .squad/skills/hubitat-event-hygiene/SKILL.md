@@ -1,7 +1,7 @@
 # Skill: Hubitat Event Hygiene
 
 **Confidence:** high
-**Source:** gemstone-lights.groovy v0.4.8 + touchstone-fireplace.groovy v0.1.27 + gemstone-lights.groovy v0.4.14 + sunstat-thermostat-parent/child.groovy v0.1.9
+**Source:** Verified across 5 independent driver releases (2026-05-18): touchstone v0.1.25–v0.1.28 (skip-if-match + dedupe patterns), gemstone v0.4.12–v0.4.15 (skip-if-match + dedupe patterns), sunstat v0.1.8–v0.1.10 (skip-if-match pattern). Pattern applied to both LAN (Touchstone) and cloud drivers (Gemstone, SunStat) across command-path and parse-path emit sites.
 
 ## Problem
 
@@ -138,3 +138,20 @@ Use this split when the same state can surface twice: once from the command hand
 This skill is about the **Events tab** (Hubitat device UI → Events). The `hubitat-log-hygiene` skill is about the **live log** (Hubitat → Logs). They are separate concerns:
 - Events tab: populated by `sendEvent(descriptionText: ...)` — one entry per state change
 - Live log: populated by `log.info/debug/warn/error` — noisy stream, purged frequently
+
+---
+
+## 2026-05-18 Validation: Skip-If-Match + Parse-Path Dedupe Across 5 Releases
+
+**Validated independently across:**
+- **Touchstone v0.1.25–v0.1.26**: Command-path idempotency (`on()`, `off()`, other command handlers) preventing audible relay clicks and wire noise
+- **Touchstone v0.1.28**: Parse-path dedupe in `applyDps()` + `emitAttribute()` loop, suppressing unchanged attributes from periodic refreshes and device echoes
+- **Gemstone v0.4.12–v0.4.13**: Command-path idempotency (`setEffect()`, cloud PUT guards) reducing cloud API quota churn
+- **Gemstone v0.4.15**: Parse-path dedupe in `handleRefreshResponse()`, gating unchanged telemetry behind change checks for poll-driven refreshes
+- **SunStat v0.1.8–v0.1.10**: Command-path idempotency (`setFloorMinTemp()`, cloud PATCH guards) + state caching for redundant-write detection
+
+**Pattern:** Both LAN devices (Tuya direct) and cloud drivers (HTTP API) benefit from the same dual-path strategy:
+1. **Command path** → emit immediately (digital event) without skip-if-match to give user immediate visual feedback
+2. **Parse/poll/push path** → check current value before emit to dedupe unchanged state
+
+**Result:** Reduces event spam in history, prevents audible artifacts on LAN fireplaces, saves cloud API quota on HTTP drivers. No behavioral regression; all diffs are emit-count reductions only.

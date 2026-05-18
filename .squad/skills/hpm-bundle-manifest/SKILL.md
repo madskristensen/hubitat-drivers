@@ -1,7 +1,8 @@
 # Skill: HPM Multi-Driver Bundle Manifest
 
 **Created:** 2026-05-17  
-**Used in:** hubitat-drivers repo v1.0.0 bundle manifest
+**Updated:** 2026-05-18 (v1.0.5 bump for Polling/Actuator metadata capability additions)
+**Used in:** hubitat-drivers repo v1.0.5 bundle manifest
 
 ---
 
@@ -116,3 +117,11 @@ Select which drivers to install.
 - HPM duplicate-detection when mixing bundle and per-driver install: largely untested. Advise users to pick one install method.
 - If `packageName` in the bundle differs from any per-driver manifest `packageName`, HPM may display them as distinct packages. Keep names consistent if you want a seamless upgrade path.
 - Bundle releases need a different tag prefix (e.g., `bundle-v1.0.1`) to avoid collisions with per-driver tags (e.g., `touchstone-v0.1.20`).
+
+---
+
+## 2026-05-18 Validation: Bundle Version Bump Rhythm
+
+**Validated pattern:** On 2026-05-18, bumped bundle root `packageManifest.json` from v1.0.4 → v1.0.5 to ship Polling/Actuator metadata capability additions to Gemstone v0.4.16 and SunStat v0.1.11. Bundle version is independent from per-driver versions and increments separately.
+
+**Rule confirmed:** Bump bundle patch version on any per-driver ship. Do NOT ship per-driver version bumps without also updating the bundle root to keep HPM subscribers in sync with the latest bundle manifest. If a driver goes from v0.4.15 → v0.4.16, also bump `packageManifest.json` root `version` field: `1.0.4` → `1.0.5`.
