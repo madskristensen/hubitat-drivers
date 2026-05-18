@@ -4,55 +4,286 @@
 
 ## 2026-05-18: Redundant-write audit shipping — five driver releases
 
+**Status:** SHIPPED — 5 driver releases close 16 of 17 audit findings (SC-4 deferred).
+- Touchstone v0.1.25 (b4122ee) — T-2, T-3
+- Touchstone v0.1.26 (ffe2e9d) — T-4 through T-10
+- Gemstone v0.4.12 (91e0d1a) — G-1
+- Gemstone v0.4.13 (6ee553a) — G-2 through G-6
+- SunStat v0.1.8 (f9060fb) — SP-1, SC-1, SC-2, SC-3 (SC-4 deferred)
+
+---
+
+### Decision Drop — Touchstone v0.1.25 (T-2, T-3)
+
+## Context
+
+Trinity's redundant-write audit identified two findings in the Touchstone Fireplace driver:
+
+- **T-2 🔴** — `on()` unconditionally sends DP1=true even when the switch is already on. Tuya fireplaces emit an audible click on every DP1 write regardless of current state. Rules that re-assert `on` (common in mode-based automations) produce repeated click artifacts.
+- **T-3 🟡** — `off()` unconditionally sends DP1=false even when the switch is already off. No audible artifact, but generates unnecessary wire traffic and can interfere with DP echo sequencing.
+
+## Decision
+
+Add an early-return guard at the top of `on()` and `off()` (after the null-profile check, before any state mutations or DP writes) that returns silently when the device is already in the requested state:
+
+```groovy
+// on()
+if (device.currentValue("switch") == "on") {
+    debugLog "on(): device already on — skipping DP write"
+    return
+}
+
+// off()
+if (device.currentValue("switch") == "off") {
+    debugLog "off(): device already off — skipping DP write"
+    return
+}
+```
+
+## applyOnPowerOnDefaults Reschedule Decision
+
+`on()` calls `runInMillis(POWER_ON_DEFAULTS_DELAY_MILLIS, "applyOnPowerOnDefaults")` after the DP write. The early-return bypasses this scheduling.
+
+**Decision: skip the runIn when already on.**
+
+Rationale:
+- If the device is already on, the power-on defaults were applied during the prior `on()` invocation. Rescheduling them on a redundant `on()` call would re-fire `applyOnPowerOnDefaults` unnecessarily — the same redundant-write problem the v0.1.23/0.1.24 audit addressed.
+- If a user believes values have drifted since the last power-on, the correct recovery path is toggle off → on, which forces a full transition including the defaults schedule. This is the idiomatic "re-apply defaults" gesture and is consistent with how the v0.1.23 defaults guard was designed.
+- Adding a conditional re-runIn (e.g., "reschedule only if uptime > threshold") would introduce stateful complexity with no measurable benefit and contradicts the audit's skip-if-match philosophy.
+
+## Consistency with Prior Art
+
+Same pattern as v0.1.23 (`applyOnPowerOnDefaults` per-DP guards) and v0.1.24 (`defaultHeatingSetpoint` guard). All use `device.currentValue()` as the idempotency key and log at `debug` level on skip.
+
+## Files Changed
+
+- `drivers/touchstone-fireplace/touchstone-fireplace.groovy` — v0.1.25
+
+## Findings Closed
+
+- T-2 🔴 (audible artifact on redundant `on()`)
+- T-3 🟡 (wire traffic on redundant `off()`)
+
+---
+
+### Decision Drop — Touchstone v0.1.26 (T-4 through T-10)
+
+# Decision: Touchstone v0.1.26 — Batch-fix audit T-4 through T-10
+
 **Date:** 2026-05-18  
-**Author:** Tank (Autopilot)  
-**Status:** SHIPPED — 5 driver releases closed 16 of 17 findings  
-**Summary:** Touchstone v0.1.25/v0.1.26, Gemstone v0.4.12/v0.4.13, SunStat v0.1.8 all now apply skip-if-match write-idempotency pattern across all affected endpoints. SC-4 (state.floorMinTemp caching in SunStat child) deferred to post-audit validation phase.
+**Author:** Tank  
+**Driver:** drivers/touchstone-fireplace/touchstone-fireplace.groovy  
+**Version:** 0.1.26
 
-### Touchstone v0.1.25: T-2, T-3 — switch idempotency
-- **T-2** (on() DP1=true): Added skip-if-match check. Prevents audible artifacts from repeated rule assertions.
-- **T-3** (off() DP1=false): Added skip-if-match check. Reduces wire traffic when already off.
-- **Status:** SHIPPED, commit b4122ee
+## Summary
 
-### Touchstone v0.1.26: T-4 through T-10 — wire-only yellows batch
-- **T-4** (setFlameColor DP101): Skip-if-match on DP101
-- **T-5** (setFlameBrightness DP102): Skip-if-match on DP102
-- **T-6** (setFlameSpeed DP103): Skip-if-match on DP103
-- **T-7** (setCharcoalColor DP104): Skip-if-match on DP104
-- **T-8** (setHeatLevel DP5): Skip-if-match on DP5 (explicit path only; auto-apply path excluded for safety)
-- **T-9** (setHeatingSetpoint DP14): Skip-if-match on DP14
-- **T-10** (setChildLock DP108): Skip-if-match on DP108 (harmless but consistent)
-- **Status:** SHIPPED, commit ffe2e9d
+Applied the v0.1.23 skip-if-match idempotency pattern to seven user-explicit command paths that were previously writing the device DP unconditionally (Trinity's 🟡 findings T-4 through T-10, plus T-10 🟢).
 
-### Gemstone v0.4.12: G-1 — effect idempotency
-- **G-1** (activateEffectWithPattern): Added check against current `effectName`. Prevents visible animation restart on repeated `setEffect(sameName)`.
-- **Caveat:** `cycleEffect()` flow preserves user intent (wrapping to same effect in single-item catalog is acceptable).
-- **Status:** SHIPPED, commit 91e0d1a
+## Functions Guarded
 
-### Gemstone v0.4.13: G-2 through G-6 — cloud quota yellows batch
-- **G-2** (on() PUT /onState): Skip-if-match on onState
-- **G-3** (off() PUT /onState): Skip-if-match on onState
-- **G-4** (setLevel() brightness): Skip-if-match on brightness value
-- **G-5** (setColor() composite hue+sat+level): Skip-if-match on hue+sat pair
-- **G-6** (setColorTemperature()): Skip-if-match on colorTemperature
-- **Status:** SHIPPED, commit 6ee553a
+| Finding | Function | Attribute | DP | Type |
+|---|---|---|---|---|
+| T-4 | setFlameColor(name) | "flameColor" | 101 | String (label) |
+| T-5 | setFlameBrightness(level) | "flameBrightness" | 102 | String (label) |
+| T-6 | setFlameSpeed(speed) | "flameSpeed" | 103 | String (label) |
+| T-7 | setCharcoalColor(name) | "charcoalColor" | 104 | String (label) |
+| T-8 | setHeatLevel(level) | "heatLevel" | 5 | String (normalized lowercase) |
+| T-9 | setHeatingSetpoint(temp) | "heatingSetpoint" | 14 | Integer (compared as Integer) |
+| T-10 | setChildLock(state) | "childLock" | 108 | String ("on"/"off") |
 
-### SunStat v0.1.8: SP-1, SC-1, SC-2, SC-3 — API quota yellows batch (SC-4 deferred)
-- **SP-1** (setAwayModeInternal PATCH /State): Skip-if-match on awayMode
-- **SC-1** (setThermostatSetpoint PUT /Child/Thermostats): Skip-if-match on thermostat setpoint
-- **SC-2** (setHumiditySetpoint PUT /Child/Humidity): Skip-if-match on humidity setpoint
-- **SC-3** (setTemperatureOffset PUT /Child/Temperature): Skip-if-match on temperature offset
-- **SC-4 (DEFERRED):** setChildLock / state.floorMinTemp caching — requires parseDeviceState refactor for min/max bounds caching. Scheduled for post-audit validation phase.
-- **Status:** SHIPPED (SC-4 deferred), commit f9060fb
+## Pattern Applied
 
-### Findings count
-- **Red (visible):** T-2 ✓ SHIPPED, T-1 pre-existing (fixed separately)
-- **Yellow (wire/API):** T-3, T-4 through T-10, G-2 through G-6, SP-1, SC-1 through SC-3 ✓ ALL SHIPPED (16 items)
-- **Green (harmless):** T-10 ✓ SHIPPED
-- **Deferred:** SC-4 (awaiting post-audit validation, state.floorMinTemp caching)
-- **By-design (not counted):** 3 items
+Each function now reads `device.currentValue("<attribute>")` before the `sendDpWrite` call. If the current value matches the requested value AND current is non-null, the function logs a `debugLog` skip message and returns early without sending to the device.
 
-**Next:** Await Mads' real-device validation on all five driver releases.
+Null-current rule: if `device.currentValue()` returns null (unknown state, fresh install), the write proceeds — guards only trigger on confirmed matches.
+
+## Numeric Attribute Note (T-9)
+
+`setHeatingSetpoint` compares as `Integer` (via `safeInt`) to avoid false mismatches from type coercion. The comparison uses the post-clamped value so edge-of-range requests are handled correctly.
+
+## setHeatLevel Safety Note (T-8)
+
+The heater is intentionally excluded from `applyOnPowerOnDefaults` for safety (no auto-start on power-on). That exclusion is **preserved and unaffected** by this change. The guard added here only applies to the explicit `setHeatLevel` user command path.
+
+## Rationale
+
+Tuya Local DP writes cause an audible relay click on the Touchstone Sideline Elite regardless of whether the new value equals the current one. Automation rules that re-assert the same state (e.g., scene controllers, mode rules) would cause repeated audible artifacts. The skip-if-match pattern eliminates these while preserving correct behavior: the first write always goes through (null state), and the Hubitat attribute stays in sync via the `emitAttribute` call that follows a successful write.
+
+---
+
+### Decision Drop — Gemstone v0.4.12 (G-1)
+
+## Problem
+
+`activateEffectWithPattern()` unconditionally sent `PUT /deviceControl/play/pattern` on every
+`setEffect()` call. Gemstone hardware visibly restarts the animation sequence on receiving any
+pattern PUT, even with identical parameters. Calling `setEffect("Pulse")` when Pulse is already
+playing caused a visible animation glitch.
+
+**Audit finding:** G-1 🔴 (Trinity's redundant-write audit)
+
+## Fix (v0.4.12)
+
+Added an idempotency guard in `activateEffectWithPattern()` immediately before the
+`executeOrQueueRequest(buildEffectRequest(...))` call:
+
+```groovy
+String currentEffect = safeString(device.currentValue("effectName"))
+if (resolvedName && currentEffect == resolvedName) {
+    debugLog "setEffect: '${resolvedName}' already active — skipping pattern PUT"
+    return
+}
+```
+
+State events (`switch`, `level`, `effectName`, `colorMode`) are still emitted before the guard —
+the Hubitat device state stays consistent whether or not the PUT is skipped.
+
+`safeString` is an existing helper at L2221 (confirmed present in the file).
+
+## Edge-Case Decision: cycleEffect with 1-effect catalog
+
+`setNextEffect()` and `setPreviousEffect()` delegate through `cycleEffect()` →
+`activateEffectByIndex()` → `activateEffectWithPattern()`. With a 1-effect catalog, "next" wraps
+back to the same effect — the guard suppresses that cycle command (no PUT is sent).
+
+**Decision:** Accept this edge case. A 1-effect catalog is a degenerate configuration; there is
+nothing meaningful to cycle to. The guard suppression is the correct behavior (no pointless
+restart). A `forceWrite: true` flag was considered to thread through `cycleEffect()` to bypass the
+guard, but the wiring would touch three call sites for negligible real-world benefit. Simpler
+guard wins.
+
+This edge case is documented here; no code comment added (would be noise for normal catalogs).
+
+## Same Pattern As
+
+Touchstone v0.1.23+ skip-if-match guards for redundant defaults (Trinity audit T-series).
+
+---
+
+### Decision Drop — Gemstone v0.4.13 (G-2 through G-6)
+
+# Decision Drop: Gemstone Lights v0.4.13 — Batch Yellow Audit Findings G-2 through G-6
+
+**Author:** Tank (Driver Developer)
+**Date:** 2026-05-18
+**Driver:** `drivers/gemstone-lights/gemstone-lights.groovy`
+**Version shipped:** 0.4.13
+
+---
+
+## Summary
+
+Five 🟡 cloud-quota findings from Trinity's redundant-write audit were closed in a single batch. All share the same root cause: commands were unconditionally issuing cloud API calls (`PUT /deviceControl/onState` or `PUT /deviceControl/play/pattern`) even when the device was already in the requested state.
+
+---
+
+## Findings Closed
+
+| # | Function | Guard condition |
+|---|---|---|
+| G-2 | `on()` | `device.currentValue("switch") == "on"` → return before sendCommand |
+| G-3 | `off()` | `device.currentValue("switch") == "off"` → return before sendCommand |
+| G-4 | `setLevel()` | captured level before sendEvent; if `currentLevel == clamped` → skip pattern PUT |
+| G-5 | `setColor()` | composite: `colorMode == "RGB"` AND hue + saturation + level all match → skip pattern PUT |
+| G-6 | `setColorTemperature()` | `colorMode == "CT"` AND `colorTemperature == kelvin` → skip pattern PUT |
+
+---
+
+## G-5 Composite-Write Rationale
+
+`setColor()` writes three attributes atomically (hue, saturation, level). A single-attribute check would miss partial-match cases (e.g., same hue but different saturation). Three options were considered:
+
+1. **Compare hue + saturation + level all three** — safe; misses only if all three happen to match by coincidence with a non-RGB color mode. ✅ **Chosen.**
+2. **Check colorMode == "RGB" AND three components** — same as option 1 with explicit mode guard. ✅ (also included — this is effectively what option 1 became.)
+3. **Skip guarding G-5 entirely** — avoided; the composite check is tractable and avoids unnecessary cloud calls.
+
+The implemented guard requires:
+- `colorMode == "RGB"` (ensures we're not in CT or EFFECTS mode)
+- `curHue as Integer == hue` AND `curSat as Integer == saturation` AND `curLevel as Integer == level`
+
+This is conservative: any mismatch on any component causes the PUT to proceed. No risk of false-dedup from mode transitions.
+
+---
+
+## G-6 CT Mode Guard Rationale
+
+`setColorTemperature()` should only skip when in `colorMode == "CT"`. If the device is in RGB or EFFECTS mode and a CT command arrives with a matching kelvin value (unlikely but possible after a driver restart with stale state), we must still send the PUT to switch the hardware into CT mode. The guard therefore requires both conditions before skipping.
+
+---
+
+## Non-Interference with G-1 (setEffect)
+
+G-1's guard (shipped v0.4.12) lives in `activateEffectWithPattern()` and checks `effectName`. The G-2–G-6 guards are in distinct command handlers (`on`, `off`, `setLevel`, `setColor`, `setColorTemperature`) and do not touch the effects execution path. No interaction.
+
+---
+
+## Sandbox Safety
+
+All comparisons use `device.currentValue()` (standard Hubitat API) and integer arithmetic. No reflection, no `System.*`, no `Thread.*`. Passes Hubitat sandbox constraints.
+
+---
+
+### Decision Drop — SunStat v0.1.8 (SP-1, SC-1, SC-2, SC-3; SC-4 deferred)
+
+# Decision Drop — SunStat v0.1.8: Redundant Cloud PATCH Batch Fix
+
+**Date:** 2026-05-18  
+**Author:** Tank  
+**Drivers:** sunstat-thermostat-parent.groovy + sunstat-thermostat-child.groovy  
+**Version bump:** 0.1.7 → 0.1.8
+
+---
+
+## Findings Addressed
+
+### SP-1 — setAwayModeInternal (parent)
+- Added skip-if-match guard reading `device.currentValue("awayMode")` before the optimistic `sendEvent` + PATCH.
+- Uses `safeStr` + null-safe compare (`current != null && current == mode`).
+
+### SC-1 — setThermostatMode (child)
+- Added per-case guards inside the `switch` for "heat" and "off" branches.
+- Reads `device.currentValue("thermostatMode")` before `sendEvt` + PATCH per branch.
+- No guard needed for unsupported modes (they already return with a warning).
+
+### SC-2 — setHeatingSetpoint (child)
+- Added numeric guard before `sendEvent` + PATCH.
+- Reads `device.currentValue("heatingSetpoint")`, casts to BigDecimal, compares to post-clamp `clamped` value.
+- Guard fires on the clamped/rounded value so it matches what the driver would actually send.
+
+### SC-3 — setScheduleEnabled (child) — dual-guard pattern
+- **Existing guard:** `emitIfChanged` at L335 already deduplicates the Hubitat event. Retained unchanged.
+- **New write-guard:** reads `device.currentValue("scheduleEnabled")` BEFORE `emitIfChanged` is called (so the pre-event value is captured correctly; `sendEvent` in Hubitat updates `device.currentValue()` synchronously). Checks captured value after the `wattsDeviceId` validation, before `sendDevicePatch`.
+- Both guards coexist and solve independent problems:
+  - `emitIfChanged` → prevents duplicate Hubitat events on the local platform
+  - write-guard → prevents redundant cloud PATCH calls to the Watts API
+
+---
+
+## SC-4 Deferred — setFloorMinTemp
+
+**Status:** DEFERRED — not addressed in this batch.
+
+**Reason:** Fixing SC-4 requires caching the current `floorMinTemp` value from `parseDeviceState`. The function sends a read-modify-write payload to `/Device/{id}` with both `Floor.W` (warmth) and `Floor.A` (away) values. To skip a redundant PATCH, the driver would need to compare the incoming `temp` against the last-polled warmth value. That value is not currently stored in `state.*` — it would need to be cached as `state.floorMinTemp` (or similar) whenever `parseDeviceState` processes the schedule payload. That's a non-trivial state-handling change warranting its own focused commit.
+
+**What would be needed:**
+1. In `parseDeviceState`, when the schedule payload contains `Floor.W`, store it: `state.floorMinTemp = <parsed value>`
+2. In `setFloorMinTemp`, read `safeBigDecimal(state.floorMinTemp, null)` and compare to `clamped`. If equal, skip PATCH.
+
+---
+
+## BY-DESIGN Exclusions (intentionally NOT guarded)
+
+| Finding | Function | Reason |
+|---------|----------|--------|
+| SC-5 | cancelBoost() | State-assertion path — must always PATCH to defeat cloud drift and correctly exit boost state |
+| SC-6 | setBoost() | Always a new boost with a new duration/expiry — no meaningful idempotency |
+| SC-7 | boostExpired() / initialize() | Recovery paths — must always reassert state to ensure correctness after reconnect or reboot |
+
+---
+
+## Version History
+- Parent: 0.1.7 → 0.1.8
+- Child:  0.1.7 → 0.1.8
 
 ---
 
