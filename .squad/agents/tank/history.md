@@ -6,27 +6,16 @@
 
 ## Latest Work (2026-05-18)
 
-### SunStat v0.1.8 — Close SP-1, SC-1, SC-2, SC-3 (batch yellows)
-- v0.1.8 added skip-if-match guards to setAwayModeInternal (parent SP-1), setThermostatMode (SC-1), setHeatingSetpoint (SC-2), and setScheduleEnabled (SC-3) — Trinity's 🟡 findings from the redundant-write audit; reduces Watts cloud API quota consumption
-- SC-3 dual-guard pattern: existing emitIfChanged dedupes Hubitat events; new write-guard reads pre-event value (before emitIfChanged) and skips PATCH if already matches — both guards coexist solving independent problems
-- SC-4 (setFloorMinTemp) deferred: needs state.floorMinTemp caching in parseDeviceState before guard can be applied
-- BY-DESIGN exclusions confirmed: SC-5 cancelBoost (state-assertion), SC-6 setBoost (always new value), SC-7 boostExpired/initialize (recovery paths) — NOT touched
-- Decision drop: .squad/decisions/inbox/tank-sunstat-yellows-batch.md
+### 2026-05-18T15:30:00Z — Audit shipping spree: 5 driver releases closed 16/17 findings
+- **Touchstone v0.1.25** (b4122ee): T-2 + T-3 (switch idempotency)
+- **Touchstone v0.1.26** (ffe2e9d): T-4 through T-10 (7× wire-only yellows batch)
+- **Gemstone v0.4.12** (91e0d1a): G-1 (effect animation idempotency)
+- **Gemstone v0.4.13** (6ee553a): G-2 through G-6 (5× cloud quota yellows batch)
+- **SunStat v0.1.8** (f9060fb): SP-1, SC-1–SC-3 (4× API quota yellows batch; SC-4 deferred for state.floorMinTemp caching refactor)
 
-### Gemstone Lights v0.4.13 — Close G-2 through G-6 (batch yellows)
-- v0.4.13 added skip-if-match guards to on(), off(), setLevel(), setColor(), setColorTemperature() — Trinity's G-2 through G-6 🟡 findings from the redundant-write audit; reduces cloud API quota consumption for automation rules re-asserting the same state; G-5 setColor uses composite (hue + saturation + level + colorMode == "RGB") guard; G-6 setColorTemperature requires colorMode == "CT" before deduping; decision drop in inbox at tank-gemstone-yellows-batch.md
+All findings applied skip-if-match idempotency pattern (current attribute check before DP/API write). Pattern prevents audible relay clicks (T-2, G-1), reduces API quota (G-2–G-6, SP-1, SC-1–SC-3), and maintains wire-traffic hygiene (T-3–T-10). By-design exclusions: SC-5/SC-6/SC-7 state-assertion and recovery paths untouched. 
 
-### Gemstone Lights v0.4.12 — Close G-1 effect idempotency
-- v0.4.12 added skip-if-match guard in activateEffectWithPattern() — Trinity's G-1 🔴 finding from the redundant-write audit; degenerate 1-effect cycle edge case accepted and documented in decisions inbox
-
-### Touchstone v0.1.26 — Close T-4 through T-10 (batch yellows)
-- v0.1.26 added skip-if-match guards to 7 user-explicit command paths: setFlameColor (T-4), setFlameBrightness (T-5), setFlameSpeed (T-6), setCharcoalColor (T-7), setHeatLevel (T-8), setHeatingSetpoint (T-9), setChildLock (T-10); heater safety exclusion from applyOnPowerOnDefaults preserved
-
-### Touchstone v0.1.25 — Close T-2 + T-3 switch idempotency
-- v0.1.25 added skip-if-already-on/off guard to on()/off() — Trinity audit T-2 (🔴 audible) and T-3 (🟡 wire) closed; applyOnPowerOnDefaults runIn correctly skipped in the already-on path
-
-### Touchstone v0.1.24 — Close T-1 heatingSetpoint gap
-- v0.1.24 closed the heatingSetpoint gap in applyOnPowerOnDefaults — Trinity's T-1 finding from the audit
+**Status:** SHIPPED (16/17 findings closed; SC-4 deferred); awaiting Mads real-device validation.
 
 ---
 

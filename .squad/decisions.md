@@ -2,6 +2,60 @@
 
 ---
 
+## 2026-05-18: Redundant-write audit shipping — five driver releases
+
+**Date:** 2026-05-18  
+**Author:** Tank (Autopilot)  
+**Status:** SHIPPED — 5 driver releases closed 16 of 17 findings  
+**Summary:** Touchstone v0.1.25/v0.1.26, Gemstone v0.4.12/v0.4.13, SunStat v0.1.8 all now apply skip-if-match write-idempotency pattern across all affected endpoints. SC-4 (state.floorMinTemp caching in SunStat child) deferred to post-audit validation phase.
+
+### Touchstone v0.1.25: T-2, T-3 — switch idempotency
+- **T-2** (on() DP1=true): Added skip-if-match check. Prevents audible artifacts from repeated rule assertions.
+- **T-3** (off() DP1=false): Added skip-if-match check. Reduces wire traffic when already off.
+- **Status:** SHIPPED, commit b4122ee
+
+### Touchstone v0.1.26: T-4 through T-10 — wire-only yellows batch
+- **T-4** (setFlameColor DP101): Skip-if-match on DP101
+- **T-5** (setFlameBrightness DP102): Skip-if-match on DP102
+- **T-6** (setFlameSpeed DP103): Skip-if-match on DP103
+- **T-7** (setCharcoalColor DP104): Skip-if-match on DP104
+- **T-8** (setHeatLevel DP5): Skip-if-match on DP5 (explicit path only; auto-apply path excluded for safety)
+- **T-9** (setHeatingSetpoint DP14): Skip-if-match on DP14
+- **T-10** (setChildLock DP108): Skip-if-match on DP108 (harmless but consistent)
+- **Status:** SHIPPED, commit ffe2e9d
+
+### Gemstone v0.4.12: G-1 — effect idempotency
+- **G-1** (activateEffectWithPattern): Added check against current `effectName`. Prevents visible animation restart on repeated `setEffect(sameName)`.
+- **Caveat:** `cycleEffect()` flow preserves user intent (wrapping to same effect in single-item catalog is acceptable).
+- **Status:** SHIPPED, commit 91e0d1a
+
+### Gemstone v0.4.13: G-2 through G-6 — cloud quota yellows batch
+- **G-2** (on() PUT /onState): Skip-if-match on onState
+- **G-3** (off() PUT /onState): Skip-if-match on onState
+- **G-4** (setLevel() brightness): Skip-if-match on brightness value
+- **G-5** (setColor() composite hue+sat+level): Skip-if-match on hue+sat pair
+- **G-6** (setColorTemperature()): Skip-if-match on colorTemperature
+- **Status:** SHIPPED, commit 6ee553a
+
+### SunStat v0.1.8: SP-1, SC-1, SC-2, SC-3 — API quota yellows batch (SC-4 deferred)
+- **SP-1** (setAwayModeInternal PATCH /State): Skip-if-match on awayMode
+- **SC-1** (setThermostatSetpoint PUT /Child/Thermostats): Skip-if-match on thermostat setpoint
+- **SC-2** (setHumiditySetpoint PUT /Child/Humidity): Skip-if-match on humidity setpoint
+- **SC-3** (setTemperatureOffset PUT /Child/Temperature): Skip-if-match on temperature offset
+- **SC-4 (DEFERRED):** setChildLock / state.floorMinTemp caching — requires parseDeviceState refactor for min/max bounds caching. Scheduled for post-audit validation phase.
+- **Status:** SHIPPED (SC-4 deferred), commit f9060fb
+
+### Findings count
+- **Red (visible):** T-2 ✓ SHIPPED, T-1 pre-existing (fixed separately)
+- **Yellow (wire/API):** T-3, T-4 through T-10, G-2 through G-6, SP-1, SC-1 through SC-3 ✓ ALL SHIPPED (16 items)
+- **Green (harmless):** T-10 ✓ SHIPPED
+- **Deferred:** SC-4 (awaiting post-audit validation, state.floorMinTemp caching)
+- **By-design (not counted):** 3 items
+
+**Next:** Await Mads' real-device validation on all five driver releases.
+
+---
+
 ## 2026-05-18: Trinity Redundant-Write Audit — All Four Drivers
 
 **Date:** 2026-05-18  

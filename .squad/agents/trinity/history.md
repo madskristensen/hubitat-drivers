@@ -134,3 +134,27 @@ Participated in 4-way driver improvement scan with Tank, Cypher, Switch. Finding
 
 - 2026-05-17: Participated in top-3 driver improvements batch — sunstat v0.1.6, touchstone v0.1.6, gemstone v0.4.9.
 
+---
+
+## Learnings
+
+### 2026-05-18 — Write-idempotency audit across all four drivers
+
+**Methodology:** Read every device-write path (sendDpWrite, sendDevicePatch, PUT/PATCH HTTP) in each driver and asked: "Does the driver check device.currentValue() or a state.* cache before sending?" Anything that sends unconditionally got flagged. Then classified by severity using the "does this cause a user-visible side effect?" test from the v0.1.23 context.
+
+**Key cross-driver patterns noticed:**
+
+1. **The `emitIfChanged` / skip-if-match split** — SunStat child's `setScheduleEnabled()` is a clear example of a partial fix: `emitIfChanged` correctly gates the Hubitat event, but the `sendDevicePatch` below it is unconditional. This pattern (event deduplication ≠ write deduplication) should be audited for in every driver. These two guards solve different problems and must both be present.
+
+2. **Lifecycle-driven writes are the highest-risk category** — `applyOnPowerOnDefaults` (Touchstone) fires automatically on every power-on; `cancelBoost`/`boostExpired` (SunStat) fire on timer expiry without user interaction. These are where unconditional writes cause the most surprise: the user didn't explicitly ask for the write to happen at that moment. User-explicit commands (setFlameColor, setHeatingSetpoint) are lower priority because the user intent is explicit.
+
+3. **BY-DESIGN non-idempotent writes: state-assertion semantics** — SunStat's boost recovery is intentionally non-idempotent. `cancelBoost()` force-writes the pre-boost setpoint even if the device already shows that value, because the whole point is to defeat cloud drift (the cloud might have updated the setpoint during the boost window). Same logic applies to any "restore after override" pattern. **Do not apply skip-if-match to state-assertion paths** — it defeats the purpose.
+
+4. **Gemstone effect repeat** — `activateEffectWithPattern` is the one 🔴 in Gemstone. Sending the same effect pattern to an LED string controller visibly restarts the animation. Unlike Tuya fireplace clicks (audio), this is a visual artifact the homeowner would notice if rules re-assert the active effect. Skip-if-match should compare against `effectName` attribute or `state.lastPattern.id`.
+
+5. **Touchstone `on()` when already on** — Tuya fireplaces emit an audible click on receiving any DP write. This means `on()` called on an already-on fireplace (common in rules that re-assert switch state) produces a physical click. This is the same class of problem as the power-on defaults and should be guarded by a simple `if (device.currentValue("switch") == "on") return` at the top of `on()`.
+
+6. **Cloud drivers (Gemstone, SunStat) — wire vs. visible** — Redundant API calls in cloud drivers don't cause visible physical artifacts (lights don't flash on an idempotent PUT when value matches). The cost is API quota and latency. These are 🟡 not 🔴. Exception: Gemstone's `PUT /deviceControl/play/pattern` re-executes the animation sequence on the hardware, which IS visible — hence the 🔴 for `activateEffectWithPattern`.
+
+**Filed:** `.squad/decisions/inbox/trinity-redundant-write-audit.md`
+
