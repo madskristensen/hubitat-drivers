@@ -1,7 +1,7 @@
-/**
+﻿/**
  * Daikin WiFi Thermostat
  * Author:  Mads Kristensen
- * Version: 0.1.1
+ * Version: 0.1.2
  * License: MIT
  *
  * Local LAN control for Daikin WiFi adapters (BRP069B series, BRP15B61, and similar
@@ -14,6 +14,7 @@
  *   original. Credit and thanks to @eriktack for the foundational research.
  *
  * Changelog:
+ *   0.1.2 — 2026-05-18 — fix: replace HubAction (constructor not found on user firmware) with asynchttpGet — modern Hubitat HTTP-over-LAN pattern
  *   0.1.1 — 2026-05-18 — hotfix: remove invalid read of schedule property in updated(); correct HubAction constructor signature in sendGet
  *   0.1.0 — 2026-05-18 — initial clean-room implementation; Thermostat + Switch +
  *     EnergyMeter + HealthCheck capabilities; .isNumber() sentinel guards on all
@@ -27,7 +28,7 @@ import groovy.json.JsonOutput
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String  DRIVER_VERSION            = "0.1.1"
+@Field static final String  DRIVER_VERSION            = "0.1.2"
 @Field static final Integer DAIKIN_PORT               = 80
 @Field static final Integer LAST_ACTIVITY_THROTTLE_MS = 60000
 @Field static final Integer ENERGY_POLL_MINUTES       = 30
@@ -409,13 +410,14 @@ private void ensureDNI() {
 private void sendGet(String path, String callbackMethod) {
     if (!settings.ip) { log.warn "[Daikin] IP not configured — skipping: ${path}"; return }
     traceLog "GET ${path} → ${callbackMethod}"
+    Map params = [
+        uri         : "http://${settings.ip}${path}",
+        timeout     : 10,
+        contentType : "text/plain"
+    ]
+    Map data = [path: path]
     try {
-        sendHubCommand(new hubitat.device.HubAction(
-            [method: "GET", path: path,
-             headers: ["HOST": "${settings.ip}:${DAIKIN_PORT}", "Accept": "*/*"],
-             callback: callbackMethod],
-            hubitat.device.Protocol.LAN
-        ))
+        asynchttpGet(callbackMethod, params, data)
     } catch (Exception e) {
         log.warn "[Daikin] sendGet failed (${path}): ${e.message}"
     }
@@ -440,12 +442,13 @@ private void sendControlWrite(Map overrides) {
 }
 
 // ---------------------------------------------------------------------------
-// Response handlers (HubAction callbacks)
+// Response handlers (asynchttpGet callbacks)
 // ---------------------------------------------------------------------------
 
-def handleControlInfo(hubitat.device.HubResponse response) {
+def handleControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
     if (!checkHttpOk(response, "get_control_info")) { return }
-    String body = response?.body
+    String body = response.getData()
+    if (!body) { log.warn "[Daikin] Empty response from get_control_info"; return }
     traceLog "handleControlInfo: ${body}"
 
     Map kv = parseKV(body)
@@ -484,9 +487,10 @@ def handleControlInfo(hubitat.device.HubResponse response) {
     emitLastActivity()
 }
 
-def handleSensorInfo(hubitat.device.HubResponse response) {
+def handleSensorInfo(hubitat.scheduling.AsyncResponse response, Map data) {
     if (!checkHttpOk(response, "get_sensor_info")) { return }
-    String body = response?.body
+    String body = response.getData()
+    if (!body) { log.warn "[Daikin] Empty response from get_sensor_info"; return }
     traceLog "handleSensorInfo: ${body}"
 
     Map kv = parseKV(body)
@@ -526,9 +530,10 @@ def handleSensorInfo(hubitat.device.HubResponse response) {
     emitLastActivity()
 }
 
-def handleWeekPower(hubitat.device.HubResponse response) {
+def handleWeekPower(hubitat.scheduling.AsyncResponse response, Map data) {
     if (!checkHttpOk(response, "get_week_power_ex")) { return }
-    String body = response?.body
+    String body = response.getData()
+    if (!body) { log.warn "[Daikin] Empty response from get_week_power_ex"; return }
     traceLog "handleWeekPower: ${body}"
 
     Map kv = parseKV(body)
@@ -546,9 +551,10 @@ def handleWeekPower(hubitat.device.HubResponse response) {
     }
 }
 
-def handleYearPower(hubitat.device.HubResponse response) {
+def handleYearPower(hubitat.scheduling.AsyncResponse response, Map data) {
     if (!checkHttpOk(response, "get_year_power_ex")) { return }
-    String body = response?.body
+    String body = response.getData()
+    if (!body) { log.warn "[Daikin] Empty response from get_year_power_ex"; return }
     traceLog "handleYearPower: ${body}"
 
     Map kv = parseKV(body)
@@ -563,9 +569,9 @@ def handleYearPower(hubitat.device.HubResponse response) {
     }
 }
 
-def handleSetControlInfo(hubitat.device.HubResponse response) {
+def handleSetControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
     if (!checkHttpOk(response, "set_control_info")) { return }
-    Map kv = parseKV(response?.body ?: "")
+    Map kv = parseKV(response.getData() ?: "")
     if (kv.ret == "OK") {
         debugLog "set_control_info accepted"
     } else {
@@ -575,7 +581,7 @@ def handleSetControlInfo(hubitat.device.HubResponse response) {
     runIn(2, "getControlInfo")
 }
 
-def handlePingResponse(hubitat.device.HubResponse response) {
+def handlePingResponse(hubitat.scheduling.AsyncResponse response, Map data) {
     unschedule("pingTimeout")
     state.pingPending = false
     if (!checkHttpOk(response, "ping")) {
@@ -584,7 +590,7 @@ def handlePingResponse(hubitat.device.HubResponse response) {
     }
     emitIfChanged("healthStatus", "online", null, "${device.displayName} responded to ping")
     // Parse the control-info body received as part of the ping probe.
-    handleControlInfo(response)
+    handleControlInfo(response, data)
 }
 
 // ---------------------------------------------------------------------------
@@ -709,9 +715,9 @@ private Map parseKV(String body) {
     return result
 }
 
-private boolean checkHttpOk(hubitat.device.HubResponse response, String endpoint) {
-    if (response?.status == null) { log.warn "[Daikin] No response from ${endpoint}"; return false }
-    if (response.status != 200)   { log.warn "[Daikin] HTTP ${response.status} from ${endpoint}"; return false }
+private boolean checkHttpOk(hubitat.scheduling.AsyncResponse response, String endpoint) {
+    if (response == null) { log.warn "[Daikin] No response from ${endpoint}"; return false }
+    if (response.hasError()) { log.warn "[Daikin] HTTP error from ${endpoint}: ${response.getErrorMessage()}"; return false }
     return true
 }
 
@@ -726,7 +732,8 @@ private String operatingStateForMode(String mode) {
     }
 }
 
-// Fallback for any LAN message that arrives without a registered HubAction callback.
+// Defensive no-op: with asynchttpGet, LAN responses are delivered directly to named
+// callbacks and never arrive here. Keep as a safety net to prevent unhandled-message noise.
 def parse(String description) {
     traceLog "parse() — unrouted LAN message: ${description?.take(60)}"
 }

@@ -1,4 +1,4 @@
-# Tank — Driver Developer
+﻿# Tank — Driver Developer
 
 **⚠️ SUMMARIZED 2026-05-18T17:11:04Z — Detailed history moved to history-archive.md (file was 36542 bytes).**
 
@@ -109,3 +109,12 @@ Cypher + Trinity completed assessment of `eriktack/hubitat-daikin-wifi` upstream
 - **Blocked at install:** `java.lang.System.arraycopy` and `java.util.zip.CRC32` are on sandbox blocklist (expression-level + import-level restrictions).
 - **Pattern for future:** Any byte-copy helper must use primitive for-loop: `for (int i = 0; i < length; i++) { dest[destOff + i] = src[srcOff + i] }`. Avoid `Arrays.copyOf`, `ByteArrayOutputStream`, `java.nio` bulk-copy APIs.
 
+
+
+### Daikin v0.1.2 hotfix — HubAction(Map, Protocol) also fails; switch to asynchttpGet
+
+- **HubAction 2-arg Map form also invalid:** v0.1.1 tried HubAction(Map, Protocol). Also fails on Mads's firmware with 'Could not find matching constructor'. Both 3-arg and 2-arg Map-based HubAction constructors are broken for HTTP use on current Hubitat firmware. Stop guessing at HubAction overloads.
+- **asynchttpGet is the correct HTTP-over-LAN API:** Adopted in v0.1.2 (sendGet lines 409-422, drivers/daikin-wifi/daikin-wifi.groovy). Works for any HTTP URL (LAN or cloud), firmware 2.2+. Pattern: asynchttpGet(callbackMethod, [uri: "http://ip/path", timeout: 10, contentType: "text/plain"], [path: path])
+- **Callback signature:** def handler(hubitat.scheduling.AsyncResponse response, Map data) — body via response.getData(), error check via response.hasError(). No parseLanMessage, no DNI required.
+- **Correction to team memo:** Trinity's v0.1.0 memo claimed asynchttpGet was cloud-only. Incorrect — works for LAN HTTP too. Corrected in .squad/decisions/inbox/tank-daikin-wifi-v012-asynchttp.md.
+- **Skill:** .squad/skills/hubitat-asynchttpget-pattern/SKILL.md (new); .squad/skills/hubitat-hubaction-constructors/SKILL.md (updated to mark all Map-based forms unreliable, confidence medium).
