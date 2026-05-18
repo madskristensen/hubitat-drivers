@@ -1325,3 +1325,36 @@ Use this checklist to declare the driver "works" before recommending it to other
 - After step 6: `childLock` reflects the lock state returned by the device.
 
 **Pass criteria:** Physical buttons locked when `childLock = on`; unlocked when `childLock = off`.
+
+### Test 39: Discover -- Active-TCP IP Discovery After IP Change
+
+**What:** Verify the `discover()` command locates the fireplace after its IP changes (simulating DHCP lease renewal).
+
+**Pre-conditions:** Driver configured with correct device ID and local key. Fireplace is powered on and reachable.
+
+**Steps:**
+
+1. Note the current `deviceIP` preference value (e.g., `192.168.1.47`).
+2. In your router, force a new IP lease for the fireplace (e.g., release/renew DHCP, or change the IP assigned to the fireplace's MAC address to another address in the same /24, e.g., `192.168.1.83`).
+3. Confirm the old IP is now unreachable (ping from hub should fail).
+4. In the Hubitat device page, press **`discover()`**.
+5. Watch the Logs page.
+6. Wait for the scan to complete (smart range: under 1 minute; full sweep: up to ~8 minutes).
+
+**Expected:**
+
+- Logs show `[Touchstone] Starting active-TCP discovery on 192.168.1.0/24`.
+- Logs show `[Touchstone] Discovery probe: 192.168.1.X:6668` for each probed IP (debug logs only).
+- When the new IP is reached, logs show `[Touchstone] Discovery: found matching device at 192.168.1.83`.
+- Logs show `[Touchstone] Discovery complete -- found device at 192.168.1.83`.
+- The `deviceIP` preference updates automatically to the new IP.
+- The `networkAddress` attribute updates to the new IP.
+- The driver reconnects (`socketState = open`, `online = online`) and normal operation resumes.
+- Heartbeat resumes within 10 s of reconnect.
+
+**Pass criteria:** `deviceIP` preference updated to new IP; `networkAddress` shows new IP; driver connected and online after discovery.
+
+**Notes:**
+- If the smart ±20 range contains the new IP, discovery completes in well under 1 minute.
+- If the router assigns an IP outside the ±20 range, the full sweep will find it eventually.
+- If discovery completes with no match, logs show `[Touchstone] Discovery complete -- no matching device found`.

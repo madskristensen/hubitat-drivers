@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.20 — 2026-05-17 — active-TCP IP discovery (discover command) + improved DHCP connection-fail error
  *   0.1.19 — 2026-05-17 — child lock command (DP 108): setChildLock on/off locks physical buttons
  *   0.1.18 — 2026-05-17 — persistent socket + Tuya push subscriptions (physical remote now syncs in real time)
  *   0.1.17 — 2026-05-17 — rename setLogColor → setCharcoalColor with verified labels
@@ -80,8 +81,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.19"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.19"
+@Field static final String DRIVER_VERSION = "0.1.20"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.20"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -185,6 +186,7 @@ metadata {
         command "captureBaseline"
         command "captureDiff"
         command "setChildLock", [[name: "state*", type: "ENUM", constraints: ["off", "on"]]]
+        command "discover"
 
         attribute "flameColor",       "string"
         attribute "flameBrightness",  "string"
@@ -198,6 +200,7 @@ metadata {
         attribute "dp107",            "string"
         attribute "dp108",            "string"
         attribute "childLock",        "enum",   ["on", "off"]
+        attribute "networkAddress",    "string"
         attribute "tempUnit",         "enum",   ["F", "C"]
     }
 
@@ -424,6 +427,149 @@ def captureDiff() {
     requestStatus("capture diff", "diff", discoveryStatusDpIds())
 }
 
+// ---------------------------------------------------------------------------
+// Active-TCP IP discovery (DHCP renewal recovery)
+// ---------------------------------------------------------------------------
+
+def discover() {
+    if (!preferencesReady()) {
+        log.warn "[Touchstone] discover() skipped — configure device IP, device ID, and local key first"
+        return
+    }
+
+    String ip = deviceIpValue()
+    int lastDot = ip.lastIndexOf('.')
+    if (lastDot < 1) {
+        log.warn "[Touchstone] discover() skipped — cannot parse /24 prefix from IP '${ip}'"
+        return
+    }
+
+    String prefix = ip.substring(0, lastDot + 1)
+    Integer knownOctet = safeInt(ip.substring(lastDot + 1), null)
+
+    // Build probe order: ±20 from known IP first (typical DHCP drift), then full 1–254 sweep.
+    List<Integer> probeOrder = []
+    if (knownOctet != null) {
+        (-20..20).each { int offset ->
+            int candidate = knownOctet + offset
+            if (candidate >= 1 && candidate <= 254) {
+                probeOrder << candidate
+            }
+        }
+    }
+    Set<Integer> smartSet = probeOrder.toSet()
+    (1..254).each { int i -> if (!(i in smartSet)) probeOrder << i }
+
+    log.info "[Touchstone] Starting active-TCP discovery on ${prefix}0/24 (port ${TUYA_PORT}). " +
+             "Trying ${Math.min(probeOrder.size(), 41)} smart-range IPs first, then full sweep. " +
+             "Tip: set a DHCP reservation in your router to avoid this in future."
+
+    unschedule("sendHeartbeat")
+    closeSocket(false)
+
+    state.discoveryMode = true
+    state.discoveryPrefix = prefix
+    state.discoveryProbeQueue = probeOrder
+    state.discoveryFoundIp = null
+    state.discoveryCurrentIp = null
+
+    runIn(1, "discoveryProbeNext")
+}
+
+def discoveryProbeNext() {
+    if (state.discoveryMode != true) {
+        return
+    }
+
+    List queue = state.discoveryProbeQueue instanceof List ? (List) state.discoveryProbeQueue : []
+    if (queue.isEmpty()) {
+        discoveryComplete()
+        return
+    }
+
+    Integer nextOctet = safeInt(queue.remove(0), null)
+    state.discoveryProbeQueue = queue
+
+    if (nextOctet == null || nextOctet < 1 || nextOctet > 254) {
+        runIn(1, "discoveryProbeNext")
+        return
+    }
+
+    String prefix = safeStr(state.discoveryPrefix) ?: ""
+    String targetIp = "${prefix}${nextOctet}"
+    state.discoveryCurrentIp = targetIp
+    debugLog "Discovery probe: ${targetIp}:${TUYA_PORT}"
+
+    // Stamp intentional-close so the previous socket's disconnect callback is suppressed.
+    state.intentionalCloseAt = now()
+    state.socketOpen = false
+    try { interfaces.rawSocket.close() } catch (ignored) {}
+
+    try {
+        interfaces.rawSocket.connect(targetIp, TUYA_PORT, byteInterface: true, readDelay: 150)
+        state.socketOpen = true
+        // Send a standard DP_QUERY; the response devId identifies the device.
+        String queryJson = JsonOutput.toJson([
+            gwId: deviceIdValue(), devId: deviceIdValue(),
+            uid: deviceIdValue(), t: currentEpochSecondsString()
+        ])
+        byte[] frame = buildTuyaFrame(TUYA_CMD_DP_QUERY, queryJson)
+        interfaces.rawSocket.sendMessage(hubitat.helper.HexUtils.byteArrayToHexString(frame))
+        unschedule("discoveryProbeTimeout")
+        runIn(3, "discoveryProbeTimeout")
+    } catch (Exception e) {
+        debugLog "Discovery: no Tuya device at ${targetIp} (${e.message})"
+        state.socketOpen = false
+        runIn(1, "discoveryProbeNext")
+    }
+}
+
+def discoveryProbeTimeout() {
+    if (state.discoveryMode != true) {
+        return
+    }
+    debugLog "Discovery timeout for ${state.discoveryCurrentIp} — moving on"
+    runIn(1, "discoveryProbeNext")
+}
+
+private void discoveryHandleResponse(Map response) {
+    String currentIp = safeStr(state.discoveryCurrentIp) ?: "unknown"
+    String responseDevId = safeStr(response?.devId)?.trim()
+    String storedDevId = deviceIdValue()?.trim()
+
+    unschedule("discoveryProbeTimeout")
+
+    if (!responseDevId) {
+        log.warn "[Touchstone] Discovery: device at ${currentIp} responded but no devId in response — skipping (fail-closed)"
+        runIn(1, "discoveryProbeNext")
+        return
+    }
+
+    if (responseDevId == storedDevId) {
+        state.discoveryFoundIp = currentIp
+        log.info "[Touchstone] Discovery: found matching device at ${currentIp} (devId=${responseDevId})"
+        device.updateSetting("deviceIP", [type: "text", value: currentIp])
+        sendEvent(name: "networkAddress", value: currentIp, descriptionText: "${device.displayName} discovered at ${currentIp}")
+        discoveryComplete()
+    } else {
+        debugLog "Discovery: device at ${currentIp} devId=${responseDevId} != stored ${storedDevId} — skipping"
+        runIn(1, "discoveryProbeNext")
+    }
+}
+
+private void discoveryComplete() {
+    String found = safeStr(state.discoveryFoundIp)
+    state.discoveryMode = false
+    unschedule("discoveryProbeTimeout")
+    if (found) {
+        log.info "[Touchstone] Discovery complete — device found at ${found}"
+    } else {
+        log.warn "[Touchstone] Discovery complete — no matching device found on the /24 subnet. " +
+                 "Enter the new IP manually in device preferences, or check that the fireplace is powered on."
+    }
+    initialize()
+}
+
 def setFlameColor(color) {
     String label = safeStr(color)?.trim()
     if (!(FLAME_COLOR_TO_DP.containsKey(label))) {
@@ -574,6 +720,21 @@ def socketStatus(String message) {
 
     state.lastSocketEventTs = now()
 
+    // Discovery mode: route error/disconnect events to the discovery state machine.
+    if (state.discoveryMode == true) {
+        String lower = text.toLowerCase()
+        if (lower.contains("disconnect") || lower.contains("error") || lower.contains("reset") || lower.contains("broken pipe") || lower.contains("closed")) {
+            debugLog "socketStatus (discovery, moving to next IP): ${text}"
+            state.socketOpen = false
+            unschedule("discoveryProbeTimeout")
+            runIn(1, "discoveryProbeNext")
+        } else {
+            // "established" or similar — query already sent from discoveryProbeNext(); nothing more to do here.
+            debugLog "socketStatus (discovery): ${text}"
+        }
+        return
+    }
+
     // Suppress callbacks triggered by our own intentional close (updated/uninstalled/initialize).
     Long intentionalAt = safeLong(state.intentionalCloseAt, 0L)
     if ((now() - intentionalAt) < 3000L) {
@@ -612,6 +773,10 @@ def parse(String message) {
 
         Integer processed = consumeReceiveBuffer()
         if ((processed ?: 0) > 0) {
+            if (state.discoveryMode == true) {
+                // discoveryHandleResponse() has already handled routing; skip normal post-processing.
+                return
+            }
             unschedule("responseTimeout")
             state.awaitingResponse = false
             state.inFlight = null
@@ -783,6 +948,10 @@ def openSocket() {
     if (!preferencesReady()) {
         return
     }
+    if (state.discoveryMode == true) {
+        debugLog "openSocket() skipped — discovery in progress"
+        return
+    }
     try {
         interfaces.rawSocket.connect(deviceIpValue(), TUYA_PORT, byteInterface: true, readDelay: 150)
         state.socketOpen = true
@@ -796,13 +965,20 @@ def openSocket() {
     } catch (Exception e) {
         state.socketOpen = false
         updateSocketState("error")
-        log.warn "[Touchstone] openSocket failed: ${e.message}"
+        log.error "[Touchstone] Cannot connect to fireplace at ${deviceIpValue()}. " +
+                  "If your device IP changed (DHCP lease renewed), update it in device preferences " +
+                  "or press the 'Discover' command. " +
+                  "Tip: set a DHCP reservation in your router to prevent this. (${e.message})"
         scheduleReconnect()
     }
 }
 
 def sendHeartbeat() {
     if (!preferencesReady() || state.socketOpen != true) {
+        return
+    }
+    if (state.discoveryMode == true) {
+        debugLog "sendHeartbeat() skipped — discovery in progress"
         return
     }
     try {
@@ -821,6 +997,10 @@ def sendHeartbeat() {
 }
 
 def reconnectSocket() {
+    if (state.discoveryMode == true) {
+        debugLog "reconnectSocket() skipped — discovery in progress"
+        return
+    }
     if (state.socketOpen == true) {
         debugLog "reconnectSocket() called but socket already open"
         return
@@ -1299,6 +1479,11 @@ private Boolean processFrame(String frameHex) {
     }
 
     Map response = new JsonSlurper().parseText(decoded) as Map
+    // Discovery mode: intercept before normal DP processing; check devId match.
+    if (state.discoveryMode == true) {
+        discoveryHandleResponse(response)
+        return true
+    }
     if (response?.dps instanceof Map) {
         Map<String, Object> dps = normaliseDps(response.dps as Map)
         state.lastDps = dps
