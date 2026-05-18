@@ -145,3 +145,13 @@ Added in OPTIONS bounds-checks + log.warn + early bail in pplyDps() for enum DP
 **v0.1.10 status:** Awaiting Cypher's empirical test result (DP 105/109 read-only confirmation) before final changelog.
 
 - 2026-05-17 — When fixing display bugs in Hubitat drivers, examine BOTH the WRITE-side emit AND the INBOUND parse paths. v0.1.10 fixed the parse-side (added bounds checks for echoed-back DP values) but missed the actual write-side off-by-one that emitted OPTIONS[dpValue] after computing dpValue = idx + 1. The lesson: when a user reports 'always shows +1', the bug is almost certainly in the WRITE path where the same off-by-one math is reused for both wire output AND attribute emit.
+
+- 2026-05-17 — Hubitat Commands-tab dropdown bug: when a command parameter declares `type: 'ENUM'` with numeric-string constraints (e.g., ['1','2','3','4','5']), the dropdown widget advances one position after the user presses Set — purely cosmetic platform UI quirk, value sent and attribute emitted are both correct. Workaround: declare such parameters as `type: 'NUMBER'` with `range: 'N..M'` instead — Hubitat renders an input field, no dropdown to advance. Label enums (non-numeric strings) keep ENUM since they're not affected as severely and changing them harms UX.
+
+- 2026-05-17T17:39:11-07:00 — Touchstone color palettes (DP 101 flame, DP 104 log) stay NUMBER input until someone with hardware reports the actual visible color for each palette index. Inventing labels without verification creates worse UX than honest numeric input. setFlameBrightness named-ENUM is appropriate because Dimmest/Dim/Medium/Brighter/Brightest are hardware-independent labels — the mapping is intuitive regardless of device.
+
+- 2026-05-17 — Touchstone flame color palette (DP 101) verified labels from Tuya app screenshot: 1=Orange (default), 2=Blue, 3=White, 4=Orange+Blue, 5=Orange+White, 6=Blue+White. Future verifications for other Tuya devices should also request app screenshots before inventing labels.
+
+
+- Touchstone DP 104 = 'Charcoal Color' in the Tuya app (not 'Log Color' — the driver historically used the wrong term). 12 palette values verified: 1=Orange (default), 2=Red, 3=Blue, 4=Yellow, 5=Green, 6=Purple, 7=Cyan, 8=Magenta, 9=White, 10=Pink, 11=Rainbow (8-segment), 12=Spotlight (best-guess; mostly-white circle with orange wedge in the app). Rename completed in v0.1.17 — breaking change, no alias.
+
