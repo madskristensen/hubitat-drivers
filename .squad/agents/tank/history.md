@@ -143,3 +143,5 @@ Added in OPTIONS bounds-checks + log.warn + early bail in pplyDps() for enum DP
 **Commit:** 3fe727c — bounds-checks for all enum DPs.
 
 **v0.1.10 status:** Awaiting Cypher's empirical test result (DP 105/109 read-only confirmation) before final changelog.
+
+- 2026-05-17 — When fixing display bugs in Hubitat drivers, examine BOTH the WRITE-side emit AND the INBOUND parse paths. v0.1.10 fixed the parse-side (added bounds checks for echoed-back DP values) but missed the actual write-side off-by-one that emitted OPTIONS[dpValue] after computing dpValue = idx + 1. The lesson: when a user reports 'always shows +1', the bug is almost certainly in the WRITE path where the same off-by-one math is reused for both wire output AND attribute emit.
