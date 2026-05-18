@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.24
+ * Version: 0.1.25
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.25 — 2026-05-18 — skip redundant on()/off() DP writes when switch is already in the requested state (audit T-2, T-3)
  *   0.1.24 — 2026-05-18 — close v0.1.23 gap: defaultHeatingSetpoint now also skips redundant DP write when device setpoint already matches
  *   0.1.23 — 2026-05-18 — skip default DP writes during power-on when current attribute value already matches the configured default
  *   0.1.22 — 2026-05-18 — add traceEnable preference; demote heartbeat/refresh chatter and unchanged-DP echoes to trace level
@@ -85,8 +86,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.24"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.24"
+@Field static final String DRIVER_VERSION = "0.1.25"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.25"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -400,6 +401,11 @@ def on() {
         return
     }
 
+    if (device.currentValue("switch") == "on") {
+        debugLog "on(): device already on — skipping DP write"
+        return
+    }
+
     infoLog "${device.displayName} switch → on"
     markPowerTransitionIfChanged(true)
     applySwitchState(true, "digital")
@@ -414,6 +420,11 @@ def off() {
     Integer powerDp = dpFor("power")
     if (powerDp == null) {
         log.warn "[Touchstone] Power is not mapped for profile '${activeDeviceProfile()}'"
+        return
+    }
+
+    if (device.currentValue("switch") == "off") {
+        debugLog "off(): device already off — skipping DP write"
         return
     }
 

@@ -6,6 +6,14 @@
 
 ## Latest Work (2026-05-18)
 
+### Touchstone v0.1.25 — Close T-2 + T-3 switch idempotency
+- v0.1.25 added skip-if-already-on/off guard to on()/off() — Trinity audit T-2 (🔴 audible) and T-3 (🟡 wire) closed; applyOnPowerOnDefaults runIn correctly skipped in the already-on path
+
+### Touchstone v0.1.24 — Close T-1 heatingSetpoint gap
+- v0.1.24 closed the heatingSetpoint gap in applyOnPowerOnDefaults — Trinity's T-1 finding from the audit
+
+---
+
 ### Touchstone v0.1.22 — Log Hygiene (trace/debug split)
 - **Shipped:** 2026-05-18 (Commit f53312c)
 - **Status:** Delivered
