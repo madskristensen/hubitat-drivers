@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.14
+ * Version: 0.4.15
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,8 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.15 — 2026-05-18 — replace cloneMap JSON round-trips with recursive Map/List copies on hot request/pattern paths
+ *   0.4.15 — 2026-05-18 — dedupe unchanged refresh switch/level/hue/saturation events so poll telemetry stays stat-only
  *   0.4.14 — 2026-05-18 — throttle lastActivity emit to ≥60s; cuts unchanged-event DB churn on polls (perf audit fix #1)
  *   0.4.13 — 2026-05-18 — skip redundant on/off/setLevel/setColor/setColorTemperature PUTs when device already matches (audit G-2 through G-6)
  *   0.4.12 — 2026-05-18 — skip redundant setEffect pattern PUT when effect already active (audit G-1)
@@ -50,7 +52,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.14"
+@Field static final String DRIVER_VERSION = "0.4.15"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -70,7 +72,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.13"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.15"
 
 metadata {
     definition(
@@ -1413,7 +1415,7 @@ private void handleRefreshResponse(Map payload) {
 
     Boolean onState = data.onState == true
     state.lastOnState = onState
-    sendEvent(name: "switch", value: onState ? "on" : "off", descriptionText: "${device.displayName} turned ${onState ? 'on' : 'off'}", type: "digital")
+    sendRefreshTelemetryEventIfChanged("switch", onState ? "on" : "off", "${device.displayName} turned ${onState ? 'on' : 'off'}")
 
     Map pattern = data.pattern instanceof Map ? data.pattern as Map : null
     if (pattern) {
@@ -1425,13 +1427,13 @@ private void handleRefreshResponse(Map payload) {
         rememberPattern(pattern)
 
         Integer level = wireBrightnessToLevel(safeInt(pattern.brightness, 255))
-        sendEvent(name: "level", value: level, unit: "%", descriptionText: "${device.displayName} level set to ${level}%", type: "digital")
+        sendRefreshTelemetryEventIfChanged("level", level, "${device.displayName} level set to ${level}%", "%")
 
         List colors = pattern.colors instanceof List ? pattern.colors as List : []
         if (colors) {
             Map hs = gemstoneArgbToHubitatColor(safeInt(colors[0], 0))
-            sendEvent(name: "hue", value: hs.hue, descriptionText: "${device.displayName} hue set to ${hs.hue}", type: "digital")
-            sendEvent(name: "saturation", value: hs.saturation, descriptionText: "${device.displayName} saturation set to ${hs.saturation}", type: "digital")
+            sendRefreshTelemetryEventIfChanged("hue", hs.hue, "${device.displayName} hue set to ${hs.hue}")
+            sendRefreshTelemetryEventIfChanged("saturation", hs.saturation, "${device.displayName} saturation set to ${hs.saturation}")
         }
 
         if (inferredColorMode) {
@@ -1449,10 +1451,37 @@ private void handleRefreshResponse(Map payload) {
         }
     } else {
         state.remove("lastPattern")
-        sendEvent(name: "level", value: onState ? safeInt(device.currentValue("level"), 100) : 0, unit: "%", descriptionText: "${device.displayName} level set to ${onState ? safeInt(device.currentValue('level'), 100) : 0}%", type: "digital")
+        Integer fallbackLevel = onState ? safeInt(device.currentValue("level"), 100) : 0
+        sendRefreshTelemetryEventIfChanged("level", fallbackLevel, "${device.displayName} level set to ${fallbackLevel}%", "%")
         updateEffectName("")
         clearCurrentEffectIndex()
     }
+}
+
+private Boolean sendRefreshTelemetryEventIfChanged(String name, Object value, String descriptionText, String unit = null) {
+    if (!attributeValueChanged(name, value)) {
+        return false
+    }
+
+    Map event = [name: name, value: value, descriptionText: descriptionText]
+    if (unit) {
+        event.unit = unit
+    }
+    sendEvent(event)
+    return true
+}
+
+private Boolean attributeValueChanged(String name, Object value) {
+    def currentRaw = device.currentValue(name)
+    if (value instanceof Number || currentRaw instanceof Number) {
+        BigDecimal current = safeBigDecimal(currentRaw, null)
+        BigDecimal next = safeBigDecimal(value, null)
+        if (current != null && next != null) {
+            return current.compareTo(next) != 0
+        }
+        return current != next
+    }
+    return safeString(currentRaw) != safeString(value)
 }
 
 private void handleEffectCatalogPageResponse(Map payload, Map request) {
@@ -2279,11 +2308,44 @@ private String safeString(value, String fallback = "") {
     return value == null ? fallback : value.toString()
 }
 
+private BigDecimal safeBigDecimal(value, BigDecimal fallback = null) {
+    if (value == null) {
+        return fallback
+    }
+    if (value instanceof BigDecimal) {
+        return value as BigDecimal
+    }
+    try {
+        return new BigDecimal(value.toString())
+    } catch (ignored) {
+        try {
+            return new BigDecimal(value.toString().trim())
+        } catch (ignoredAgain) {
+            return fallback
+        }
+    }
+}
+
 private Map cloneMap(Map source) {
     if (!source) {
         return [:]
     }
-    return new JsonSlurper().parseText(JsonOutput.toJson(source)) as Map
+
+    Map copy = [:]
+    source.each { key, value ->
+        copy[key] = cloneValue(value)
+    }
+    return copy
+}
+
+private Object cloneValue(Object value) {
+    if (value instanceof Map) {
+        return cloneMap(value as Map)
+    }
+    if (value instanceof List) {
+        return (value as List).collect { item -> cloneValue(item) }
+    }
+    return value
 }
 
 private Integer responseStatus(response) {
