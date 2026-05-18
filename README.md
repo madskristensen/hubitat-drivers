@@ -4,27 +4,23 @@ Community Hubitat Elevation drivers by Mads Kristensen.
 
 **4 production-ready drivers** • 🌐 2 Local LAN • ☁️ 2 Cloud API • 📦 HPM Ready
 
----
-
 ## Available Drivers
 
 ### 🌡️ Climate Control
 
-| Driver                     | Type         | Key Features                                                                 | Docs                                            |
-| -------------------------- | ------------ | ---------------------------------------------------------------------------- | ----------------------------------------------- |
-| **Daikin WiFi Thermostat** | 🌐 Local LAN | No cloud required • Indoor/outdoor temp • Humidity • Energy meter • HTTP API | [📖 Docs](drivers/daikin-wifi/README.md)        |
-| **SunStat Connect Plus**   | ☁️ Cloud API | Floor heating • Auto-discovery • Parent/child • Watts® Home API              | [📖 Docs](drivers/sunstat-thermostat/README.md) |
+| Driver                     | Type     | Key Features                                                                 | Docs                                         |
+| -------------------------- | -------- | ---------------------------------------------------------------------------- | -------------------------------------------- |
+| **Daikin WiFi Thermostat** | 🌐 Local | No cloud required • Indoor/outdoor temp • Humidity • Energy meter • HTTP API | [Docs](drivers/daikin-wifi/README.md)        |
+| **SunStat Connect Plus**   | ☁️ Cloud | Floor heating • Auto-discovery • Parent/child • Watts® Home API              | [Docs](drivers/sunstat-thermostat/README.md) |
 
 ### 🏠 Home Ambiance
 
-| Driver                          | Type         | Key Features                                                                   | Docs                                              |
-| ------------------------------- | ------------ | ------------------------------------------------------------------------------ | ------------------------------------------------- |
-| **Gemstone Lights**             | ☁️ Cloud API | Permanent outdoor lighting • Named effects • Favorites support • Color control | [📖 Docs](drivers/gemstone-lights/README.md)      |
-| **Touchstone / Tuya Fireplace** | 🌐 Local LAN | Flame & log colors • Brightness • Heater • DP discovery • No cloud required    | [📖 Docs](drivers/touchstone-fireplace/README.md) |
+| Driver                          | Type     | Key Features                                                                   | Docs                                           |
+| ------------------------------- | -------- | ------------------------------------------------------------------------------ | ---------------------------------------------- |
+| **Gemstone Lights**             | ☁️ Cloud | Permanent outdoor lighting • Named effects • Favorites support • Color control | [Docs](drivers/gemstone-lights/README.md)      |
+| **Touchstone / Tuya Fireplace** | 🌐 Local | Flame & log colors • Brightness • Heater • DP discovery • No cloud required    | [Docs](drivers/touchstone-fireplace/README.md) |
 
 **Legend:** 🌐 Local LAN = Runs entirely on your network • ☁️ Cloud API = Requires internet connection
-
----
 
 ## Quick Start
 
@@ -65,8 +61,6 @@ For advanced users or offline installations:
 4. **Save** and create a virtual device using the driver
 5. **Configure** device preferences (see per-driver README)
 
----
-
 ## Compatibility
 
 **Hub Requirements:**
@@ -76,15 +70,12 @@ For advanced users or offline installations:
 
 **Network Requirement| :**
 
-| Driver    | Network        | Type | Details                                                          |
-| ---------------- | -------------- | ----------------------------------------------------------------------- |
-| -- |
-| Daikin Wi | i    | 🌐 Loca | LAN | Direct IP access to BRP069B adapter • No cloud account needed     |
-| | Gemstone       | ☁️ Clou        | API | Outbound HTTPS to Gemstone cloud                                  |
-| | SunStat        | ☁️ Clou        | API | Outbound HTTPS to Watts® Home cloud                               |
-| | Touchston      | 🌐 Loca        | LAN | Direct IP access to device • Requires Tuya local key (one-time se |up)  |
-
----
+| Driver       | Network  | Type                                                                  | Details |
+| ------------ | -------- | --------------------------------------------------------------------- | ------- |
+| Daikin Wi-fi | 🌐 Local | Direct IP access to BRP069B adapter • No cloud account needed         |         |
+| Gemstone     | ☁️ Cloud | Outbound HTTPS to Gemstone cloud                                      |         |
+| SunStat      | ☁️ Cloud | Outbound HTTPS to Watts® Home cloud                                   |         |
+| Touchston    | 🌐 Local | Direct IP access to device • Requires Tuya local key (one-time setup) |         |
 
 ## Contributing
 
@@ -92,9 +83,7 @@ For advanced users or offline installations:
 
 **Version bump reminder:** When updating a driver, also bump the root `packageManifest.json` version so HPM bundle users get notified.
 
----
-
-## 💬 Support & Community
+## Support & Community
 
 - **Questions?** Visit the [Hubitat Community Forums](https://community.hubitat.com/)
 - **Issues?** Open a [GitHub issue](https://github.com/madskristensen/hubitat-drivers/issues)
