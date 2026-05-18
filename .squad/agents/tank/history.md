@@ -4,6 +4,33 @@
 
 ---
 
+## Team Updates — Daikin Driver Research (2026-05-18)
+
+Cypher + Trinity completed assessment of `eriktack/hubitat-daikin-wifi` upstream. **Recommendation: Fork into this repo as `drivers/daikin-wifi/` v0.1.0.**
+
+**Key Findings:**
+- **Root bug (line 466):** `otemp="-"` (Daikin sentinel) hits `Double.parseDouble("-")` → `NumberFormatException` every poll when sensor unavailable. Fix: guard with `.isNumber()` before parse (pattern already correct on line 473).
+- **Critical capability gap:** `supportedThermostatModes` never declared — breaks Rule Machine thermostat mode dropdowns.
+- **Missing lifecycle:** No `initialize()` (polling dies on hub restart); energy endpoints over-polled (1440x/day, should be ~48x on 30-min schedule).
+- **Hygiene:** All 66 events lack `descriptionText`, no lastActivity, no HealthCheck.
+- **Upstream:** Effectively abandoned (2021 last commit, issues disabled, 2 PRs unreviewed 1–2 years).
+
+**Priority list (1–5 = ~4–5 hrs trustworthy driver; 1–8 = ~16–20 hrs repo-quality):**
+1. Guard sentinel values (`"-"`) before `Double.parseDouble()`
+2. Add `supportedThermostatModes` in `installed()` + `updated()`
+3. Fix `supportedThermostatFanModes` (missing in `installed()`)
+4. Add `initialize()` lifecycle
+5. Throttle energy polling to 30-min schedule
+6. Add HealthCheck + lastActivity
+7. Add econo/powerful mode support
+8. Apply event hygiene (descriptionText + emitIfChanged)
+
+**Reusable HVAC pattern:** Daikin sentinel-value pattern (`"-"` for unavailable sensor) is a generalizable protocol pattern across HVAC systems — worth documenting as skill for future integrations.
+
+**Full memos:** `.squad/files/daikin-research/daikin-driver-assessment.md`, `.squad/files/daikin-research/daikin-capability-gap-memo.md`
+
+---
+
 # Tank — Driver Developer
 
 **⚠️ SUMMARIZED 2026-05-18T13:19:11Z — Detailed history moved to `history-archive-2026-05-18.md` (file was 29,359 bytes).**
@@ -74,4 +101,22 @@ All findings applied skip-if-match idempotency pattern (current attribute check 
 ## Summary of Session Results (2026-05-18)
 
 All 8 perf/quality todos shipped across 5 driver releases (Touchstone v0.1.28, Gemstone v0.4.15, Touchstone v0.1.29, SunStat v0.1.10, Gemstone v0.4.16 + SunStat v0.1.11). See .squad/decisions/decisions.md and .squad/log/*-perf-todos-shipped.md for full details.
+
+---
+
+## Learnings
+
+### 2026-05-18 — System.arraycopy sandbox block (Touchstone v0.1.30)
+
+**`java.lang.System.arraycopy` is on the Hubitat sandbox blocklist.** The sandbox rejects it at install time with:
+
+> `Expression [MethodCallExpression] is not allowed: java.lang.System.arraycopy(part, 0, combined, offset, part.length) at line number 1428`
+
+This is the same class of restriction as `java.util.zip.CRC32` (blocked via import allowlist, Touchstone v0.1.2) and the reflection API block. Hubitat's sandbox enforces both import-level and expression-level restrictions.
+
+**v0.1.29 perf todo #7 lesson learned:** The `System.arraycopy()` calls introduced in v0.1.29 (lines 1428, 1452, 1472 of touchstone-fireplace.groovy) triggered sandbox rejection. The primitive `int` counter refactor from the same todo was safe and correct — only the `arraycopy` calls were blocked.
+
+**v0.1.30 fix:** Replaced all three `System.arraycopy(...)` calls with `for (int i = 0; i < length; i++) { dest[destOff + i] = src[srcOff + i] }` primitive for-loops. Primitive `int` counters retained. Perf todo #7 is permanently unachievable on Hubitat and is now closed.
+
+**Pattern for future work:** Any byte-copy helper in a Hubitat Groovy driver must use a plain primitive for-loop. `System.arraycopy`, `Arrays.copyOf`, `ByteArrayOutputStream`, and `java.nio` bulk-copy APIs are all either blocked or import-restricted.
 

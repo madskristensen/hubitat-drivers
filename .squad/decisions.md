@@ -2,6 +2,43 @@
 
 ---
 
+## 2026-05-18: Daikin Driver Research (Cypher + Trinity)
+
+**Status:** COMPLETE — Two companion memos assess upstream `eriktack/hubitat-daikin-wifi` and converge on fork-into-repo recommendation.
+
+### Cypher's Assessment
+
+Fork `eriktack/hubitat-daikin-wifi` into `drivers/daikin-wifi/` as v0.1.0 (Option C). The upstream repo is effectively abandoned — issues disabled, two open PRs unreviewed for 1–2 years, last code commit 2021. The root bug is a two-line fix: `otemp=-` (Daikin sentinel for "outdoor sensor unavailable") bypasses the truthy guard on line 464 and hits `Double.parseDouble("-")` on line 466, throwing `NumberFormatException` every poll cycle when the field is in this state. Fixing that plus applying in-house hygiene (descriptionText, lastActivity, parse-path dedup) is a focused 3–5 hour session using the same patterns as Touchstone/Gemstone/SunStat. Also file a PR upstream (Option B) in parallel as good-citizen contribution — 30 minutes, may never merge but costs little. Do not go with Option D (rewrite) — the code is structurally sound; just SmartThings-era on polish.
+
+**Key Facts:**
+- **License:** MIT — full fork rights confirmed
+- **Protocol:** Local LAN HTTP (BRP069B series, `/aircon/get_*`), not cloud
+- **Bug line:** `daikin-wifi-split-system-hubitat.groovy` line 466 — `Double.parseDouble(otemp)` when `otemp="-"`
+- **Upstream:** Abandoned (2-star repo, issues disabled, 2 open unreviewed PRs)
+- **Hygiene gap:** All 66 events lack `descriptionText`; no lastActivity; no HealthCheck
+- **Sandbox:** Clean — no blocklisted patterns
+
+### Trinity's Worth-It Verdict + Priority List
+
+Fork and fix. The upstream driver exposes the right endpoints and has sound architecture, but is missing critical Hubitat schema (`supportedThermostatModes` completely absent — breaks Rule Machine), has no `initialize()` lifecycle (polling dies on hub restart), and over-polls energy endpoints on every refresh cycle. These are all straightforward fixes. Combined with Cypher's root bug fix (`otemp="-"` sentinel), a focused 4–5 hour session produces a reliable, working driver. Full "exemplary" rewrite (HealthCheck, event hygiene, econo/powerful mode, model detection) would add ~12–15 hours on top. Defer those to a follow-up if the driver proves itself useful.
+
+**Recommended Scope — Ordered Priority List:**
+1. **Apply Cypher's bug fix** — guard `otemp`/`htemp` against `"-"` sentinel before `Double.parseDouble()`. Prerequisite for stable operation.
+2. **Add `supportedThermostatModes`** — emit `["auto","cool","heat","dry","fan","off"]` in `installed()` + `updated()`. Fixes Rule Machine thermostat mode dropdowns.
+3. **Fix `supportedThermostatFanModes`** — also emit in `installed()`, not just `updated()`. 5-minute change.
+4. **Add `initialize()` lifecycle** — chain from `installed()` + `updated()`; re-registers polling after hub restart.
+5. **Throttle energy endpoint polling** — separate `refreshEnergy()` on a 30-minute schedule; remove `get_week_power_ex` and `get_year_power_ex` from the main `refresh()` cycle.
+6. **Add `capability "HealthCheck"` + `lastActivity`** — LAN driver qualifies for Pattern A per skill `hubitat-healthcheck-vs-lastactivity`.
+7. **Add econo/powerful mode support** — `get_special_mode` read + `setSpecialMode()` command.
+8. **Apply event hygiene** — `descriptionText:` on all `sendEvent` calls + `emitIfChanged()` on parse paths.
+
+**Items 1–5:** ~4–5 hrs. Delivers a trustworthy, Rule Machine-compatible driver.  
+**Items 1–8:** ~16–20 hrs. Delivers repo-quality, shelf-stable driver.
+
+**Full memos:** `.squad/files/daikin-research/daikin-driver-assessment.md`, `.squad/files/daikin-research/daikin-capability-gap-memo.md`
+
+---
+
 ## 2026-05-18: Tank — Pending driver perf/quality todos
 
 **Status:** PENDING — Eight fresh perf/quality audit items proposed by Tank, including one outstanding repo-backed item (SC-4 from Trinity's redundant-write audit).
