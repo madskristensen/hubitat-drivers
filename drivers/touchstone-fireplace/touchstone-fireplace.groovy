@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.15
+ * Version: 0.1.16
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.16 — 2026-05-17 — gate v0.1.15 diagnostic flame-color logs
  *   0.1.15 — 2026-05-17 — setFlameColor verified Tuya app labels + wire debug logging
  *   0.1.14 — 2026-05-17 — colors back to NUMBER; drop setDpRaw legacy alias
  *   0.1.13 — 2026-05-17 — named-enum dropdowns for brightness and color palettes
@@ -75,7 +76,7 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.15"
+@Field static final String DRIVER_VERSION = "0.1.16"
 @Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.15"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
@@ -403,7 +404,7 @@ def setFlameColor(color) {
     }
 
     String dpValue = FLAME_COLOR_TO_DP[label]
-    log.info "[Touchstone] setFlameColor: sending DP ${flameColorDp} = '${dpValue}' (label '${label}') to device"
+    debugLog "setFlameColor: sending DP ${flameColorDp} = '${dpValue}' (label '${label}') to device"
     infoLog "${device.displayName} flame color → ${label}"
     emitAttribute("flameColor", label, "${device.displayName} flame color set to ${label}", "digital")
     sendDpWrite(flameColorDp.toString(), dpValue, "flame color", WRITE_REFRESH_DELAY_SECONDS)
@@ -1252,7 +1253,7 @@ private void applyDps(Map<String, Object> dps) {
         String flameColorVal = safeStr(dps[flameColorDpId])
         String label = DP_TO_FLAME_COLOR[flameColorVal]
         if (label) {
-            log.info "[Touchstone] applyDps: received DP 101 = '${flameColorVal}' → '${label}'"
+            debugLog "applyDps: received DP 101 = '${flameColorVal}' → '${label}'"
             emitAttribute("flameColor", label, "${device.displayName} flame color is ${label}")
         } else {
             log.warn "[Touchstone] applyDps: ignoring unrecognised flameColor DP value '${flameColorVal}'"
