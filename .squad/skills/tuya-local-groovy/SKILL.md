@@ -480,6 +480,45 @@ Apply the same conditional to the "Sent Tuya cmd" log in `pumpQueue()`.
 
 
 
+## Idempotent Default Application
+
+When a driver applies user-configured defaults at a lifecycle event (power-on, scene activation, schedule trigger), guard each DP write with a current-attribute check so the write is skipped if the device is already in the desired state.
+
+### Pattern
+
+```groovy
+String current = device.currentValue("flameColor")
+if (current != null && current == configuredDefault) {
+    traceLog "applyOnDefaults: skipping defaultFlameColor — already '${configuredDefault}'"
+} else {
+    debugLog "applyOnDefaults: applying defaultFlameColor = '${configuredDefault}' (was '${current}')"
+    // proceed with sendDpWrite(...)
+}
+```
+
+### Rules
+
+1. **null current = proceed.** `device.currentValue()` returns null when the driver has no prior observation (just installed, or no STATUS received yet). Treat null as "state unknown → apply the default". Skipping when state is unknown would silently fail to apply the user's preference.
+2. **Each default is independent.** Evaluate all configured defaults separately. If flameColor matches but flameBrightness doesn't, skip only the flameColor write.
+3. **Log hygiene:** skipped paths → `traceLog`; applied paths → `debugLog`. Consistent with the v0.1.22 trace/debug taxonomy.
+4. **Profile guard unchanged.** The existing `if (!dpId) { log.warn }` branches apply before this check — skip-if-match only executes when the DP is mapped for the active profile.
+5. **No protocol behavior change.** Timing, ordering, and the enqueue/pump mechanism are unchanged. This is purely a conditional guard around the existing write path.
+
+### Why this matters on Tuya hardware
+
+Some Tuya fireplace (and heater) models visibly flicker or emit an audible click when receiving a DP write even if the value is already set. Unconditional writes on every power-on are perceptible to the user. This guard eliminates the artifact while keeping the semantics correct.
+
+### Applicable drivers
+
+- **Touchstone Fireplace** — flameColor, flameBrightness, flameSpeed, charcoalColor (v0.1.23)
+- **Gemstone Smart Heater** — zone default attributes applied at zone-activate time
+- **SunStat Solar Control** — setpoint/mode defaults applied at schedule trigger
+- Any future driver with a `defaultFoo` preference written at a lifecycle event
+
+---
+
+
+
 - [ ] Preferences: `deviceIP`, `deviceId`, `localKey(password)`, polling, `logEnable`, `traceEnable`
 - [ ] Add `Device Profile` when only one model is fully mapped (`Tested` / `Generic` / `Custom`)
 - [ ] `Switch`, `Refresh`, `Initialize`
@@ -494,3 +533,4 @@ Apply the same conditional to the "Sent Tuya cmd" log in `pumpQueue()`.
 - [ ] `socketState` attribute surfaced on dashboard
 - [ ] `intentionalCloseAt` timestamp guard in `closeSocket()` / `socketStatus()` to suppress spurious reconnects
 - [ ] delayed refresh after writes when the device has stale post-transition DPs
+- [ ] **Idempotent defaults:** guard each `defaultFoo` DP write with a `currentValue` check (skip-if-match + traceLog)

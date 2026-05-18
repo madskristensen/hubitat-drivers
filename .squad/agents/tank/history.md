@@ -52,6 +52,33 @@ See `history-archive-2026-05-18.md` for detailed learnings on:
 - DP 108 child lock boolean wiring
 - And more...
 
+## Learnings
+
+### Skip-if-match pattern for power-on defaults (v0.1.23)
+
+When a driver applies user-configured defaults at a lifecycle event (power-on, scene activation, etc.), first check `device.currentValue(attributeName)` against the configured default label before writing the DP:
+
+```groovy
+String current = device.currentValue("flameColor")
+if (current != null && current == configuredDefault) {
+    traceLog "applyOnDefaults: skipping defaultFlameColor — already '${configuredDefault}'"
+} else {
+    debugLog "applyOnDefaults: applying defaultFlameColor = '${configuredDefault}' (was '${current}')"
+    // proceed with DP write
+}
+```
+
+Key rules:
+- **null current value = proceed with write.** The device state may not be known yet immediately after power-on. Skipping when state is unknown would silently fail to apply the user's preference.
+- **Each default is independent.** Evaluate each attribute separately — don't gate all four on a single all-or-nothing check.
+- **Log hygiene:** skipped lines go to `traceLog`, applied lines go to `debugLog`. Consistent with v0.1.22 trace/debug taxonomy.
+- **DPs not mapped for the profile** (the existing `log.warn` branches) are unaffected — skip-if-match only applies inside the "DP is mapped" branch.
+
+**Applicable to similar drivers:**
+- **Gemstone Smart Heater** — if it applies configured zone defaults at zone-activate time, apply the same pattern per zone attribute.
+- **SunStat Solar Control** — if defaults are applied at schedule trigger, apply the same pattern for setpoint/mode attributes.
+- Generally: any driver with a `defaultFoo` preference that writes a DP at a lifecycle event should use this pattern to avoid spurious wire traffic and device flicker.
+
 
 ---
 
