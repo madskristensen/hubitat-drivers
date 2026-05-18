@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.21
+ * Version: 0.1.22
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.22 — 2026-05-18 — add traceEnable preference; demote heartbeat/refresh chatter and unchanged-DP echoes to trace level
  *   0.1.21 — 2026-05-17 — HealthCheck capability + lastActivity attribute
  *   0.1.20 — 2026-05-17 — active-TCP IP discovery (discover command) + improved DHCP connection-fail error
  *   0.1.19 — 2026-05-17 — child lock command (DP 108): setChildLock on/off locks physical buttons
@@ -82,8 +83,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.21"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.21"
+@Field static final String DRIVER_VERSION = "0.1.22"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.22"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -287,6 +288,10 @@ metadata {
               title: "Enable debug logging (auto-off after 30 minutes)",
               defaultValue: false
 
+        input name: "traceEnable", type: "bool",
+              title: "Trace logging — very chatty (protocol-level wire debug only; auto-off after 30 minutes)",
+              defaultValue: false
+
         input name: "txtEnable", type: "bool",
               title: "Enable descriptionText (info) logging",
               defaultValue: true
@@ -303,6 +308,7 @@ def installed() {
     device.updateSetting("pollInterval", [value: "300", type: "enum"])
     device.updateSetting("setpointUnit", [value: "F", type: "enum"])
     device.updateSetting("logEnable", [value: false, type: "bool"])
+    device.updateSetting("traceEnable", [value: false, type: "bool"])
     device.updateSetting("txtEnable", [value: true, type: "bool"])
     initialize()
 }
@@ -327,6 +333,10 @@ def updated() {
     if (settings.logEnable) {
         runIn(1800, "logsOff")
         debugLog "Debug logging enabled; will auto-disable in 30 minutes"
+    }
+    if (settings.traceEnable) {
+        runIn(1800, "traceOff")
+        log.debug "[Touchstone] Trace logging enabled; will auto-disable in 30 minutes"
     }
 
     initialize()
@@ -370,6 +380,11 @@ def uninstalled() {
 def logsOff() {
     device.updateSetting("logEnable", [value: "false", type: "bool"])
     log.info "Touchstone / Tuya Fireplace: debug logging auto-disabled after 30 minutes"
+}
+
+def traceOff() {
+    device.updateSetting("traceEnable", [value: "false", type: "bool"])
+    log.info "Touchstone / Tuya Fireplace: trace logging auto-disabled after 30 minutes"
 }
 
 // ---------------------------------------------------------------------------
@@ -830,7 +845,11 @@ private void enqueueRequest(Integer cmd, String payloadJson, String reason, Stri
     }
     queue << request
     state.pendingRequests = queue
-    debugLog "Queued Tuya cmd ${cmd} for ${reason}; pending=${queue.size()}"
+    if (reason == "refresh") {
+        traceLog "Queued Tuya cmd ${cmd} for ${reason}; pending=${queue.size()}"
+    } else {
+        debugLog "Queued Tuya cmd ${cmd} for ${reason}; pending=${queue.size()}"
+    }
     pumpQueue()
 }
 
@@ -879,7 +898,11 @@ private void pumpQueue() {
         interfaces.rawSocket.sendMessage(hex)
         state.inFlight = request
         state.awaitingResponse = true
-        debugLog "Sent Tuya cmd ${request.cmd} for ${request.reason}"
+        if (safeStr(request.reason) == "refresh") {
+            traceLog "Sent Tuya cmd ${request.cmd} for ${request.reason}"
+        } else {
+            debugLog "Sent Tuya cmd ${request.cmd} for ${request.reason}"
+        }
         unschedule("responseTimeout")
         runIn(RESPONSE_TIMEOUT_SECONDS, "responseTimeout")
     } catch (Exception e) {
@@ -1003,7 +1026,7 @@ def sendHeartbeat() {
         byte[] frame = buildTuyaFrame(TUYA_CMD_HEARTBEAT, "")
         String hex = hubitat.helper.HexUtils.byteArrayToHexString(frame)
         interfaces.rawSocket.sendMessage(hex)
-        debugLog "Heartbeat sent"
+        traceLog "Heartbeat sent"
     } catch (Exception e) {
         log.warn "[Touchstone] Heartbeat failed: ${e.message}"
         state.socketOpen = false
@@ -1501,11 +1524,11 @@ private Boolean processFrame(String frameHex) {
     Integer payloadLength = frame.length - 28
     byte[] payload = payloadLength > 0 ? sliceBytes(frame, 20, payloadLength) : new byte[0]
 
-    debugLog "Received Tuya cmd ${cmd} retcode=${retcode} payloadLen=${payload.length}"
-
     if (cmd == TUYA_CMD_HEARTBEAT) {
+        traceLog "Received Tuya cmd ${cmd} retcode=${retcode} payloadLen=${payload.length}"
         return true
     }
+    debugLog "Received Tuya cmd ${cmd} retcode=${retcode} payloadLen=${payload.length}"
 
     Map inFlightRequest = state.inFlight instanceof Map ? (Map) state.inFlight : [:]
     String decoded = decryptTuyaPayload(payload)?.trim()
@@ -1513,7 +1536,7 @@ private Boolean processFrame(String frameHex) {
         return true
     }
 
-    debugLog "Decoded Tuya payload: ${decoded}"
+    traceLog "Decoded Tuya payload: ${decoded}"
 
     if (decoded.contains("data unvalid")) {
         if (getStatusCommand() != TUYA_CMD_CONTROL_NEW) {
@@ -1581,7 +1604,11 @@ private void applyDps(Map<String, Object> dps) {
         String flameColorVal = safeStr(dps[flameColorDpId])
         String label = DP_TO_FLAME_COLOR[flameColorVal]
         if (label) {
-            debugLog "applyDps: received DP 101 = '${flameColorVal}' → '${label}'"
+            if (device.currentValue("flameColor") != label) {
+                debugLog "applyDps: received DP 101 = '${flameColorVal}' → '${label}' (changed)"
+            } else {
+                traceLog "applyDps: received DP 101 = '${flameColorVal}' → '${label}' (unchanged)"
+            }
             emitAttribute("flameColor", label, "${device.displayName} flame color is ${label}")
         } else {
             log.warn "[Touchstone] applyDps: ignoring unrecognised flameColor DP value '${flameColorVal}'"
@@ -1623,8 +1650,8 @@ private void applyDps(Map<String, Object> dps) {
         }
         if (dps.containsKey("105")) {
             // DP 105 is confirmed read-only / unimplemented on Sideline Elite firmware.
-            // Silently absorb any status updates at debug level only.
-            debugLog "applyDps: received DP 105 = ${safeStr(dps["105"])} (read-only on this firmware; ignored)"
+            // Silently absorb any status updates at trace level only.
+            traceLog "applyDps: received DP 105 = ${safeStr(dps["105"])} (read-only on this firmware; ignored)"
         }
         if (dps.containsKey("107")) {
             emitAttribute("dp107", safeStr(dps["107"]), "${device.displayName} DP 107 is ${dps["107"]}")
@@ -2106,6 +2133,12 @@ private String currentEpochSecondsString() {
 private void debugLog(String message) {
     if (settings.logEnable) {
         log.debug "[Touchstone] ${message}"
+    }
+}
+
+private void traceLog(String message) {
+    if (settings.traceEnable) {
+        log.trace "[Touchstone] ${message}"
     }
 }
 
