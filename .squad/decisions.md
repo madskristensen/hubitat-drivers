@@ -2888,3 +2888,105 @@ A previous Tank spawn delivered `drivers/daikin-wifi/` v0.1.0 as a fork of `erik
 
 
 
+
+---
+
+## 2026-05-18: EZ Dashboard Not In Scope (Mads Directive)
+
+### 2026-05-18T19:39:26Z: User directive
+**By:** Mads (via Copilot)
+**What:** Mads does not use Hubitat EZ Dashboard. PR #3's only useful contribution (declaring `supportedThermostatModes` / `supportedThermostatFanModes` as `JSON_OBJECT` attribute type for EZ Dashboard compatibility) is therefore dropped from the Daikin driver v0.1.2 backlog. The associated `setSupportedThermostatModes()` / `setSupportedThermostatFanModes()` runtime-override commands are also dropped — they were paired with the same EZ Dashboard scenario.
+**Why:** User request — captured for team memory. Future Daikin v0.1.1+ planning sessions should not re-investigate EZ Dashboard support.
+
+
+---
+
+## 2026-05-18: Daikin WiFi v0.1.1 Hotfix (Tank)
+
+# Decision Drop — Daikin WiFi v0.1.1 Hotfix
+
+**Author:** Tank  
+**Date:** 2026-05-18  
+**Commit:** c28882f  
+**Version bump:** 0.1.0 → 0.1.1 (patch)
+
+---
+
+## Context
+
+Mads installed v0.1.0 on his hub immediately after ship and hit two runtime errors within minutes:
+
+```
+warn  [Daikin] sendGet failed (/aircon/get_sensor_info): Could not find matching constructor for:
+      hubitat.device.HubAction(java.util.LinkedHashMap, hubitat.device.Protocol, java.util.LinkedHashMap)
+warn  [Daikin] sendGet failed (/aircon/get_control_info): Could not find matching constructor for:
+      hubitat.device.HubAction(java.util.LinkedHashMap, hubitat.device.Protocol, java.util.LinkedHashMap)
+error groovy.lang.GroovyRuntimeException: Cannot read write-only property: schedule on line 685 (method updated)
+```
+
+Both errors fired on first `Save Preferences` after install — polling never started.
+
+---
+
+## Bug 1 — Write-only property: schedule (line 685)
+
+**Root cause:** `def setSchedule(schedule)` (Thermostat capability command stub, line 312) follows Groovy's JavaBean naming convention. The method name `setSchedule` creates a write-only pseudo-property named `schedule` on the driver object (setter exists, no getter). Hubitat's sandbox then cannot distinguish between:
+- Reading the `schedule` property (to invoke it as a closure) — FAILS: write-only
+- Calling the platform's `schedule(String cron, String method)` built-in — should succeed but is shadowed
+
+When `registerSchedules()` called `schedule(fastCron, "refresh")` at line 685, Groovy's dynamic dispatch resolved `schedule` as the write-only property rather than the platform method → runtime error.
+
+**Fix:** Replaced both `schedule(cron, method)` calls in `registerSchedules()` with idiomatic `runEvery*` platform methods (switch on `refreshInterval` enum: 1/5/10/15/30 minutes). `runEvery30Minutes("refreshEnergy")` replaces the fixed 30-minute energy cron. This entirely avoids invoking `schedule` by name and sidesteps the naming conflict permanently.
+
+**Lines changed:** 683–697 (registerSchedules method rewritten)
+
+**Lesson:** Any driver implementing the Thermostat capability MUST NOT call `schedule(cron, method)` — use `runEvery*` methods instead. The `setSchedule` command stub is unavoidable for capability compliance; the workaround lives in the caller.
+
+---
+
+## Bug 2 — HubAction constructor signature (lines 413–418)
+
+**Root cause:** The driver called `new hubitat.device.HubAction(Map params, Protocol protocol, Map options)` — a 3-argument constructor that does NOT exist in current Hubitat firmware. The `callback` key was placed in a separate third `Map options` argument.
+
+**Valid HubAction constructors for LAN HTTP:**
+| Signature | Status |
+|---|---|
+| `HubAction(String action)` | ✅ valid |
+| `HubAction(String action, Protocol protocol)` | ✅ valid |
+| `HubAction(String action, Protocol protocol, String dni)` | ✅ valid |
+| `HubAction(String action, Protocol protocol, String dni, Map options)` | ✅ valid |
+| `HubAction(Map params)` | ✅ valid |
+| `HubAction(Map params, Protocol protocol)` | ✅ valid — **preferred for LAN GET** |
+| `HubAction(Map params, Protocol protocol, Map options)` | ❌ does NOT exist |
+
+**Fix:** Moved `callback: callbackMethod` into the `params` Map; dropped the third argument. Now uses the documented 2-arg form:
+```groovy
+sendHubCommand(new hubitat.device.HubAction(
+    [method: "GET", path: path,
+     headers: ["HOST": "${ip}:${port}", "Accept": "*/*"],
+     callback: "handlerMethodName"],
+    hubitat.device.Protocol.LAN
+))
+```
+
+**Lines changed:** 413–418 (sendGet method, HubAction constructor)
+
+**Note:** The v0.1.0 history entry for "HubAction callback pattern" had documented the broken 3-arg form. Superseded by this fix.
+
+---
+
+## Other findings (smoke check)
+
+- No other `schedule(cron, method)` calls elsewhere in the file — only the two in `registerSchedules()` (now fixed).
+- No other HubAction calls beyond `sendGet()` — only one call site.
+- Sandbox compliance unchanged: no `System.arraycopy`, `java.util.zip`, reflection, or app-only prefs.
+- packageManifest.json valid JSON; both `version` fields bumped to `0.1.1`.
+
+---
+
+## Lessons Learned
+
+1. **`schedule` is a write-only property** — NEVER call `schedule(cron, method)` in a driver that also defines `setSchedule()`. Use `runEvery*` methods.
+2. **HubAction 3-arg Map variant does not exist** — `HubAction(Map, Protocol, Map)` is not a valid overload. Callback belongs inside the params Map when using the 2-arg `HubAction(Map, Protocol)` form.
+3. **Test on first install before declaring shipped** — both bugs were immediately visible on first `Save Preferences`. A quick hub install smoke test before tagging would catch these.
+

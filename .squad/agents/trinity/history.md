@@ -92,78 +92,19 @@ See .squad/decisions.md (merged entries) and .squad/orchestration-log/2026-05-17
 
 ---
 
-## Learnings
+## 2026-05-18 Learnings Summary
 
-### 2026-05-17T15:41:32-07:00 — Cross-driver review: Gemstone, SunStat, Touchstone
+### Cross-driver improvements (2026-05-17)
+- 4-way review with Tank, Cypher, Switch identified 8 anti-patterns across Gemstone, SunStat, Touchstone (undeclared `capability "Polling"`, missing `Sensor` capability, redundant event emission, packaging gaps, raw DP attributes missing named commands, parent/child version skew, colorMode as string not enum).
+- Utility method duplication documented — recommendation: create `.squad/templates/driver-utilities.groovy` canonical source.
 
-**Recurring patterns found across all three drivers (good — consistent idioms):**
-- `logEnable` / `txtEnable` preference pair — all three. `logsOff()` auto-disable at 30 min — all three.
-- `@Field static final` constants with no cross-field references — all three respect the Hubitat sandbox rule.
-- `emitIfChanged()` helper to suppress redundant sendEvent calls — SunStat child + Touchstone; Gemstone not needed (always-changing color values).
-- `USER_AGENT` constant on drivers that make HTTP calls (Gemstone, SunStat parent). Touchstone has one too.
-- `installed()` sets preference defaults explicitly; `updated()` calls `initialize()`; `initialize()` guards on config readiness before scheduling.
+### Write-idempotency patterns (2026-05-18)
+- Lifecycle-driven writes (power-on defaults, timer-expiry) are highest risk. User-explicit commands lower priority.
+- `emitIfChanged` gates events; skip-if-match guards writes — both required, solve different problems.
+- State-assertion paths (e.g., boost recovery, cloud-drift defense) should NOT be guarded — by-design non-idempotent.
+- Tuya fireplace DP writes produce audible click → guard `on()` with `if (device.currentValue("switch") == "on") return`.
 
-**Anti-patterns / gaps identified:**
-
-1. **`poll()` without `capability "Polling"`** — Gemstone and SunStat parent both implement `poll()` but don't declare `capability "Polling"`. Touchstone is correct. Undeclared capability means Hubitat Polling app won't discover these devices as compatible.
-
-2. **`capability "Sensor"` missing alongside `TemperatureMeasurement`** — Touchstone has `TemperatureMeasurement` but no `Sensor`. Hubitat convention: `Sensor` is the marker capability that companion apps and dashboards use to classify sensor devices. SunStat child correctly declares both.
-
-3. **`power` attribute duplicating `switch`** — Touchstone declares a custom `power` attribute ("on"/"off") and emits it in parallel with the standard `switch` attribute from every on/off state change. This doubles every event in the Events tab and adds noise. `switch` is the standard; `power` is redundant and should be removed.
-
-4. **Packaging gaps are driver-specific** — SunStat has CHANGELOG.md, TESTING.md, README.md, packageManifest.json. Gemstone has TESTING.md, README.md, packageManifest.json but no CHANGELOG.md. Touchstone has README.md and packageManifest.json but no CHANGELOG.md and no TESTING.md. All drivers should have all four files for HPM compatibility and contributor onboarding.
-
-5. **Named commands missing for known-semantic DPs** — Touchstone surfaced DP 103 (flame speed: Slow/Medium/Fast) and DP 105 (log brightness) as raw `dp103`/`dp105` attributes with no named commands, even though the architecture decision specified `setFlameSpeed()` and `setLogBrightness()` as named commands. DPs with confirmed semantics should graduate to named commands; only truly unknown DPs should stay raw.
-
-6. **Parent/child version skew in SunStat** — Parent at v0.1.4, child at v0.1.2. The last two parent releases were parent-only fixes (no child code changed), so the skew is technically correct but confusing for users comparing versions. Convention: bump child version in lockstep with parent (even no-op) so users see consistent version numbers.
-
-7. **`colorMode` as `string` instead of `enum`** — Gemstone declares `attribute "colorMode", "string"` but only ever emits three values: "RGB", "CT", "EFFECTS". Declaring it as `enum` gives rules engines proper constraint checking and improves dashboard tile behavior.
-
-8. **Utility method duplication across all three drivers** — `safeStr`, `safeInt`, `safeBigDecimal`, `emitIfChanged`, `debugLog`, `infoLog`, `logsOff` are near-identical copies in all three. Hubitat sandbox doesn't allow shared libraries, so runtime duplication is unavoidable — but there is no canonical template source. A `.squad/templates/driver-utilities.groovy` snippet file would serve as the single source of truth that Tank copies from when scaffolding new drivers.
-
-**For detailed learning notes, see archived history.**
-
----
-
-## 2026-05-17T15:41:32Z — Cross-driver improvement scan (4-way)
-
-Participated in 4-way driver improvement scan with Tank, Cypher, Switch. Findings consolidated by Squad. Orchestration log: `.squad/orchestration-log/2026-05-17T15-41-32-trinity.md`.**
-
-
-## Team updates
-
-- 2026-05-17: Participated in top-3 driver improvements batch — sunstat v0.1.6, touchstone v0.1.6, gemstone v0.4.9.
-- 2026-05-18: Daikin WiFi research memos (`daikin-capability-gap-memo.md`) were used as direct input for Tank-2's clean-room driver implementation (commit b26c04f). Research established the capability gap inventory (supportedThermostatModes, lifecycle, energy polling) and informed the v0.1.0 priority list. Clean-room pattern proves that research-stage feasibility analysis naturally feeds independent authorship without source code copying.
-
----
-
-## Learnings
-
-### 2026-05-18 — Write-idempotency audit across all four drivers
-
-**Methodology:** Read every device-write path (sendDpWrite, sendDevicePatch, PUT/PATCH HTTP) in each driver and asked: "Does the driver check device.currentValue() or a state.* cache before sending?" Anything that sends unconditionally got flagged. Then classified by severity using the "does this cause a user-visible side effect?" test from the v0.1.23 context.
-
-**Key cross-driver patterns noticed:**
-
-1. **The `emitIfChanged` / skip-if-match split** — SunStat child's `setScheduleEnabled()` is a clear example of a partial fix: `emitIfChanged` correctly gates the Hubitat event, but the `sendDevicePatch` below it is unconditional. This pattern (event deduplication ≠ write deduplication) should be audited for in every driver. These two guards solve different problems and must both be present.
-
-2. **Lifecycle-driven writes are the highest-risk category** — `applyOnPowerOnDefaults` (Touchstone) fires automatically on every power-on; `cancelBoost`/`boostExpired` (SunStat) fire on timer expiry without user interaction. These are where unconditional writes cause the most surprise: the user didn't explicitly ask for the write to happen at that moment. User-explicit commands (setFlameColor, setHeatingSetpoint) are lower priority because the user intent is explicit.
-
-3. **BY-DESIGN non-idempotent writes: state-assertion semantics** — SunStat's boost recovery is intentionally non-idempotent. `cancelBoost()` force-writes the pre-boost setpoint even if the device already shows that value, because the whole point is to defeat cloud drift (the cloud might have updated the setpoint during the boost window). Same logic applies to any "restore after override" pattern. **Do not apply skip-if-match to state-assertion paths** — it defeats the purpose.
-
-4. **Gemstone effect repeat** — `activateEffectWithPattern` is the one 🔴 in Gemstone. Sending the same effect pattern to an LED string controller visibly restarts the animation. Unlike Tuya fireplace clicks (audio), this is a visual artifact the homeowner would notice if rules re-assert the active effect. Skip-if-match should compare against `effectName` attribute or `state.lastPattern.id`.
-
-5. **Touchstone `on()` when already on** — Tuya fireplaces emit an audible click on receiving any DP write. This means `on()` called on an already-on fireplace (common in rules that re-assert switch state) produces a physical click. This is the same class of problem as the power-on defaults and should be guarded by a simple `if (device.currentValue("switch") == "on") return` at the top of `on()`.
-
-6. **Cloud drivers (Gemstone, SunStat) — wire vs. visible** — Redundant API calls in cloud drivers don't cause visible physical artifacts (lights don't flash on an idempotent PUT when value matches). The cost is API quota and latency. These are 🟡 not 🔴. Exception: Gemstone's `PUT /deviceControl/play/pattern` re-executes the animation sequence on the hardware, which IS visible — hence the 🔴 for `activateEffectWithPattern`.
-
-**Filed:** `.squad/decisions/inbox/trinity-redundant-write-audit.md`
-
----
-
-## Learnings
-
-### 2026-05-18 — Daikin WiFi driver capability gap analysis (eriktack/hubitat-daikin-wifi v1.0.3)
+### Daikin capability gap analysis (2026-05-18)
 
 **Daikin BRP069B API surface (reusable notes):**
 - Local LAN HTTP on port 80, no auth required. BRP069B (not C) series only.
@@ -181,3 +122,18 @@ Participated in 4-way driver improvement scan with Tank, Cypher, Switch. Finding
 
 **Filed:** `.squad/files/daikin-research/daikin-capability-gap-memo.md` and `.squad/decisions/inbox/trinity-daikin-capability-gap.md`
 
+
+## Team Updates
+
+### Hubitat Write-Only Property Gotcha + HubAction Constructor Table (Tank-3, 2026-05-18)
+
+**Key Lessons from Daikin v0.1.1 hotfix:**
+
+1. **Groovy JavaBean Naming + Scheduler Method Shadowing**  
+   Custom command setX(x) creates a write-only property x on the driver object. If the code also calls the platform's x() scheduler method (e.g., schedule(cron, method)), Groovy's dynamic dispatch resolves the name as the write-only property instead of the method → runtime error ("Cannot read write-only property"). Workaround: use unEvery* idiomatic methods instead of calling schedule by name. Affected drivers: any Thermostat capability driver that calls schedule(cron, method) in addition to providing the setSchedule() stub.
+
+2. **HubAction Constructor Overloads**  
+   Valid forms for LAN HTTP: HubAction(String), HubAction(String, Protocol), HubAction(String, Protocol, String dni), HubAction(String, Protocol, String dni, Map options), HubAction(Map), HubAction(Map, Protocol) ← **preferred for GET**. Invalid form: HubAction(Map, Protocol, Map) does NOT exist. Callback must be inside the params Map when using 2-arg form.
+
+3. **Test on First Install Before Shipping**  
+   Both bugs were immediately visible on first Save Preferences after install. Smoke-test drivers on hub before tagging v1.0 releases.

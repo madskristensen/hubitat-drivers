@@ -152,3 +152,18 @@ QA and testing specialist for Hubitat drivers. Focuses on real-device validation
 - 2026-05-18: Queued for validation: Touchstone v0.1.18 persistent socket (Tests 34–37) + Gemstone v0.4.10 multi-zones (Tests 19–22) + Touchstone v0.1.19 child lock (Test 38) + Touchstone v0.1.20 discovery (Test 39) + HPM bundle v1.0.0 (multi-driver bundle install). Five validation areas pending hardware.
 - 2026-05-18: New health monitoring validation areas: Touchstone v0.1.21 HealthCheck ping (Tests 40–41) + Gemstone v0.4.11 lastActivity (Test 42) + SunStat v0.1.7 lastActivity cascade (Test 43). Eight total validation areas queued.
 - 2026-05-18: ⚠️ Alert — `java.lang.System.arraycopy` is sandbox-blocked on Hubitat (same as CRC32 import block). Never use in driver code; use primitive `for` loops instead. Touchstone v0.1.30 hotfix applied. See `.squad/decisions/decisions.md::tank-touchstone-v130-arraycopy-fix`.
+
+## Team Updates
+
+### Hubitat Write-Only Property Gotcha + HubAction Constructor Table (Tank-3, 2026-05-18)
+
+**Key Lessons from Daikin v0.1.1 hotfix:**
+
+1. **Groovy JavaBean Naming + Scheduler Method Shadowing**  
+   Custom command setX(x) creates a write-only property x on the driver object. If the code also calls the platform's x() scheduler method (e.g., schedule(cron, method)), Groovy's dynamic dispatch resolves the name as the write-only property instead of the method → runtime error ("Cannot read write-only property"). Workaround: use unEvery* idiomatic methods instead of calling schedule by name. Affected drivers: any Thermostat capability driver that calls schedule(cron, method) in addition to providing the setSchedule() stub.
+
+2. **HubAction Constructor Overloads**  
+   Valid forms for LAN HTTP: HubAction(String), HubAction(String, Protocol), HubAction(String, Protocol, String dni), HubAction(String, Protocol, String dni, Map options), HubAction(Map), HubAction(Map, Protocol) ← **preferred for GET**. Invalid form: HubAction(Map, Protocol, Map) does NOT exist. Callback must be inside the params Map when using 2-arg form.
+
+3. **Test on First Install Before Shipping**  
+   Both bugs were immediately visible on first Save Preferences after install. Smoke-test drivers on hub before tagging v1.0 releases.

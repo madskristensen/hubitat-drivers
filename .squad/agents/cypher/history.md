@@ -48,3 +48,18 @@ Cypher-4 research directly enabled two Tank-15 ships:
 ## Archive
 
 **Older sessions (2026-05-16 to 2026-05-17):** SunStat/Watts research, Bosch feasibility, Gemstone color investigation, Touchstone DP analysis, Tuya key extraction audit, Hubitat sandbox learnings, system.arraycopy blocker, and cross-driver patterns saved to `history-archive.md`.
+
+## Team Updates
+
+### Hubitat Write-Only Property Gotcha + HubAction Constructor Table (Tank-3, 2026-05-18)
+
+**Key Lessons from Daikin v0.1.1 hotfix:**
+
+1. **Groovy JavaBean Naming + Scheduler Method Shadowing**  
+   Custom command setX(x) creates a write-only property x on the driver object. If the code also calls the platform's x() scheduler method (e.g., schedule(cron, method)), Groovy's dynamic dispatch resolves the name as the write-only property instead of the method → runtime error ("Cannot read write-only property"). Workaround: use unEvery* idiomatic methods instead of calling schedule by name. Affected drivers: any Thermostat capability driver that calls schedule(cron, method) in addition to providing the setSchedule() stub.
+
+2. **HubAction Constructor Overloads**  
+   Valid forms for LAN HTTP: HubAction(String), HubAction(String, Protocol), HubAction(String, Protocol, String dni), HubAction(String, Protocol, String dni, Map options), HubAction(Map), HubAction(Map, Protocol) ← **preferred for GET**. Invalid form: HubAction(Map, Protocol, Map) does NOT exist. Callback must be inside the params Map when using 2-arg form.
+
+3. **Test on First Install Before Shipping**  
+   Both bugs were immediately visible on first Save Preferences after install. Smoke-test drivers on hub before tagging v1.0 releases.
