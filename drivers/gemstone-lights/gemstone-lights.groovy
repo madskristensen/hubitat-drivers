@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.10
+ * Version: 0.4.11
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.11 — 2026-05-17 — lastActivity attribute (ISO 8601 timestamp of last successful API call)
  *   0.4.10 — 2026-05-17 — multi-zone / multi-controller support
  *     - New 'controllerName' preference: binds this Hubitat device to a specific Gemstone physical controller by name (case-insensitive, trimmed)
  *     - Blank controllerName preserves v0.4.9 behavior (bind to first controller found)
@@ -46,7 +47,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.10"
+@Field static final String DRIVER_VERSION = "0.4.11"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -66,7 +67,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.10"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.11"
 
 metadata {
     definition(
@@ -94,6 +95,7 @@ metadata {
         attribute "colorMode", "string"
         attribute "colorName", "string"
         attribute "favoriteEffects", "string"
+        attribute "lastActivity", "string"
     }
 
     preferences {
@@ -596,6 +598,7 @@ def apiResponseCallback(response, data) {
         handleEffectCatalogPageResponse(payload, data as Map)
     }
 
+    touchActivity()
     updateAuthenticatedStatus()
 
     if (data?.followUp instanceof Map) {
@@ -1315,6 +1318,7 @@ private void handleDevicesResponse(Map payload) {
     state.deviceName = safeString(selectedDevice?.name, device.displayName)
 
     infoLog "${device.displayName} is bound to Gemstone cloud device '${state.deviceName}'"
+    touchActivity()
     updateAuthenticatedStatus()
     flushPendingRequests()
 }
@@ -1326,6 +1330,12 @@ private void handleAuthFailure(String logMessage, String statusValue) {
     state.discoveryHomegroups = []
     log.error "[Gemstone] ${logMessage}"
     updateAuthStatus(statusValue)
+}
+
+private void touchActivity() {
+    sendEvent(name: "lastActivity",
+              value: new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX"),
+              descriptionText: "${device.displayName} last activity")
 }
 
 private void updateAuthenticatedStatus() {

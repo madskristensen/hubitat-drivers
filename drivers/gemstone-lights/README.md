@@ -28,6 +28,7 @@ Integrates Gemstone permanent outdoor LED strings with Hubitat Elevation via the
 - **`favoriteEffects`** — Comma-separated favorite names with a `⭐` prefix
 - **`lightEffects`** — Standard Hubitat JSON map (`{"0":"⭐ Pulse",...}`) built favorites-first for dashboards
 - **`colorTemperature` / `colorName`** — Updated on `setColorTemperature()` and when a matching CT fallback pattern is seen during `refresh()`
+- **`lastActivity`** — ISO 8601 timestamp of the last successful Gemstone cloud API response
 
 ## Command Surface
 
