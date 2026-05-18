@@ -2,6 +2,196 @@
 
 ---
 
+## 2026-05-18: Trinity Redundant-Write Audit — All Four Drivers
+
+**Date:** 2026-05-18  
+**Author:** Trinity (Lead / Architect)  
+**Status:** AUDIT COMPLETE — pending Mads authorization for individual fixes  
+**Triggered by:** Touchstone v0.1.23 idempotent-default pattern; user asked "do we have anything like that elsewhere?"
+
+---
+
+### Summary
+
+**3 🔴 findings, 14 🟡, 1 🟢, 3 BY-DESIGN (not bugs).**
+
+Recommended next steps:
+1. **Authorize T-1 immediately** — the `defaultHeatingSetpoint` gap in `applyOnPowerOnDefaults` is the only unfixed item from the v0.1.23 work, and it's the same physical-click risk as the four color defaults that were fixed.
+2. **Authorize T-2** — `on()` click-when-already-on is the most common automation pattern that triggers audible artifacts.
+3. **Authorize G-1** — effect animation restart on `setEffect(sameName)` is the most visible cross-driver finding.
+4. The 🟡 cloud-driver findings (Gemstone, SunStat) can be addressed in a single batch pass. No user-visible artifacts; purely API quota.
+
+---
+
+### Touchstone Fireplace (`drivers/touchstone-fireplace/touchstone-fireplace.groovy`)
+
+| # | Function (lines) | DP / endpoint | Current check | Trigger | Severity |
+|---|---|---|---|---|---|
+| T-1 | `applyOnPowerOnDefaults()` L1227–1244 | DP14 (heatingSetpoint) | **None** — the four color/speed defaults above it ARE guarded (v0.1.23), but `defaultHeatingSetpoint` is not | Power-on lifecycle, fires ~1.5s after every `on()` | 🔴 Visible — DP14 write during post-ON transition causes relay click on Tuya firmware |
+| T-2 | `on()` L395–409 | DP1=true | **None** | User or rule call | 🔴 Visible — Tuya fireplaces click on DP write even if already on; rules that re-assert `on` repeatedly produce audible artifacts |
+| T-3 | `off()` L412–424 | DP1=false | **None** | User or rule call | 🟡 Wire only — device is already off; no audible artifact when off; still generates wire traffic |
+| T-4 | `setFlameColor()` L596–612 | DP101 | None | Explicit user command | 🟡 Wire only — user commanded it; automation loops could repeat |
+| T-5 | `setFlameBrightness()` L615–630 | DP102 | None | Explicit user command | 🟡 Wire only |
+| T-6 | `setFlameSpeed()` L657–672 | DP103 | None | Explicit user command | 🟡 Wire only |
+| T-7 | `setCharcoalColor()` L633–650 | DP104 | None | Explicit user command | 🟡 Wire only |
+| T-8 | `setHeatLevel()` L675–689 | DP5 | None | Explicit user command | 🟡 Wire only — heater relay not safety-sensitive but generates click on repeat |
+| T-9 | `setHeatingSetpoint()` L692–708 | DP14 | None | Explicit user command | 🟡 Wire only |
+| T-10 | `setChildLock()` L723–731 | DP108 | None | Explicit user command | 🟢 Harmless — child lock DP unlikely to produce visible artifact on repeat |
+
+**Recommended fix — T-1 (highest priority):**  
+Same skip-if-match pattern as v0.1.23 applied to the four color/speed defaults. Add before the `sendDpWrite` at L1235:
+```groovy
+Integer currentSetpoint = safeInt(device.currentValue("heatingSetpoint"), null)
+if (currentSetpoint != null && currentSetpoint == clampedSetpoint) {
+    traceLog "applyOnDefaults: skipping defaultHeatingSetpoint — already ${clampedSetpoint}°${unit}"
+} else {
+    // existing sendDpWrite block
+}
+```
+
+**Recommended fix — T-2:**  
+Add at the top of `on()`, before `sendDpWrite`:
+```groovy
+if (device.currentValue("switch") == "on") {
+    debugLog "on(): device already on — skipping DP write"
+    return
+}
+```
+(Remove the early-return after confirming `applyOnPowerOnDefaults` should still be rescheduled in this path if needed.)
+
+**Caveat — T-8 (setHeatLevel):** The heater is intentionally excluded from `applyOnPowerOnDefaults` for safety. The explicit command path (`setHeatLevel()`) is fine to guard; the exclusion in the defaults path is correct and should not be changed.
+
+---
+
+### Gemstone Lights (`drivers/gemstone-lights/gemstone-lights.groovy`)
+
+| # | Function (lines) | Endpoint | Current check | Trigger | Severity |
+|---|---|---|---|---|---|
+| G-1 | `activateEffectWithPattern()` L983–996 | `PUT /deviceControl/play/pattern` | **None** — no check against current `effectName` or `state.lastPattern.id` | `setEffect()` or `cycleEffect()` | 🔴 Visible — Gemstone hardware re-executes the animation sequence on receiving a pattern PUT; calling `setEffect("Pulse")` when Pulse is already playing visibly restarts the animation |
+| G-2 | `on()` L198–203 | `PUT /deviceControl/onState {onState:true}` | None | User or rule call | 🟡 Wire/API — extra cloud quota; device likely transitions smoothly rather than flashing |
+| G-3 | `off()` L205–209 | `PUT /deviceControl/onState {onState:false}` | None | User or rule call | 🟡 Wire/API |
+| G-4 | `setLevel()` L216–228 | `PUT /deviceControl/play/pattern` (brightness) | None | User or rule call | 🟡 Wire/API |
+| G-5 | `setColor()` L235–254 | `PUT /deviceControl/play/pattern` (colors) | None | User or rule call | 🟡 Wire/API — solid-color writes are composite (hue+sat+level); no single attribute to check atomically |
+| G-6 | `setColorTemperature()` L277–301 | `PUT /deviceControl/play/pattern` | None | User or rule call | 🟡 Wire/API |
+
+**Recommended fix — G-1:**  
+In `activateEffectWithPattern()` before `executeOrQueueRequest(buildEffectRequest(...))`, add:
+```groovy
+String currentEffect = safeString(device.currentValue("effectName"))
+if (resolvedName && currentEffect == resolvedName) {
+    debugLog "setEffect: '${resolvedName}' already active — skipping pattern PUT"
+    return
+}
+```
+
+**Caveat — `cycleEffect()`:** `setNextEffect()` and `setPreviousEffect()` delegate through `cycleEffect()` → `activateEffectByIndex()` → `activateEffectWithPattern()`. The skip-if-match above would also suppress a user pressing "next" when the catalog has only one effect (next wraps back to the same effect). That edge case is probably acceptable but worth noting in the fix.
+
+---
+
+### SunStat Parent (`drivers/sunstat-thermostat/sunstat-thermostat-parent.groovy`)
+
+| # | Function (lines) | Endpoint | Current check | Trigger | Severity |
+|---|---|---|---|---|---|
+| SP-1 | `setAwayModeInternal()` L210–256 | `PATCH /Location/{id}/State {awayState:...}` | **None** — optimistic `sendEvent` fires first but the PATCH is unconditional | `setHome()`, `setAway()`, `setAwayMode()` | 🟡 Wire/API — extra API quota; no visible effect |
+
+**Recommended fix — SP-1:**  
+Add before the PATCH call:
+```groovy
+if (safeStr(device.currentValue("awayMode")) == mode) {
+    debugLog "setAwayMode: already '${mode}' — skipping PATCH"
+    return
+}
+```
+
+---
+
+### SunStat Child (`drivers/sunstat-thermostat/sunstat-thermostat-child.groovy`)
+
+| # | Function (lines) | Endpoint | Current check | Trigger | Severity |
+|---|---|---|---|---|---|
+| SC-1 | `setThermostatMode()` L174–191 | `PATCH /Device/{id} {Settings:{Mode:...}}` | None | `heat()`, `off()`, `setThermostatMode()` | 🟡 Wire/API |
+| SC-2 | `setHeatingSetpoint()` L204–213 | `PATCH /Device/{id} {Settings:{Heat:...}}` | None | User or rule call | 🟡 Wire/API |
+| SC-3 | `setScheduleEnabled()` L328–343 | `PATCH /Device/{id} {Settings:{SchedEnable:...}}` | **Partial** — `emitIfChanged` gates the Hubitat event but `sendDevicePatch` at L342 is unconditional regardless | User command | 🟡 Wire/API — note: event deduplication ≠ write deduplication; the two guards solve different problems |
+| SC-4 | `setFloorMinTemp()` L350–366 | `PATCH /Device/{id} {Settings:{Schedule:{Floor:{W:...}}}}` | None | User command | 🟡 Wire/API — fixing requires caching the current floorMinTemp from `parseDeviceState` |
+
+**BY-DESIGN (do not fix):**
+
+| # | Function | Reason |
+|---|---|---|
+| SC-5 | `cancelBoost()` L291–313 — writes `Heat: preBoostSetpoint` and optionally `SchedEnable: "On"` | State-assertion semantic. Intentionally force-writes the restore setpoint regardless of current state, to defeat cloud drift that may have occurred during the boost window. |
+| SC-6 | `setBoost()` L240–285 — writes `Heat: boostTarget` | Always writes a new value (currentSetpoint + delta), never the same value the device already has. Not a redundant write. |
+| SC-7 | `boostExpired()` / `initialize()` boost recovery L319–321, L128–145 | Timer callback delegates to `cancelBoost()` — same BY-DESIGN reasoning as SC-5. Hub-restart recovery re-arms the timer only; no immediate device write unless boost has overrun. |
+
+**SC-3 fix note:** The `emitIfChanged` at L335 correctly guards the Hubitat event. The fix is to add the same condition before the `sendDevicePatch` call:
+```groovy
+String currentSched = safeStr(device.currentValue("scheduleEnabled"))
+if (currentSched == lower) {
+    debugLog "setScheduleEnabled: already '${lower}' — skipping PATCH"
+    return
+}
+```
+
+---
+
+### Cross-Driver Observations
+
+1. **The `emitIfChanged` / write-guard split** — SunStat child's `setScheduleEnabled` is the clearest example of a half-fix: Hubitat event deduplication is present but device write deduplication is absent. These are independent guards solving independent problems. Any driver that adds `emitIfChanged` should also ask "does the device write need the same guard?"
+
+2. **Lifecycle-driven writes are 🔴; user-explicit are 🟡** — `applyOnPowerOnDefaults` fires automatically on every power-on without user awareness. User commands (setFlameColor, setHeatingSetpoint) are 🟡 because the user explicitly requested the write.
+
+3. **State-assertion paths are BY-DESIGN** — SunStat's boost cancel/expire path intentionally writes the restore setpoint unconditionally. This is correct behavior for "defeat cloud drift" semantics. Do not apply skip-if-match to these paths.
+
+4. **Cloud vs. local severity** — Redundant writes to Tuya local (Touchstone) can produce audible/tactile artifacts (clicks, brief flame state transitions). Redundant REST calls to Gemstone/Watts produce API quota consumption. Exception: Gemstone `PUT /deviceControl/play/pattern` also restarts the animation on hardware (🔴).
+
+---
+
+## 2026-05-18: Tank — Touchstone v0.1.24 — defaultHeatingSetpoint skip-if-match (closes T-1)
+
+**Date:** 2026-05-18  
+**Author:** Tank  
+**Driver:** Touchstone Fireplace v0.1.24  
+**Status:** Shipped  
+**Scope:** Closes Trinity's T-1 finding from redundant-write audit; extends v0.1.23 pattern to heatingSetpoint default
+
+---
+
+### What Changed
+
+Applied the same skip-if-match guard from v0.1.23 to the `defaultHeatingSetpoint` line in `applyOnPowerOnDefaults()`. Before writing DP14, the driver now compares the configured default against `device.currentValue("heatingSetpoint")`. Only sends the DP write if:
+- Current value is **null** (state unknown), OR
+- Current value **differs** from the configured default
+
+If they match, skips the write and logs at `traceLog`.
+
+### Pattern (v0.1.23 + v0.1.24 unified)
+
+All power-on defaults now use the same conditional logic:
+```groovy
+String current = device.currentValue("attributeName")
+if (current != null && current == configuredDefault) {
+    traceLog "applyOnDefaults: skipping defaultAttributeName — already '${configuredDefault}'"
+} else {
+    debugLog "applyOnDefaults: applying defaultAttributeName = '${configuredDefault}' (was '${current}')"
+    sendDpWrite(...)
+}
+```
+
+Guarded defaults in v0.1.24: `defaultFlameColor`, `defaultFlameBrightness`, `defaultFlameSpeed`, `defaultCharcoalColor`, **`defaultHeatingSetpoint`** (NEW).
+
+### Rationale
+
+- DP14 write during post-power-on transition causes relay click on Tuya firmware (visible/audible)
+- User turns fireplace off/on; firmware retains setpoint state; unconditional write is noise
+- Matches the conditional pattern already in v0.1.23 for the four light/flame defaults
+- No protocol behavior change; purely guard around existing write path
+- Null = "needs the default" is the safe side (race between defaults window and first STATUS frame)
+
+### Severity Closed
+
+✅ T-1 🔴 → 🟢 (no longer visible artifact risk after this fix)
+
+---
+
 ## 2026-05-18: Touchstone Driver Log Hygiene — trace vs debug taxonomy
 
 **Date:** 2026-05-18  
