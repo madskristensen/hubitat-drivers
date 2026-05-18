@@ -395,9 +395,92 @@ When adding or editing driver changelog entries:
 - do **not** use full ISO 8601 timestamps like `2026-05-17T12:22:15-07:00`
 - keep the parsable entries in the doc-comment `Changelog:` block even if separate prose `// vX.Y.Z` comments also exist
 
-## Reusable Checklist
+## Log Hygiene — trace vs debug split
 
-- [ ] Preferences: `deviceIP`, `deviceId`, `localKey(password)`, polling, `logEnable`
+Tuya protocol drivers produce two distinct categories of log output. Mixing them makes `logEnable=true` unreadable in production.
+
+### Two-tier logging pattern
+
+Add a `traceEnable` preference (bool, default false) alongside `logEnable`. Wire a `traceLog()` helper gated on `traceEnable` / `log.trace` that mirrors the existing `debugLog()` / `log.debug` helper.
+
+```groovy
+input name: "traceEnable", type: "bool",
+      title: "Trace logging — very chatty (protocol-level wire debug only; auto-off after 30 minutes)",
+      defaultValue: false
+```
+
+```groovy
+private void traceLog(String message) {
+    if (settings.traceEnable) {
+        log.trace "[Driver] ${message}"
+    }
+}
+```
+
+Mirror the auto-disable pattern: in `updated()`, schedule `runIn(1800, "traceOff")` if `traceEnable`. Provide `traceOff()` that calls `device.updateSetting("traceEnable", [value: "false", type: "bool"])`.
+
+### What goes at each level
+
+**traceLog (firehose — off by default):**
+- "Heartbeat sent" (every 10 s on a persistent socket)
+- Heartbeat ACK received (cmd == TUYA_CMD_HEARTBEAT path)
+- "Queued / Sent Tuya cmd N for refresh" — only when reason == "refresh" (periodic polling)
+- "Decoded Tuya payload: {...}" — raw wire dump; always trace, never debug
+- Read-only DP echoes (DPs confirmed unimplemented on a given firmware)
+- Per-DP echo lines where the decoded value **equals** the current device attribute (nothing changed)
+
+**debugLog (stays at debug — readable in production):**
+- User-initiated writes: on/off, setFlameColor, setHeatLevel, etc.
+- Per-DP echo lines where the decoded value **changed** from current device attribute
+- Socket lifecycle: open, reconnect attempt, discovery mode transitions
+- Protocol mode switches (device22 fallback, etc.)
+- Errors / warnings — these are already at `log.warn`; leave them alone
+
+### "Log only on change" rule for DP echoes
+
+Before calling `debugLog` in `applyDps`, compare the decoded label against `device.currentValue(attributeName)`:
+
+```groovy
+if (device.currentValue("flameColor") != label) {
+    debugLog "applyDps: DP ${dpId} = '${raw}' → '${label}' (changed)"
+} else {
+    traceLog "applyDps: DP ${dpId} = '${raw}' → '${label}' (unchanged)"
+}
+```
+
+Apply this pattern to every DP handler that has an explicit log line in `applyDps`.
+
+### Heartbeat ACK split
+
+The heartbeat received-frame log must be split: route the TUYA_CMD_HEARTBEAT path to `traceLog` before the normal `debugLog` for all other commands:
+
+```groovy
+if (cmd == TUYA_CMD_HEARTBEAT) {
+    traceLog "Received Tuya cmd ${cmd} retcode=${retcode} payloadLen=${payload.length}"
+    return true
+}
+debugLog "Received Tuya cmd ${cmd} retcode=${retcode} payloadLen=${payload.length}"
+```
+
+### Refresh chatter
+
+Periodic-refresh queue/send pairs should be trace, not debug:
+
+```groovy
+if (reason == "refresh") {
+    traceLog "Queued Tuya cmd ${cmd} for ${reason}; pending=${queue.size()}"
+} else {
+    debugLog "Queued Tuya cmd ${cmd} for ${reason}; pending=${queue.size()}"
+}
+```
+
+Apply the same conditional to the "Sent Tuya cmd" log in `pumpQueue()`.
+
+---
+
+
+
+- [ ] Preferences: `deviceIP`, `deviceId`, `localKey(password)`, polling, `logEnable`, `traceEnable`
 - [ ] Add `Device Profile` when only one model is fully mapped (`Tested` / `Generic` / `Custom`)
 - [ ] `Switch`, `Refresh`, `Initialize`
 - [ ] If the device exposes temperature, add `TemperatureMeasurement`
