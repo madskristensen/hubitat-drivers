@@ -1,7 +1,7 @@
 ﻿/**
  * Daikin WiFi Thermostat
  * Author:  Mads Kristensen
- * Version: 0.1.6
+ * Version: 0.1.7
  * License: MIT
  *
  * Local LAN control for Daikin WiFi adapters (BRP069B series, BRP15B61, and similar
@@ -14,6 +14,7 @@
  *   original. Credit and thanks to @eriktack for the foundational research.
  *
  * Changelog:
+ *   0.1.7 — 2026-05-18 — feat: tempUp/tempDown ±0.5° commands, energyYesterday + energyThisYear/LastYear attrs; fix: graceful 404 on get_special_mode (some BRP069B firmware doesn't support it), drying→fan only operatingState spec compliance; cleanup: remove dead state.pingRequestedAt write
  *   0.1.6 — 2026-05-18 — feat: setpointDisplay attribute (peer-driver UX); fix: null/range guards on setpoint setters; cleanup: skip energy poll when off, remove dead yearTotal computation, fix log typo
  *   0.1.5 — 2026-05-18 — hotfix: close unclosed triple-quote string literal in parseSpecialMode (driver wouldn't load); fix empty log interpolation
  *   0.1.4 — 2026-05-18 — feat: econo/powerful mode (setSpecialMode + specialMode attr), get_model_info runtime capability cache, full event hygiene audit
@@ -32,7 +33,7 @@ import groovy.json.JsonOutput
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String  DRIVER_VERSION            = "0.1.6"
+@Field static final String  DRIVER_VERSION            = "0.1.7"
 @Field static final Integer DAIKIN_PORT               = 80
 @Field static final Integer LAST_ACTIVITY_THROTTLE_MS = 60000
 @Field static final Integer ENERGY_POLL_MINUTES       = 30
@@ -107,11 +108,16 @@ metadata {
             description: "Swing direction: off=fixed, vertical=up/down, horizontal=left/right, 3d=both"]]
         command "setSpecialMode", [[name: "Mode", type: "ENUM", constraints: ["off", "econo", "powerful"],
             description: "Special mode: off=normal, econo=energy-saving, powerful=boost"]]
+        command "tempUp"
+        command "tempDown"
 
-        attribute "outsideTemp",  "number"
-        attribute "fanRate",      "enum",   FAN_RATE_OPTIONS
-        attribute "swingMode",    "enum",   ["off", "vertical", "horizontal", "3d"]
-        attribute "specialMode",  "enum",   ["off", "econo", "powerful"]
+        attribute "outsideTemp",     "number"
+        attribute "fanRate",         "enum",   FAN_RATE_OPTIONS
+        attribute "swingMode",       "enum",   ["off", "vertical", "horizontal", "3d"]
+        attribute "specialMode",     "enum",   ["off", "econo", "powerful"]
+        attribute "energyYesterday", "number"
+        attribute "energyThisYear",  "number"
+        attribute "energyLastYear",  "number"
         attribute "healthStatus",    "enum",   ["online", "offline", "unknown"]
         attribute "lastActivity",    "string"
         attribute "setpointDisplay", "string"
@@ -205,9 +211,9 @@ def updated() {
 def initialize() {
     debugLog "initialize()"
     unschedule()
-    state.pingPending           = false
-    state.pingRequestedAt       = 0L
-    state.lastActivityEmittedAt = 0L
+    state.pingPending            = false
+    state.specialModeUnsupported = false
+    state.lastActivityEmittedAt  = 0L
 
     if (!settings.ip) {
         log.warn "[Daikin] IP not configured — polling disabled until preferences are saved"
@@ -331,6 +337,10 @@ def setSwingMode(String mode) {
 }
 
 def setSpecialMode(String mode) {
+    if (state.specialModeUnsupported) {
+        log.warn "[Daikin] setSpecialMode: this device does not support the special mode endpoint — ignoring"
+        return
+    }
     String lmode = mode?.toLowerCase()
     if (!SPECIAL_MODE_OPTIONS.contains(lmode)) { log.warn "[Daikin] Unknown special mode: ${mode}"; return }
     log.info "[Daikin] ${device.displayName} special mode → ${lmode}"
@@ -396,6 +406,27 @@ def setSchedule(schedule) {
     log.warn "[Daikin] setSchedule() is not supported in v${DRIVER_VERSION} — use Hubitat rules instead"
 }
 
+def tempUp()   { adjustSetpoint(true)  }
+def tempDown() { adjustSetpoint(false) }
+
+private void adjustSetpoint(boolean up) {
+    String mode = device.currentValue("thermostatMode") ?: "off"
+    if (mode in ["off", "dry", "fan"]) {
+        log.info "[Daikin] tempUp/tempDown: no setpoint to adjust in ${mode} mode — ignoring"
+        return
+    }
+    // Step is 0.5°C; in °F the nearest whole-degree step is 1°F.
+    BigDecimal delta = (location.temperatureScale == "F") ? (up ? 1.0G : -1.0G) : (up ? 0.5G : -0.5G)
+    if (mode == "heat" || mode == "auto") {
+        BigDecimal current = device.currentValue("heatingSetpoint") as BigDecimal
+        if (current != null) { setHeatingSetpoint(current + delta) }
+    }
+    if (mode == "cool" || mode == "auto") {
+        BigDecimal current = device.currentValue("coolingSetpoint") as BigDecimal
+        if (current != null) { setCoolingSetpoint(current + delta) }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Commands — Refresh / Polling / HealthCheck
 // ---------------------------------------------------------------------------
@@ -413,6 +444,7 @@ def doSensorRefresh() {
 }
 
 def doSpecialModeRefresh() {
+    if (state.specialModeUnsupported) { traceLog "doSpecialModeRefresh: endpoint unsupported on this unit — skipping"; return }
     sendGet("/aircon/get_special_mode", "parseSpecialMode")
 }
 
@@ -436,7 +468,6 @@ def doYearPowerRefresh() {
 def ping() {
     debugLog "ping()"
     state.pingPending     = true
-    state.pingRequestedAt = now()
     unschedule("pingTimeout")
     runIn(PING_TIMEOUT_SECONDS, "pingTimeout")
     sendGet("/aircon/get_control_info", "handlePingResponse")
@@ -689,6 +720,10 @@ def handleWeekPower(hubitat.scheduling.AsyncResponse response, Map data) {
             BigDecimal todayKwh = days[0].toBigDecimal()
             emitIfChanged("energy", todayKwh, "kWh", "${device.displayName} energy today → ${todayKwh} kWh")
         }
+        if (days.size() > 1 && days[1]?.isNumber()) {
+            BigDecimal yesterdayKwh = days[1].toBigDecimal()
+            emitIfChanged("energyYesterday", yesterdayKwh, "kWh", "${device.displayName} energy yesterday → ${yesterdayKwh} kWh")
+        }
     }
 }
 
@@ -700,6 +735,28 @@ def handleYearPower(hubitat.scheduling.AsyncResponse response, Map data) {
 
     Map kv = parseKV(body)
     if (kv.ret != "OK") { log.warn "[Daikin] get_year_power_ex: ret=${kv.ret}"; return }
+
+    // BRP069B4x community-documented fields: curr_year_heat + curr_year_cool (this calendar year)
+    // and prev_year_heat + prev_year_cool (previous calendar year).
+    // Field names may differ across firmware revisions — skip and trace-log if not present.
+    String cyrHeat = kv.curr_year_heat
+    String cyrCool = kv.curr_year_cool
+    String pyrHeat = kv.prev_year_heat
+    String pyrCool = kv.prev_year_cool
+
+    if (cyrHeat?.isNumber() && cyrCool?.isNumber()) {
+        BigDecimal thisYear = cyrHeat.toBigDecimal() + cyrCool.toBigDecimal()
+        emitIfChanged("energyThisYear", thisYear, "kWh", "${device.displayName} energy this year → ${thisYear} kWh")
+    } else {
+        traceLog "handleYearPower: curr_year_heat/curr_year_cool not found or non-numeric — skipping energyThisYear"
+    }
+
+    if (pyrHeat?.isNumber() && pyrCool?.isNumber()) {
+        BigDecimal lastYear = pyrHeat.toBigDecimal() + pyrCool.toBigDecimal()
+        emitIfChanged("energyLastYear", lastYear, "kWh", "${device.displayName} energy last year → ${lastYear} kWh")
+    } else {
+        traceLog "handleYearPower: prev_year_heat/prev_year_cool not found or non-numeric — skipping energyLastYear"
+    }
 }
 
 def handleSetControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
@@ -726,7 +783,19 @@ def handleSetSpecialMode(hubitat.scheduling.AsyncResponse response, Map data) {
 }
 
 def parseSpecialMode(hubitat.scheduling.AsyncResponse response, Map data) {
-    if (!checkHttpOk(response, "get_special_mode")) { return }
+    if (response == null) { log.warn "[Daikin] No response from get_special_mode"; return }
+    if (response.hasError()) {
+        String errMsg = response.getErrorMessage() ?: ""
+        if (response.getStatus() == 404 || errMsg.contains("Not Found")) {
+            if (!state.specialModeUnsupported) {
+                state.specialModeUnsupported = true
+                log.info "[Daikin] Unit does not support special mode endpoint — disabling econo/powerful feature on this device"
+            }
+        } else {
+            log.warn "[Daikin] HTTP error from get_special_mode: ${errMsg}"
+        }
+        return
+    }
     String body = response.getData()
     if (!body) { log.warn "[Daikin] Empty response from get_special_mode"; return }
     traceLog "parseSpecialMode: ${body}"
@@ -907,7 +976,7 @@ private String operatingStateForMode(String mode) {
         case "cool": return "cooling"
         case "heat": return "heating"
         case "fan":  return "fan only"
-        case "dry":  return "drying"
+        case "dry":  return "fan only"
         case "off":  return "idle"
         default:     return "auto"   // "auto" mode — device decides heating/cooling demand
     }
