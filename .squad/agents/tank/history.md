@@ -103,6 +103,14 @@ See history-archive.md for detailed earlier sessions (Gemstone, SunStat, Bosch f
 
 Participated in 4-way driver improvement scan with Trinity, Cypher, Switch. Findings consolidated by Squad. Orchestration log: .squad/orchestration-log/2026-05-17T15-41-32-tank.md.
 
+- 2026-05-17T19:24:48-07:00 — **Spock unit test POC (Touchstone pure helpers):** Strategy A (extracted helpers) is the right starting point. Key learnings:
+  1. **Strategy A vs B in practice:** Strategy A (copy pure functions to a testable helper class) has zero mocking friction and runs in ~1s. The main hidden cost is the dual Tuya frame format: `buildTuyaFrame` produces *outgoing* frames (no retcode, 24-byte minimum); `processFrame` parses *incoming* frames (with retcode at offset 16, 28-byte minimum). Strategy A exposed this immediately — Strategy B would have surfaced the same issue but with more debugging noise.
+  2. **CRC32 cross-validation pattern:** Test the driver's pure-Groovy CRC32 against `java.util.zip.CRC32` directly in the spec. This confirms the lookup table is identical to the JDK implementation, which confirms the Tuya framing is correct at the wire level.
+  3. **Gradle + Java 8 JRE (not JDK):** Gradle 7.6.4 runs fine against a JRE (not a full JDK) for Groovy-only builds because the Groovy compiler (`groovyc`) ships with the Groovy JAR — `javac` is not required. This is a non-obvious but important detail for CI on minimal images.
+  4. **Extending to Gemstone:** The ABGR color math and `controllerName` match are the best Strategy A extraction targets. Effect catalog lookups need Strategy B to avoid copy-pasting the full catalog definition.
+  5. **Extending to SunStat:** Boost expiry math should accept `now()` as an injectable `long` parameter rather than calling `now()` internally — makes tests deterministic without mocking. Same pattern for token expiry checks.
+  6. **`@Field static final` on extracted helpers:** In Strategy A, use a plain `static final` in a `class` (not a script-level `@Field`). This avoids the script-vs-class compilation ambiguity that Strategy B would need to handle.
+
 ---
 
 ## 2026-05-17T15:50:06Z — Touchstone v0.1.6 — flame speed, log brightness, drop power attribute

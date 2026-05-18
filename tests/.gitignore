@@ -1,0 +1,6 @@
+# Gradle build outputs
+build/
+.gradle/
+
+# Downloaded Gradle distribution (not shipped — gradlew downloads it automatically)
+.gradle-dist/
