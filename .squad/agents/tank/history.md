@@ -219,3 +219,5 @@ All 8 versions validated on Mads's real BRP069B hardware (firmware version pendi
 **2026-05-18 Team Update:** MyQ feasibility research completed; verdict = build ratgdo ESPHome HTTP driver (local, no cloud). Cypher confirmed ratgdo firmware actively maintained; Trinity sketched architecture. Awaiting Mads hardware decision. See .squad/decisions.md for full report.
 
 **2026-05-18 Team Update (Scribe merge):** Rainbird verdict = install MHedish community driver; do not build competing version. AES/CBC + javax.crypto confirmed sandbox-safe for any future encrypted-local driver. Bosch Home Connect identified as next greenfield opportunity.
+
+**2026-05-18 Team Update (Scribe):** Bosch Home Connect verdict = install craigde/hubitat-homeconnect-v3 community driver. OAuth Authorization Code Grant works in Hubitat via parent App cloud callback URI — pattern unblocks future cloud-OAuth drivers.

@@ -1743,3 +1743,384 @@ Rainbird hits all four. HVAC drivers (Daikin, SunStat) hit three. Light drivers 
 **Date:** 2026-05-18T15:44:37-07:00  
 **Status:** Recommend to Mads for sprint planning
 
+
+
+---
+
+## 2026-05-18: Cypher — Bosch Home Connect Audit
+
+# Bosch Home Connect Audit — cypher
+**Date:** 2026-05-18T16:01:12-07:00  
+**Requested by:** Mads Kristensen (owns Bosch WiFi fridge)  
+**Source thread:** https://community.hubitat.com/t/release-home-connect-integration-control-bosch-siemens-thermador-and-more/160748
+
+---
+
+## 1. Executive Summary
+
+**Verdict: INSTALL** — with eyes open about setup complexity and SSE fragility.
+
+A comprehensive, actively maintained Hubitat integration already exists: **craigde/hubitat-homeconnect-v3** (Craig Dewar), HPM-published, covering 13 appliance types including a dedicated `Home Connect FridgeFreezer v3` driver with door state, temperature control, and mode attributes. Last commit **2026-03-13** (65 days ago as of this audit). The fridge driver specifically exposes `fridgeContact`/`freezerContact` as `ContactSensor`-compatible attributes, making door-open Rule Machine triggers straightforward.
+
+The primary tension: the driver uses Hubitat's EventStream interface to maintain an SSE connection to Bosch's cloud. This works but required 20+ patch releases in January–March 2026 to stabilize (watchdog, reconnect logic, keep-alive detection). Setup also requires a 5-step Bosch developer portal registration before the first auth. Neither is a blocker — both are documented and handled by the driver — but both create ongoing operational overhead that a simple local-LAN driver does not have.
+
+**Rubric score: 67/100 for BUILD-NEW.** With an active, comprehensive community driver already in place, the strategic recommendation flips to **INSTALL** (use craigde's driver), not BUILD. The 67 is not a disqualifier — it reflects cloud-only protocol and high build complexity relative to the existing option.
+
+---
+
+## 2. Existing Driver Audit
+
+### Repo & Author
+
+| Field | Value |
+|---|---|
+| Repo | https://github.com/craigde/hubitat-homeconnect-v3 |
+| Author | Craig Dewar (GitHub: `craigde`) |
+| Forum thread | https://community.hubitat.com/t/release-home-connect-integration-control-bosch-siemens-thermador-and-more/160748 |
+| HPM | ✅ Published as "Home Connect Integration v3" |
+| Last App version | 3.1.7 (2026-03-13) |
+| Last Stream Driver version | 3.3.22 (2026-03-13) |
+| Last FridgeFreezer driver version | 3.1.3 (2026-02-20) |
+| Original author | Rfg81 (v1 foundation; v3 is a full rewrite) |
+| License | Apache 2.0 |
+
+### Capabilities Per Appliance Type
+
+| Appliance | Driver | Key Features |
+|---|---|---|
+| **Fridge/Freezer** | `HomeConnectFridgeFreezer.groovy` | Door state (per-compartment ContactSensor), temp monitoring + setpoints, superCooling/superFreezing, eco/sabbath/vacation mode, ice dispenser, door alarm |
+| Dishwasher | `HomeConnectDishwasher.groovy` | Programs, timing, salt/rinse aid alerts, button notifications |
+| Oven | `HomeConnectOven.groovy` | Heating modes, °F/°C, meat probe, preheat alerts |
+| Washer | `HomeConnectWasher.groovy` | Programs, temp, spin speed, i-Dos dosing |
+| Dryer | `HomeConnectDryer.groovy` | Programs, drying target, lint/condenser alerts |
+| WasherDryer | `HomeConnectWasherDryer.groovy` | Combined wash+dry, mode tracking |
+| Coffee Maker | `HomeConnectCoffeeMaker.groovy` | Beverages, bean/water levels, drink counters |
+| Hood | `HomeConnectHood.groovy` | Fan speed (5 levels + intensive), ambient lighting |
+| Cooktop/Hob | `HomeConnectCooktop.groovy` | Zone monitoring (6 zones), timer alerts |
+| Warming Drawer | `HomeConnectWarmingDrawer.groovy` | Warming levels, programs, push-to-open |
+| Cook Processor | `HomeConnectCookProcessor.groovy` | Manual mode, temp/speed, step navigation |
+| Cleaning Robot | `HomeConnectCleaningRobot.groovy` | Battery, dock status, stuck detection, zones |
+| Wine Cooler | (maps to FridgeFreezer driver) | Same fridge feature set |
+
+All drivers include: `PushableButton` (cycle complete, maintenance, error notifications), `jsonState` attribute for Node-RED, `dumpState`/`getDiscoveredKeys`/`getRecentEvents` debug commands, and `eventStreamStatus` tracking.
+
+### Architecture
+
+**Three-component:**
+
+```
+[Home Connect Cloud HTTPS API + SSE]
+          ↕
+[Stream Driver]  ←→  [Parent App (HomeConnectIntegration)]  ←→  [Child Drivers × N]
+ SSE + REST               OAuth, discovery, routing              per-appliance type
+```
+
+- **Parent App** (`HomeConnectIntegration.groovy`): Manages OAuth, device discovery, event routing from Stream Driver to correct child. Holds `atomicState.oAuthAuthToken`, `oAuthRefreshToken`, `oAuthTokenExpires`.
+- **Stream Driver** (`HomeConnectStreamDriver.groovy`): A Hubitat driver that maintains the persistent SSE connection via Hubitat's EventStream interface (`eventStreamStatus()` / `parse()` callbacks). Also serves as the REST API library for child drivers (GET/PUT/DELETE methods).
+- **Child Drivers**: Per appliance-type (not per-appliance-instance — one driver class handles all fridges).
+
+**Device Network ID pattern:** `HC3-{haId}` where `haId` is Bosch's appliance ID (e.g., `HC3-BOSCH-HCS05FRF5-12345678901234`).
+
+### OAuth2 Handling
+
+**Grant type:** Authorization Code Grant (NOT Device Flow, even though Bosch supports Device Flow). This means:
+
+1. User opens Hubitat app configuration in a browser
+2. Clicks "Connect to Home Connect"
+3. Redirected to `https://api.home-connect.com/security/oauth/authorize` → logs into Bosch account
+4. Redirected back to `https://cloud.hubitat.com/api/{hub-uuid}/apps/{app-id}/oauth/callback`
+5. Hubitat app receives the code, POSTs to token endpoint, stores access+refresh tokens in `atomicState`
+
+**Redirect URI:** `${getFullApiServerUrl()}/oauth/callback` — Hubitat's built-in cloud endpoint. User must manually register this in the Bosch developer portal before step 2. The app displays the exact URL on its configuration page.
+
+**Token storage:**
+- `atomicState.oAuthAuthToken` — access token (24h lifetime)
+- `atomicState.oAuthRefreshToken` — refresh token (long-lived)
+- `atomicState.oAuthTokenExpires` — expiry as `now()` + `expires_in * 1000`
+
+**Token refresh pattern:** Proactive, request-gated — `getOAuthToken()` is called before every API request and refreshes if expiry < 60 seconds away. No scheduled cron refresh — relies entirely on request-time checks. If Hubitat goes cold (no API calls for >24h), the access token expires and will be refreshed via the stored refresh token on the next call.
+
+**Known OAuth issue documented:** Early v3 releases had a "two browser tab" workaround for redirect timing. v3.1.0+ added stateless CSRF validation that resolved this (state value is timestamp + hashCode, validated in callback, 10-minute expiry window).
+
+### Event Architecture — SSE vs. Polling
+
+The Stream Driver uses Hubitat's EventStream interface:
+- `sendHubCommand()` opens a persistent SSE connection to `GET /api/homeappliances/{haId}/events`
+- `parse()` method receives streaming data chunks
+- `eventStreamStatus(STOP/START)` lifecycle callbacks handle disconnects
+
+**This works in Hubitat** (contrary to the note in `home-connect-oauth-device-flow/SKILL.md` that says SSE is not viable — it IS viable via EventStream, just fragile).
+
+**Evidence of fragility:** Stream Driver went from v3.0.0 (2026-01-07) to v3.3.22 (2026-03-13) — 22+ patch versions in 65 days, all addressing SSE-specific issues:
+- "Too many follow-up requests" ProtocolException (v3.2.0)
+- Keep-alive detection failures (v3.3.18)  
+- Silent stream drops with no eventStreamStatus callback (v3.3.0 watchdog)
+- Hubitat stripping newlines from parse() chunks (v3.3.15)
+- Double-processing of SSE events (v3.2.9)
+- Stale connectionStatus showing "disconnected" while events still flow (v3.3.21)
+
+The driver now has a **watchdog** (persistent cron, checks every N minutes for data gaps), **3-minute dead-stream timeout** (Home Connect sends KEEP-ALIVE every ~55s), **exponential backoff** on reconnect, and **rate limit state guards** to prevent reconnect storms.
+
+**Bottom line:** SSE works but requires this much infrastructure to be reliable. If SSE stays dead for reasons outside Hubitat (Bosch connectivity, network hiccups), events stop until the watchdog fires and reconnects.
+
+**No pure polling fallback:** If SSE is unavailable, the driver has no scheduled REST polling of `/api/homeappliances/{haId}/status`. State only updates from SSE events or on explicit user `refresh()`. This is a gap for a fridge — a door left open for 30 minutes without SSE would generate no alert until watchdog reconnects.
+
+### Known Issues (from forum thread and GitHub commit history)
+
+1. **SSE stream reliability** — the dominant theme in all v3.3.x patches (see above)
+2. **First-install device creation timing** — fixed in v3.1.3/3.1.4 (foundDevices not persisting across page callbacks on first install)
+3. **OAuth redirect URI registration friction** — user must add the URI to Bosch portal and wait 15-30 minutes for DNS propagation before authorizing
+4. **Rate limit recovery after storm** — v3.3.22 fixed apiGet() not checking rate-limit state, which re-triggered 429 on reconnect
+5. **409 Conflict noise** — fridge returns 409 when a command is sent while door is open or remote control is disabled; driver now translates these to user-friendly `lastCommandStatus` strings
+6. **No device-flow option** — if a user's Bosch developer account is already registered, it's a smoother path; for new users the setup friction is real
+
+### Maintenance Status
+
+**ACTIVE.** Last commit 2026-03-13 (65 days ago). 13 appliance types all shipping as of 2026 with dedicated drivers. Forum thread is the linked post above. HPM-published and searchable. Craig Dewar appears responsive to issues based on the patch cadence. The only concern is the pace of SSE patches — 22 in 65 days — which could indicate an underlying instability that hasn't been fully resolved, or simply rigorous patching to production quality. Given v3.3.x has held since 2026-03-13, the latter seems more likely.
+
+---
+
+## 3. Bosch Home Connect Protocol Notes
+
+### Auth Flow
+
+| Parameter | Value |
+|---|---|
+| Grant types supported | **Authorization Code** + **Device Flow** |
+| Used by craigde driver | Authorization Code |
+| Token URL | `https://api.home-connect.com/security/oauth/token` |
+| Auth URL | `https://api.home-connect.com/security/oauth/authorize` |
+| Access token lifetime | **86400 seconds (24 hours)** |
+| Refresh token | Long-lived (months); may rotate — always persist response's `refresh_token` |
+| Daily token refresh limit | **100/day** |
+| Per-minute token refresh limit | 10/minute |
+
+**Device Flow** (not used by craigde): `POST /security/oauth/device_authorization`. Returns `user_code` + `verification_uri_complete`. User visits URL, authenticates, driver polls for token. No redirect URI required — simpler setup. Hubitat driver can display the URL to the user and poll every 5s via `runIn()`. This is documented in `.squad/skills/home-connect-oauth-device-flow/SKILL.md`.
+
+**Authorization Code Grant in Hubitat:** Works via Hubitat App `mappings {}` + `getFullApiServerUrl()` cloud callback endpoint. Per-hub URI (`https://cloud.hubitat.com/api/{hub-uuid}/apps/{app-id}/oauth/callback`) must be pre-registered in Bosch developer portal. Bosch requires exact URI match — no wildcards. Hub UUID is stable per-hub, so this is a one-time registration per user.
+
+### Key Endpoints for a Fridge
+
+```
+GET  /api/homeappliances
+     → {"data": {"homeappliances": [{"haId": "...", "name": "...", "type": "FridgeFreezer", "connected": true}]}}
+
+GET  /api/homeappliances/{haId}/status
+     → {"data": {"status": [
+          {"key": "Refrigeration.Common.Status.Door.Refrigerator",
+           "value": "BSH.Common.EnumType.DoorState.Open",
+           "displayvalue": "Open"},
+          {"key": "Refrigeration.FridgeFreezer.Status.TemperatureRefrigerator",
+           "value": 4, "unit": "°C"},
+          {"key": "BSH.Common.Status.OperationState",
+           "value": "BSH.Common.EnumType.OperationState.Ready"}
+       ]}}
+
+GET  /api/homeappliances/{haId}/settings
+     → {"data": {"settings": [
+          {"key": "Refrigeration.FridgeFreezer.Setting.SetpointTemperatureRefrigerator",
+           "value": 4, "unit": "°C"},
+          {"key": "BSH.Common.Setting.PowerState",
+           "value": "BSH.Common.EnumType.PowerState.On"}
+       ]}}
+
+GET  /api/homeappliances/{haId}/events       ← SSE stream; persistent connection
+     Content-Type: text/event-stream
+     → data: {"haId": "...", "items": [{"key": "Refrigeration.Common.Status.Door.Refrigerator",
+               "value": "BSH.Common.EnumType.DoorState.Open", "displayvalue": "Open"}]}
+
+GET  /api/homeappliances/{haId}/programs/active
+     → 404 (fridges have no programs — this is expected and handled gracefully)
+```
+
+All requests require:
+```
+Authorization: Bearer {access_token}
+Accept: application/vnd.bsh.sdk.v1+json
+```
+
+### Door-Open Detection Specifically
+
+**Status key (polled):**
+```
+Refrigeration.Common.Status.Door.Refrigerator
+  → BSH.Common.EnumType.DoorState.Open
+  → BSH.Common.EnumType.DoorState.Closed
+
+Refrigeration.Common.Status.Door.Freezer
+  (same enum values)
+
+Refrigeration.Common.Status.Door.FlexZone
+Refrigeration.Common.Status.Door.ChillerLeft
+Refrigeration.Common.Status.Door.ChillerRight
+Refrigeration.Common.Status.Door.FlexCompartment
+  (depending on fridge model)
+```
+
+**Door alarm events (SSE, EventPresentState-based):**
+```
+Refrigeration.FridgeFreezer.Event.DoorAlarmRefrigerator
+  → BSH.Common.EnumType.EventPresentState.Present   (alarm active)
+  → BSH.Common.EnumType.EventPresentState.Off         (alarm cleared)
+
+Refrigeration.FridgeFreezer.Event.DoorAlarmFreezer
+Refrigeration.FridgeFreezer.Event.TemperatureAlarmFreezer
+```
+
+**How the driver maps this:**
+- `Refrigeration.Common.Status.Door.Refrigerator` → `fridgeDoorState: "Open"` + `fridgeContact: "open"` (ContactSensor-compatible)
+- `BSH.Common.Status.DoorState` (generic, single-door models) → `doorState` + `contact`
+- `DoorAlarmRefrigerator` event → `pushed: 1` (Button 1 PushableButton) → Rule Machine trigger
+- `anyDoorOpen` boolean attribute updated from all door state changes
+
+**Aggregate ContactSensor behavior:** `contact` attribute (root-level Hubitat capability) reflects `anyDoorOpen` — if ANY door is open, `contact = "open"`. Individual doors have their own `fridgeContact`/`freezerContact` attributes for per-door rules.
+
+### Rate Limits (Exact Bosch Documentation)
+
+Source: https://developer.home-connect.com/docs/general/ratelimiting
+
+| Limit | Value |
+|---|---|
+| **Requests per day** (per client + user account) | **1,000** |
+| **Requests per minute** | **50** (burst: 20, leaky bucket) |
+| **Program starts per minute** | 5 |
+| **Program stops per minute** | 5 |
+| **Event monitoring channels** (concurrent) | 10 max |
+| **Successive errors before block** | 10 errors → 10-minute block |
+| **Token refreshes per day** | 100 |
+| **Token refreshes per minute** | 10 |
+| Rate limit header | `X-RateLimit-Remaining`, `Retry-After` (on 429) |
+
+**Implication for fridge polling:** If SSE drops and driver falls to REST polling, at 90-second intervals = ~960 requests/day — borderline. At 120s intervals = 720/day — comfortable. The craigde driver does NOT poll as a fallback; SSE is the only real-time update mechanism.
+
+### OAuth-in-Hubitat Consideration
+
+**The craigde driver's approach (Auth Code Grant):**
+- Pros: Standard OAuth2 flow, tokens live in the App's `atomicState` (survives hub reboots), `httpPost` for token exchange is synchronous and reliable
+- Cons: User must register per-hub callback URL in Bosch portal; requires browser flow; the Bosch portal propagation delay (15-30 min) is a real UX friction point
+
+**The alternative (Device Flow):**
+- Pros: No redirect URI needed; user just visits a short URL (displayable in Hubitat log); driver can be a pure Driver (no App required); simpler registration (just `client_id` in preferences, no portal URL update)
+- Cons: Device code expires in 300 seconds; user must complete auth within that window; polling loop in driver adds complexity
+- This is exactly what `.squad/skills/home-connect-oauth-device-flow/SKILL.md` documents
+
+**Conclusion:** craigde's Auth Code Grant approach is correct for an App-based integration. It's more setup work per user but more robust long-term (no code expiry race, clean refresh-token persistence). Device Flow is better for a pure Driver. Since craigde is an App, Auth Code Grant is the right choice.
+
+**The hairy part confirmed:** There is no universal Bosch redirect URI. Each Hubitat hub has a unique UUID in its callback URL, so every user registers a different URI. Bosch requires exact-match registration. This is genuinely friction, but it's one-time per user. The driver handles it gracefully by displaying the URI on the config page.
+
+---
+
+## 4. Sandbox-Safety Check
+
+Patterns used in craigde driver and their sandbox status:
+
+| Pattern | Used In | Sandbox Status |
+|---|---|---|
+| `atomicState` for token storage | Parent App | ✅ Safe — standard Hubitat |
+| `httpPost` (synchronous) for token exchange | Parent App | ✅ Safe — used in SunStat, Gemstone |
+| `httpGet` (synchronous) for device discovery | Parent App | ✅ Safe — standard |
+| EventStream interface (`eventStreamStatus`, `parse()`) | Stream Driver | ✅ Safe — Hubitat platform feature |
+| `sendHubCommand(HubAction)` for SSE connection | Stream Driver | ✅ Safe — standard HubAction |
+| `asynchttpGet`/`asynchttpPut` for REST calls | Stream Driver | ✅ Safe — confirmed in SunStat, Gemstone, Daikin |
+| `runIn()` for reconnect scheduling | Stream Driver | ✅ Safe |
+| `schedule()` for watchdog cron | Stream Driver | ✅ Safe |
+| `groovy.json.JsonSlurper` / `JsonOutput` | All | ✅ Safe |
+| `URLEncoder.encode()` | Parent App | ✅ Safe |
+
+**No sandbox-unsafe patterns found.** No reflection, no JNI, no raw TCP sockets, no MQTT, no persistent thread blocking.
+
+The only "interesting" pattern is EventStream — this is NOT the same as `asynchttpGet` with a streaming connection. It uses `interfaces.eventStream` or equivalent HubAction magic that Hubitat specifically supports for SSE. The craigde driver's extensive SSE patches demonstrate it works on real Hubitat hubs.
+
+---
+
+## 5. Rubric Score — Trinity Driver Fit Rubric (100 pts)
+
+### Hard Disqualifiers Check (10 items)
+
+| Disqualifier | Status |
+|---|---|
+| Cloud API officially dead or hostile | ❌ Clear — Bosch has active developer.home-connect.com, free registration |
+| Requires reflection, JNI, native libraries | ❌ Clear — HTTPS + JSON only |
+| Device costs >$500 or hardware-unavailable | ❌ Clear — Mads owns the fridge |
+| Requires browser OAuth2 redirect | ⚠️ Partial — yes, but Hubitat App `mappings {}` handles it; NOT a hard blocker |
+| Persistent MQTT subscriber | ❌ Clear — SSE not MQTT |
+| Binary protocol with no Groovy decoder | ❌ Clear — JSON over HTTPS |
+| Safety-critical device without audit logging | ❌ Clear — fridge is not safety-critical |
+| Requires >1KB secrets in preferences | ❌ Clear — client_id + client_secret are short strings |
+| Multi-protocol with undocumented fallback | ❌ Clear — single HTTPS endpoint |
+| Reflection or sandbox-restricted Groovy | ❌ Clear — all safe (see §4) |
+
+**All 10 hard disqualifiers: CLEAR.** The OAuth redirect is partially flagged but not a hard disqualifier since Hubitat's App OAuth mechanism handles it.
+
+### Weighted Criteria (BUILD-NEW scenario)
+
+| Criterion | Max | Score | Reasoning |
+|---|---|---|---|
+| **Local vs. Cloud Protocol** | 20 | **5** | Cloud HTTPS only. No local protocol exists for Bosch appliances. Full 20 unavailable. Bosch has no documented local API — this is a hard architectural constraint. |
+| **Mads Can Test** | 15 | **15** | Mads owns a Bosch WiFi fridge. Baseline 15. |
+| **User Demand Signal** | 15 | **12** | HPM-published, 13 appliance types, active forum thread, active patching. Slight deduction: a full rewrite (v3) was needed suggesting v1/v2 had reliability issues; SSE fragility may continue generating community friction. |
+| **Sandbox-Safe** | 15 | **12** | Auth Code Grant via App + EventStream + asynchttpGet all confirmed safe. Deduct 3: SSE via EventStream is fragile in practice (22+ patches in 65 days), adding operational risk that pure REST polling doesn't have. |
+| **Vendor API Stability** | 15 | **13** | Bosch has been running developer.home-connect.com since ~2017 with free registration. No kill signals. Officially documented. Minor deduction: free developer tier TOS could theoretically change; Bosch has no "developer program forever" commitment. |
+| **Effort to Ship** | 10 | **4** | Building NEW: App + Stream Driver + ~13 child drivers = very high effort (200+ hours). If IMPROVE-EXISTING (craigde), effort ≈ near-zero (just install). Score reflects BUILD-NEW scenario — scored low because existing driver already covers everything. |
+| **Maintenance Burden** | 10 | **6** | Cloud-only = token refresh + rate limiting forever. SSE watchdog complexity. Bosch API versioning risk. But 24h tokens (vs 15min for SunStat) and official developer program make this manageable. |
+
+**Total: 67 / 100**
+
+### Threshold Verdict
+
+**67 pts → ⚠️ Conditional Fit (60–79)**
+
+### INSTALL / IMPROVE / FORK / BUILD Verdict
+
+**✅ INSTALL — do not build from scratch, do not fork.**
+
+The rubric says Conditional Fit, but the strategic analysis is unambiguous:
+
+1. **craigde/hubitat-homeconnect-v3 is comprehensive.** 13 appliance types, fridge driver fully implemented with door state (per-compartment ContactSensor), temperature control, all modes, debug commands. There is nothing meaningful to add in a BUILD that isn't already there.
+
+2. **It's actively maintained.** Last commit 65 days ago. 22+ patches in the last 65 days = active, responsive maintenance. Not stale.
+
+3. **HPM-published.** Install path is straightforward. Side-by-side installation is documented for users who want to test before migrating.
+
+4. **The fridge driver specifically solves Mads's use case.** Door open → `fridgeContact: "open"` → Rule Machine trigger. Temperature monitoring. This is exactly what's needed.
+
+5. **The only BUILD justification would be:** replacing SSE with pure polling for reliability, or implementing Device Flow for simpler setup. Neither is worth building from scratch when craigde's driver already exists and has a watchdog/reconnect system that addresses SSE drops.
+
+**Decision tree:**
+- Mads installs via HPM and SSE is stable → **Done. Use it.**
+- SSE keeps dropping (watchdog reconnects every few hours, events missed) → **IMPROVE: file issue on craigde asking for polling-fallback mode. If unresponsive >30 days, fork.**
+- Mads wants to consolidate into this repo (consistent code style, async patterns) → **FORK, using craigde as tested reference. Core complexity is the App OAuth + Stream Driver; child drivers are straightforward once those exist.**
+
+---
+
+## 6. Open Questions for Mads
+
+1. **Which fridge model?** Bosch series (Series 4, 6, 8)? Side-by-side, bottom freezer, or French door? Some models have flex zones, chillers, or ice dispensers; others don't. The driver's `getDiscoveredKeys` command will tell you which door status keys your specific appliance exposes on first connection.
+
+2. **Does he own other Bosch Home Connect appliances?** The integration covers 13 types. If he has a dishwasher, oven, or washer, a single install covers all of them — higher install ROI.
+
+3. **Primary use case:** Door-open alerts only, or also temperature monitoring + remote control? If just door-open alerts, a stripped-down polling driver (120s interval, ~720 calls/day) would be more reliable and simpler than the full SSE integration. If temp control + super-cooling are wanted, the full driver is the right choice.
+
+4. **Bosch developer account:** Does Mads already have one? If not, the 5-step setup (create account → register app → wait 15-30 min for propagation → paste URI → authorize) is the main friction barrier. The simulator access also requires a developer account — useful for testing without the real fridge.
+
+5. **Home Connect app paired?** The fridge must be paired to the Home Connect mobile app before the Hubitat integration can discover it. If it's already paired and working in the app, Hubitat discovery is straightforward.
+
+6. **SSE tolerance:** If Mads's network or Bosch's cloud is unreliable, SSE drops will mean missed door-open events until the watchdog reconnects (~3-minute gap max with the current watchdog). Is that acceptable? For a door-alarm use case, a 3-minute delayed alert could mean a very cold kitchen floor.
+
+---
+
+## 7. Sources
+
+| Source | URL | Date Accessed |
+|---|---|---|
+| Hubitat forum thread (v3 release post) | https://community.hubitat.com/t/release-home-connect-integration-control-bosch-siemens-thermador-and-more/160748 | 2026-05-18 |
+| GitHub repo | https://github.com/craigde/hubitat-homeconnect-v3 | 2026-05-18 |
+| Parent App source | `craigde/hubitat-homeconnect-v3:apps/HomeConnectIntegration.groovy` v3.1.7 | 2026-05-18 |
+| Stream Driver source | `craigde/hubitat-homeconnect-v3:drivers/HomeConnectStreamDriver.groovy` v3.3.22 | 2026-05-18 |
+| FridgeFreezer driver source | `craigde/hubitat-homeconnect-v3:drivers/HomeConnectFridgeFreezer.groovy` v3.1.3 | 2026-05-18 |
+| Bosch Home Connect API docs — General | https://developer.home-connect.com/docs/general/ratelimiting | 2026-05-18 |
+| Bosch Home Connect API docs — Auth | https://developer.home-connect.com/docs/authorization/flow | 2026-05-18 |
+| Existing skill — Device Flow | `.squad/skills/home-connect-oauth-device-flow/SKILL.md` | 2026-05-18 |
+| Existing skill — Cloud OAuth App | `.squad/skills/hubitat-cloud-oauth-app/SKILL.md` | 2026-05-18 |
+| Trinity Driver Fit Rubric | `.squad/decisions/decisions.md` §trinity-driver-fit-rubric | 2026-05-18 |
+

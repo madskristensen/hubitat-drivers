@@ -227,3 +227,7 @@ Most SmartThings-era Hubitat thermostat ports missing `supportedThermostatModes`
 ---
 
 **Last updated:** 2026-05-18T22:00Z (arc close reskill)
+
+---
+
+**2026-05-18 Team Update (Scribe):** Three consecutive driver candidates (MyQ, Rainbird, Bosch) audited to 'install existing community driver'. Pattern: Mads's stack is well-covered by community; focus may shift from new builds to composition automations across existing drivers.

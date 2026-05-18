@@ -6,6 +6,55 @@
 
 ## Learnings
 
+### Bosch Home Connect Protocol + craigde Driver Audit (2026-05-18)
+
+**Full memo:** `.squad/decisions/inbox/cypher-bosch-home-connect-audit.md`
+
+**Protocol shape:**
+- Transport: HTTPS to `api.home-connect.com`. No local protocol. No LAN fallback.
+- Auth: OAuth2 Authorization Code Grant (Bosch also supports Device Flow — see skill). Access token 86400s (24h). Refresh token long-lived, may rotate.
+- Discovery: `GET /api/homeappliances` → array of `{haId, name, type, connected}`.
+- Status: `GET /api/homeappliances/{haId}/status` → array of key/value items.
+- Door state key: `Refrigeration.Common.Status.Door.Refrigerator` → `BSH.Common.EnumType.DoorState.Open/Closed`. Per-compartment variants: `.Freezer`, `.FlexZone`, `.ChillerLeft`, `.ChillerRight`, `.FlexCompartment`.
+- SSE: `GET /api/homeappliances/{haId}/events` — text/event-stream. **IS usable in Hubitat via EventStream interface** (contrary to earlier skill note) but fragile — requires watchdog + reconnect infrastructure.
+- Rate limits: 1,000 requests/day, 50/minute, 10 SSE channels, 100 token refreshes/day.
+
+**Sandbox safety verdict: ✅ CONFIRMED.** Auth Code Grant via App `mappings {}`, `httpPost` token exchange, `asynchttpGet` REST, EventStream SSE — all safe. No crypto, no reflection.
+
+**OAuth2-in-Hubitat pattern:** Auth Code Grant requires a Hubitat **App** (not a Driver) to use `mappings {}`. Per-hub callback URI (`https://cloud.hubitat.com/api/{hub-uuid}/apps/{app-id}/oauth/callback`) must be pre-registered in the cloud provider's portal. This is one-time-per-user friction, not a blocker. `atomicState` survives hub reboots and is the correct token store. Proactive request-gated refresh (check expiry < 60s on every call) is the pattern craigde uses; works without a cron scheduler.
+
+**Existing driver audit verdict:** `craigde/hubitat-homeconnect-v3` (Craig Dewar) v3.1.7 (2026-03-13) is ACTIVE, HPM-published, covers 13 appliance types including a complete FridgeFreezer driver with per-compartment ContactSensor, temperature monitoring, all modes, debug commands. **INSTALL verdict** — do not build from scratch. Rubric score 67/100 (Conditional Fit) but strategic recommendation is INSTALL because the driver is comprehensive and active.
+
+**SSE-via-EventStream correction:** The `home-connect-oauth-device-flow/SKILL.md` says "SSE not viable on Hubitat." This is WRONG for App/Driver code that uses Hubitat's EventStream interface. SSE IS viable but requires substantial reconnect/watchdog infrastructure (craigde needed 22+ patches in 65 days to stabilize it). Updated skill with caveat.
+
+---
+
+## Learnings
+
+### Rainbird LNK WiFi Protocol (2026-05-18)
+
+**Full memo:** `.squad/decisions/inbox/cypher-rainbird-lnk-feasibility.md`
+
+**Protocol shape:**
+- Transport: HTTP POST to `http://{ip}/stick` port 80 (or HTTPS 443). Standard HTTP, not raw TCP.
+- Envelope: JSON-RPC 2.0, `method: "tunnelSip"`, `params.data` = SIP command as hex string, `params.length` = byte count.
+- Encryption: AES-256-CBC. Key = SHA-256(password) as 32-byte key. IV = 16 random bytes. Padding: custom (append `\x00\x10`, fill with `\x10`). Frame: [SHA-256(plaintext) 32B][IV 16B][ciphertext].
+- NO HMAC — first 32 bytes are `SHA-256(plaintext)` hash only, not keyed.
+- Auth: none beyond shared password. No session token. Every request standalone-encrypted.
+- Push: none. Pure poll. HA polls every 60 seconds.
+
+**Key SIP opcodes:** `02` model/version, `05` serial, `3F` active zones (bitmask), `39` manual run zone (minutes!), `40` stop all, `3E` rain sensor, `36` get rain delay, `37` set rain delay, `4C` combined state snapshot.
+
+**Sandbox safety verdict: ✅ CONFIRMED.** `javax.crypto.Cipher / AES/CBC/NoPadding / SunJCE` is confirmed sandbox-safe — used in two existing Hubitat Rainbird drivers (craigde/jbilodea and MHedish) AND in our own Touchstone driver (AES-ECB variant). `ByteArrayOutputStream`, `MessageDigest`, `SecretKeySpec`, `IvParameterSpec` all safe. `System.arraycopy` is still blocked — use loops or `ByteArrayOutputStream.write()`.
+
+**Existing driver audit verdict:** MHedish/Hubitat `RainBird-LNK-Wi-Fi-Module.groovy` v1.0.0.0 (last commit 2026-05-07) is active, HPM-published, parent/child architecture, proper encryption, multi-firmware support. DO NOT reinvent. **IMPROVE-EXISTING.** craigde/jbilodea v0.92 (2020) is stale and superseded.
+
+**Rubric score:** 92/100. Strong Fit. IMPROVE-EXISTING verdict (not BUILD) because MHedish is active and covers all functionality.
+
+**Community driver audit pattern:** New skill written at `.squad/skills/community-driver-audit-before-build/SKILL.md`.
+
+---
+
 ### Driver Opportunity Shortlist (2026-05-18)
 
 **Full report:** `.squad/decisions/inbox/cypher-driver-opportunities-2026.md`
@@ -125,6 +174,8 @@ Cypher-4 research directly enabled two Tank-15 ships:
 **Older sessions (2026-05-16 to 2026-05-17):** SunStat/Watts research, Bosch feasibility, Gemstone color investigation, Touchstone DP analysis, Tuya key extraction audit, Hubitat sandbox learnings, system.arraycopy blocker, and cross-driver patterns saved to `history-archive.md`.
 
 ## Team Updates
+
+**2026-05-18 Team Update (Scribe):** Bosch Home Connect audit complete — 67/100 rubric, but INSTALL verdict wins. craigde/hubitat-homeconnect-v3 is comprehensive (13 appliances), HPM-published, actively maintained. Discovered OAuth Authorization Code Grant pattern via Hubitat App cloud callbacks—reusable for future cloud-OAuth drivers. Verdict = install, not build.
 
 ### Hubitat Write-Only Property Gotcha + HubAction Constructor Table (Tank-3, 2026-05-18)
 
