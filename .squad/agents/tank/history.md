@@ -118,3 +118,11 @@ Cypher + Trinity completed assessment of `eriktack/hubitat-daikin-wifi` upstream
 - **Callback signature:** def handler(hubitat.scheduling.AsyncResponse response, Map data) — body via response.getData(), error check via response.hasError(). No parseLanMessage, no DNI required.
 - **Correction to team memo:** Trinity's v0.1.0 memo claimed asynchttpGet was cloud-only. Incorrect — works for LAN HTTP too. Corrected in .squad/decisions/inbox/tank-daikin-wifi-v012-asynchttp.md.
 - **Skill:** .squad/skills/hubitat-asynchttpget-pattern/SKILL.md (new); .squad/skills/hubitat-hubaction-constructors/SKILL.md (updated to mark all Map-based forms unreliable, confidence medium).
+
+### Daikin v0.1.3 — setSwingMode command + swingMode attribute (665e968)
+
+- **Daikin BRP069B f_dir mapping:** f_dir=0→"off" (fixed position), f_dir=1→"vertical" (up/down swing), f_dir=2→"horizontal" (left/right swing), f_dir=3→"3d" (combined both axes). "3d" is Daikin's term for the combined mode.
+- **Trinity's fanDirection memo was stale:** The v0.1.2 driver did NOT parse f_dir at all and had no fanDirection attribute. f_dir parsing (→ swingMode attribute) was added as part of v0.1.3 — it was a genuine gap, not just a write-side omission.
+- **set_control_info requires all 6 params:** pow, mode, stemp, f_rate, f_dir, shum must all be present on every set_control_info call. The existing sendControlWrite(Map overrides) helper covers this pattern — reads current device attribute values as defaults and the caller supplies only the fields to change. Used for setSwingMode exactly as for setFanRate and setThermostatMode. No new helper needed.
+- **sendControlWrite f_dir default:** Changed from hardcoded "0" to SWING_TO_DAIKIN_F_DIR[device.currentValue("swingMode")] ?: "0" — preserves current swing setting across all other control writes (setThermostatMode, setFanRate, setpoint changes, etc.).
+- **Extension note (v0.1.4 econo/powerful):** Econo and powerful modes use a separate `set_special_mode` endpoint (not set_control_info), so a dedicated sendSpecialModeWrite helper will be needed. The set_control_info 6-param pattern does not apply there.
