@@ -1,7 +1,7 @@
 ﻿/**
  * Daikin WiFi Thermostat
  * Author:  Mads Kristensen
- * Version: 0.1.2
+ * Version: 0.1.3
  * License: MIT
  *
  * Local LAN control for Daikin WiFi adapters (BRP069B series, BRP15B61, and similar
@@ -14,6 +14,7 @@
  *   original. Credit and thanks to @eriktack for the foundational research.
  *
  * Changelog:
+ *   0.1.3 — 2026-05-18 — feat: add setSwingMode command + swingMode attribute (off/vertical/horizontal/3d) — Daikin f_dir 0-3 mapping
  *   0.1.2 — 2026-05-18 — fix: replace HubAction (constructor not found on user firmware) with asynchttpGet — modern Hubitat HTTP-over-LAN pattern
  *   0.1.1 — 2026-05-18 — hotfix: remove invalid read of schedule property in updated(); correct HubAction constructor signature in sendGet
  *   0.1.0 — 2026-05-18 — initial clean-room implementation; Thermostat + Switch +
@@ -28,7 +29,7 @@ import groovy.json.JsonOutput
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String  DRIVER_VERSION            = "0.1.2"
+@Field static final String  DRIVER_VERSION            = "0.1.3"
 @Field static final Integer DAIKIN_PORT               = 80
 @Field static final Integer LAST_ACTIVITY_THROTTLE_MS = 60000
 @Field static final Integer ENERGY_POLL_MINUTES       = 30
@@ -57,6 +58,15 @@ import groovy.json.JsonOutput
 @Field static final List<String> SUPPORTED_MODES     = ["auto", "cool", "heat", "dry", "fan", "off"]
 @Field static final List<String> SUPPORTED_FAN_MODES = ["auto", "on"]
 
+// Daikin BRP069B swing direction codes (f_dir field in control_info).
+@Field static final List<String> SWING_MODE_OPTIONS = ["off", "vertical", "horizontal", "3d"]
+@Field static final Map<String, String> DAIKIN_F_DIR_TO_SWING = [
+    "0": "off", "1": "vertical", "2": "horizontal", "3": "3d"
+]
+@Field static final Map<String, String> SWING_TO_DAIKIN_F_DIR = [
+    "off": "0", "vertical": "1", "horizontal": "2", "3d": "3"
+]
+
 // ---------------------------------------------------------------------------
 // Metadata
 // ---------------------------------------------------------------------------
@@ -82,9 +92,12 @@ metadata {
         command "refreshEnergy"
         command "setFanRate", [[name: "rate*", type: "ENUM", constraints: FAN_RATE_OPTIONS,
             description: "Daikin fan speed code (A=Auto, B=Silent, 3–7=speed levels)"]]
+        command "setSwingMode", [[name: "Mode", type: "ENUM", constraints: ["off", "vertical", "horizontal", "3d"],
+            description: "Swing direction: off=fixed, vertical=up/down, horizontal=left/right, 3d=both"]]
 
         attribute "outsideTemp",  "number"
         attribute "fanRate",      "enum",   FAN_RATE_OPTIONS
+        attribute "swingMode",    "enum",   ["off", "vertical", "horizontal", "3d"]
         attribute "healthStatus", "enum",   ["online", "offline", "unknown"]
         attribute "lastActivity", "string"
     }
@@ -290,6 +303,15 @@ def setFanRate(String rate) {
     sendControlWrite([f_rate: rate])
 }
 
+def setSwingMode(String mode) {
+    String lmode = mode?.toLowerCase()
+    if (!SWING_MODE_OPTIONS.contains(lmode)) { log.warn "[Daikin] Unknown swing mode: ${mode}"; return }
+    String daikinFDir = SWING_TO_DAIKIN_F_DIR[lmode]
+    log.info "[Daikin] ${device.displayName} swing mode → ${lmode}"
+    emitIfChanged("swingMode", lmode, null, "${device.displayName} swing mode → ${lmode}")
+    sendControlWrite([f_dir: daikinFDir])
+}
+
 def setHeatingSetpoint(temp) {
     BigDecimal tempBd = new BigDecimal(temp.toString())
     BigDecimal clamped = clampSetpoint(tempBd)
@@ -433,7 +455,7 @@ private void sendControlWrite(Map overrides) {
     String mCode = overrides.containsKey("mode")   ? overrides.mode   : (HUBITAT_MODE_TO_DAIKIN[currentMode] ?: "1")
     String stemp = overrides.containsKey("stemp")  ? overrides.stemp  : "${currentSetpointC()}"
     String fRate = overrides.containsKey("f_rate") ? overrides.f_rate : (device.currentValue("fanRate") ?: "A")
-    String fDir  = overrides.containsKey("f_dir")  ? overrides.f_dir  : "0"
+    String fDir  = overrides.containsKey("f_dir")  ? overrides.f_dir  : (SWING_TO_DAIKIN_F_DIR[device.currentValue("swingMode")] ?: "0")
     String shum  = overrides.containsKey("shum")   ? overrides.shum   : "0"
 
     String path = "/aircon/set_control_info?pow=${pow}&mode=${mCode}&stemp=${stemp}&f_rate=${fRate}&f_dir=${fDir}&shum=${shum}"
@@ -458,6 +480,7 @@ def handleControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
     String mode  = kv.mode
     String stemp = kv.stemp
     String fRate = kv.f_rate
+    String fDir  = kv.f_dir
 
     // pow=0 → "off"; otherwise map mode code to Hubitat string
     String tMode    = (pow == "0") ? "off" : (DAIKIN_MODE_TO_HUBITAT[mode] ?: "auto")
@@ -472,6 +495,11 @@ def handleControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
 
     if (fRate) {
         emitIfChanged("fanRate", fRate, null, "${device.displayName} fan rate → ${fRate}")
+    }
+
+    if (fDir) {
+        String swingMode = DAIKIN_F_DIR_TO_SWING[fDir] ?: "off"
+        emitIfChanged("swingMode", swingMode, null, "${device.displayName} swing mode → ${swingMode}")
     }
 
     // stemp can be "-" in fan/dry modes; guard before parsing

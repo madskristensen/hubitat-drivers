@@ -21,7 +21,7 @@ Local LAN control for Daikin WiFi adapters (BRP069B series and similar) via the 
 | Switch | `on` / `off` shortcut over thermostat power |
 | HealthCheck + `ping()` | LAN reachability probe; marks device offline after 5s timeout |
 
-Custom attributes: `outsideTemp` (outdoor sensor), `fanRate` (Daikin fan speed code), `healthStatus`, `lastActivity`.
+Custom attributes: `outsideTemp` (outdoor sensor), `fanRate` (Daikin fan speed code), `swingMode` (off/vertical/horizontal/3d), `healthStatus`, `lastActivity`.
 
 ## Setup
 
@@ -47,7 +47,7 @@ Both schedules are registered in `initialize()` and survive hub reboots.
 
 - **No econo / powerful mode** — `get_special_mode` / `set_special_mode` endpoints not yet implemented. Planned for v0.1.1.
 - **No on-device timer** — `get_program` / `set_program` not implemented (use Hubitat rules instead).
-- **No runtime capability detection** — the driver does not call `get_model_info` to check whether your specific unit supports swing or the humidity sensor. Humidity attribute stays unset if the sensor is absent; swing direction is fixed at `0` (horizontal).
+- **No runtime capability detection** — the driver does not call `get_model_info` to check whether your specific unit supports the humidity sensor. Humidity attribute stays unset if the sensor is absent.
 - **Setpoint unity** — Daikin's local API exposes a single setpoint register (`stemp`) shared across modes. The driver writes it to both `heatingSetpoint` and `coolingSetpoint` on refresh. You can set them independently via Hubitat commands; the driver uses the mode-appropriate value on each write.
 
 ## Acknowledgments
