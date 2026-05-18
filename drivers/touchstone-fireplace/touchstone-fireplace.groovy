@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.28
+ * Version: 0.1.29
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,8 +17,10 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.29 — 2026-05-18 — drop dead `lastDps` state writes from `processFrame()` after confirming the driver has no readers to migrate (perf todo #6)
+ *   0.1.29 — 2026-05-18 — switch hot byte-copy helpers to primitive `int` counters + `System.arraycopy()` where copies are contiguous (perf todo #7)
  *   0.1.28 — 2026-05-18 — persist only leftover partial-frame data in `state.rxBuffer` after `consumeReceiveBuffer()` so fully-consumed chunks stop writing state (perf todo #2)
- *   - 0.1.28 — 2026-05-18 — dedupe unchanged parse/push events for flameColor/flameBrightness/charcoalColor/flameSpeed/heatLevel/heatingSetpoint/temperature while preserving digital command echoes (perf todo #4)
+ *   0.1.28 — 2026-05-18 — dedupe unchanged parse/push events for flameColor/flameBrightness/charcoalColor/flameSpeed/heatLevel/heatingSetpoint/temperature while preserving digital command echoes (perf todo #4)
  *   0.1.27 — 2026-05-18 — throttle lastActivity emit to ≥60s + raise heartbeat 10s→20s (Cypher-verified stable interval); cuts ~8400 sendEvent + 4300 scheduled-job ticks/day per device (perf audit fixes #1 + #3)
  *   0.1.26 — 2026-05-18 — skip redundant setFlameColor/Brightness/Speed/setCharcoalColor/setHeatLevel/setHeatingSetpoint/setChildLock DP writes when attribute already matches (audit T-4 through T-10)
  *   0.1.25 — 2026-05-18 — skip redundant on()/off() DP writes when switch is already in the requested state (audit T-2, T-3)
@@ -90,8 +92,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.28"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.28"
+@Field static final String DRIVER_VERSION = "0.1.29"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.29"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -361,6 +363,7 @@ def initialize() {
     state.retryIndex = 0
     state.statusCommand = null
     state.seqNo = 0L
+    state.remove("lastDps")
     state.socketOpen = false
     state.reconnectAttempts = 0
     state.pingPending = false
@@ -1411,20 +1414,18 @@ private long crc32(byte[] data) {
 }
 
 private byte[] concatBytes(byte[]... arrays) {
-    Integer totalLength = 0
+    int totalLength = 0
     for (byte[] part : arrays) {
-        totalLength += part?.length ?: 0
+        totalLength += part == null ? 0 : part.length
     }
 
     byte[] combined = new byte[totalLength]
-    Integer offset = 0
+    int offset = 0
     for (byte[] part : arrays) {
-        if (!part) {
+        if (part == null || part.length == 0) {
             continue
         }
-        for (Integer i = 0; i < part.length; i++) {
-            combined[offset + i] = part[i]
-        }
+        System.arraycopy(part, 0, combined, offset, part.length)
         offset += part.length
     }
     return combined
@@ -1446,19 +1447,18 @@ private Long readUInt32(byte[] data, Integer offset) {
            (data[offset + 3] & 0xFFL)
 }
 
-private byte[] sliceBytes(byte[] source, Integer start, Integer length) {
+private byte[] sliceBytes(byte[] source, int start, int length) {
     byte[] copy = new byte[length]
-    for (Integer i = 0; i < length; i++) {
-        copy[i] = source[start + i]
-    }
+    System.arraycopy(source, start, copy, 0, length)
     return copy
 }
 
 private Boolean startsWithBytes(byte[] data, byte[] prefix) {
-    if (!data || !prefix || data.length < prefix.length) {
+    if (data == null || prefix == null || data.length == 0 || prefix.length == 0 || data.length < prefix.length) {
         return false
     }
-    for (Integer i = 0; i < prefix.length; i++) {
+    int prefixLength = prefix.length
+    for (int i = 0; i < prefixLength; i++) {
         if (data[i] != prefix[i]) {
             return false
         }
@@ -1469,9 +1469,7 @@ private Boolean startsWithBytes(byte[] data, byte[] prefix) {
 private byte[] protocol33HeaderBytes() {
     byte[] versionBytes = TUYA_VERSION.getBytes("UTF-8")
     byte[] header = new byte[versionBytes.length + 12]
-    for (Integer i = 0; i < versionBytes.length; i++) {
-        header[i] = versionBytes[i]
-    }
+    System.arraycopy(versionBytes, 0, header, 0, versionBytes.length)
     return header
 }
 
@@ -1662,7 +1660,6 @@ private Boolean processFrame(String frameHex) {
     }
     if (response?.dps instanceof Map) {
         Map<String, Object> dps = normaliseDps(response.dps as Map)
-        state.lastDps = dps
         applyDps(dps)
         handleStatusCapture(safeStr(inFlightRequest.captureMode), dps)
     }

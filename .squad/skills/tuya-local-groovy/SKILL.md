@@ -593,3 +593,33 @@ if (current != null && current == label) {
 ```
 
 Null-current rule: `device.currentValue()` returns `null` when the driver has no prior observation. Treat `null` as "state unknown → apply the write." Only skip when current matches the target.
+
+## Hot-path Byte Helper Hygiene
+
+When Tuya v3.3 drivers assemble or slice frames on every send/receive cycle, keep the helpers on plain `byte[]` plus primitive `int` math. Boxed `Integer` loop counters inside `concatBytes()`, `sliceBytes()`, `startsWithBytes()`, and `protocol33HeaderBytes()` add avoidable autoboxing overhead in the hottest part of the driver.
+
+### Preferred pattern
+
+- Use `System.arraycopy(...)` for contiguous copies (`concatBytes`, `sliceBytes`, protocol header prepend).
+- Reserve manual loops for byte-by-byte comparisons only, and make the counter a primitive `int`.
+- Do **not** swap to `ByteArrayOutputStream`, `java.nio`, or reflection-based helpers; the Hubitat sandbox/import allowlist makes the simple `byte[]` helpers the safest portable choice.
+
+```groovy
+private byte[] sliceBytes(byte[] source, int start, int length) {
+    byte[] copy = new byte[length]
+    System.arraycopy(source, start, copy, 0, length)
+    return copy
+}
+
+private Boolean startsWithBytes(byte[] data, byte[] prefix) {
+    if (!data || !prefix || data.length < prefix.length) {
+        return false
+    }
+    for (int i = 0; i < prefix.length; i++) {
+        if (data[i] != prefix[i]) {
+            return false
+        }
+    }
+    return true
+}
+```

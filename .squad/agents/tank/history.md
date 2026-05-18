@@ -13,7 +13,7 @@
 - **Gemstone v0.4.13** (6ee553a): G-2 through G-6 (5× cloud quota yellows batch)
 - **SunStat v0.1.8** (f9060fb): SP-1, SC-1–SC-3 (4× API quota yellows batch; SC-4 deferred for state.floorMinTemp caching refactor)
 
-All findings applied skip-if-match idempotency pattern (current attribute check before DP/API write). Pattern prevents audible relay clicks (T-2, G-1), reduces API quota (G-2–G-6, SP-1, SC-1–SC-3), and maintains wire-traffic hygiene (T-3–T-10). By-design exclusions: SC-5/SC-6/SC-7 state-assertion and recovery paths untouched. 
+All findings applied skip-if-match idempotency pattern (current attribute check before DP/API write). Pattern prevents audible relay clicks (T-2, G-1), reduces API quota (G-2–G-6, SP-1, SC-1–SC-3), and maintains wire-traffic hygiene (T-3–T-10). By-design exclusions: SC-5/SC-6/SC-7 state-assertion and recovery paths untouched.
 
 **Status:** SHIPPED (16/17 findings closed; SC-4 deferred); awaiting Mads real-device validation.
 
@@ -300,3 +300,21 @@ Added in OPTIONS bounds-checks + log.warn + early bail in pplyDps() for enum DP
 - 2026-05-18 — Touchstone parse-path buffer hygiene: build the concatenated socket hex in a local variable, feed it through `consumeReceiveBuffer(buffer)`, and persist `state.rxBuffer` only when a partial Tuya frame remains; fully-consumed chunks should remove the state key instead of rewriting it.
 - 2026-05-18 — Parse/poll event dedupe in Hubitat should be path-aware: compare inbound telemetry against `device.currentValue(...)` (numeric attrs via `BigDecimal`) and skip unchanged `sendEvent`s on the parse path, while leaving user-command handlers free to emit immediate digital events after real outbound writes.
 - 2026-05-18 — Hot-path clone hygiene for Hubitat Groovy: if the real data shapes are `Map`/`List` trees of scalars (Gemstone patterns, queued request payloads), replace `JsonOutput.toJson(...)` + `JsonSlurper.parseText(...)` deep copies with a small recursive container clone. You keep state/request isolation without paying JSON serialization cost on every refresh, queue, and effect activation.
+
+## 2026-05-18 — Touchstone v0.1.29 (perf todos #6/#7)
+
+### What changed
+
+- Removed the dead `state.lastDps` write from `processFrame()` after re-grepping the driver and confirming there were no `state.lastDps` readers to migrate.
+- Added one-time `state.remove("lastDps")` cleanup in `initialize()` so upgraded devices shed the stale state key without putting the write back on the parse path.
+- Reworked `concatBytes()`, `sliceBytes()`, `startsWithBytes()`, and `protocol33HeaderBytes()` to use primitive `int` counters, with `System.arraycopy(...)` for contiguous copies in concat/slice/header assembly.
+- Bumped the driver and `drivers/touchstone-fireplace/packageManifest.json` to `0.1.29` and added release-note-safe changelog entries dated `2026-05-18`.
+
+### Why
+
+- These were the last two medium-priority Touchstone perf items still sitting directly on the Tuya send/receive path. Removing dead state churn and boxed byte-copy loops trims Hubitat overhead without touching AES framing, CRC32, or any reflection-sensitive code.
+
+## Learnings (v0.1.29 — 2026-05-18)
+
+- 2026-05-18 — When retiring a hot-path `state.*` cache in a Hubitat driver, remove the write from the hot path and clear the legacy key once during `initialize()`; otherwise the stale state variable survives upgrades even though nothing reads it anymore.
+- 2026-05-18 — Tuya framing helpers on Hubitat should stay on plain `byte[]` plus primitive `int` math: use `System.arraycopy(...)` for contiguous `concatBytes`/`sliceBytes`/header copies, and reserve manual loops only for comparison scans like `startsWithBytes()`.
