@@ -87,6 +87,65 @@
 
 ---
 
+## Learnings
+
+### Driver Fit Rubric & House Style Distillation (Trinity)
+
+**Date:** 2026-05-18T15:28:26-07:00
+
+**House Style — What This Repo IS:**
+- Single-author maintainable (Mads is one person; every driver must "install and forget")
+- Local-first protocol preference (Daikin LAN > cloud; Touchstone Tuya LAN, not MQTT polling)
+- Parent/child for multi-device cloud accounts (SunStat pattern: one parent auth, many child thermostats)
+- Clean Hubitat ecosystem citizen (event hygiene, state bounds, scheduler discipline, network caution)
+- Hardware-tested only (Mads owns or will buy the device; no "untested but should work")
+- Graceful degradation (cloud breaks? local survives. Firmware missing endpoint? probe once, disable, don't crash)
+
+**Scoring Rubric (Max 100 pts):**
+| Criterion | Pts | Examples |
+|-----------|-----|----------|
+| Local vs. Cloud | 20 | 20: LAN HTTP/JSON (Daikin, Touchstone). 10: Cloud REST (Gemstone, SunStat). 5: Cloud w/ stability issues. 0: Killed API, MQTT-only. |
+| Mads Can Test | 15 | 15: Owns device or <$100. 7: $100–$500. 0: >$500 or unavailable. |
+| User Demand | 15 | 15: 2+ forum threads or abandoned prior driver. 10: 1 thread. 5: Mads's idea. 0: No signal. |
+| Sandbox-Safe | 15 | 15: Pure Groovy + SDK. 10: Needs long-secret pattern. 5: Workaround feasible. 0: Reflection/JNI/MQTT-subscriber/protobuf. |
+| Vendor Stability | 15 | 15: Local API stable >3y (Daikin). 10: Cloud stable (Gemstone). 5: Cloud with breakage history. 0: Killed (MyQ). |
+| Effort to Ship | 10 | 10: Local single-device (<40h). 5: Parent/child or multi-device (40–80h). 0: >80h. |
+| Maintenance | 10 | 10: Local + vendor docs. 5: Cloud or reverse-eng. 0: Killed API, frequent breaks. |
+
+**Thresholds:**
+- 80–100: ✅ Strong Fit (prioritize)
+- 65–79: 🟡 Conditional (check disqualifiers)
+- 50–64: ❌ Weak (defer)
+- <50: 🔴 No Fit
+
+**Hard Disqualifiers (any one = OUT):**
+1. Official killed/hostile API (MyQ post-Oct-2023)
+2. Reflection/JNI/native libs (sandbox-blocked)
+3. Device >$500 or unavailable
+4. Browser OAuth2 redirect (use parent/child instead)
+5. MQTT persistent subscriber
+6. Binary protocol w/o Groovy decoder
+7. Safety-critical without audit logging (garage door, lock, gate)
+8. Secrets >1KB in preferences (use parent/child pattern)
+9. Multi-protocol with undocumented fallback
+10. Uses getClass() or sandbox-restricted Groovy
+
+**Cloud-Service Trigger Patterns:**
+- **Pattern A:** Cloud-polling parent + children (SunStat example). Best for many devices per account (10+ thermostats). Scalable, 5 min latency.
+- **Pattern B:** Cloud-polling single device (Gemstone example). Best for one device per install. Simple, 5 min latency.
+- **Pattern C:** Webhook relay (Maker API + driver endpoint). Event-driven (doorbells, motion). <1 sec latency, requires Maker API setup.
+- **Pattern D:** Hybrid polling + webhook. Mission-critical + high reliability. Overkill unless service has <99% delivery SLA.
+
+**Workflow:**
+1. Cypher generates candidate list (forum demand, protocol research)
+2. Trinity scores each against rubric (hard disqualifiers first)
+3. Mads picks from shortlist ("80+ club" vs. "conditional fits")
+4. Tank implements with Trinity architecture review if needed
+
+**Rubric file:** `.squad/decisions/inbox/trinity-driver-fit-rubric.md`
+
+---
+
 ## Team Learnings — May 18, 2026
 
 ### Daikin BRP069B Complete Endpoint Catalog (Cypher)

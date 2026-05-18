@@ -1,7 +1,7 @@
 # Tank — Driver Developer
 
-**Status:** Reskilled on Daikin v0.1.0–v0.1.7 release arc (2026-05-18).  
-**Next:** v0.1.8 planning and feature expansion for Daikin BRP069B.
+**Status:** Reskilled on Daikin v0.1.0–v0.1.7 release arc (2026-05-18). Driver-opportunity shortlist + fit rubric now available (Cypher + Trinity, 2026-05-18).  
+**Next:** Await Mads's hardware pick from top 5 (Tesla WC Gen 3, Tibber, Enphase, Reolink, Mitsubishi CN105). v0.1.8 planning deferred.
 
 ---
 

@@ -1221,3 +1221,424 @@ Keep `JsonOutput.toJson()` — it's the correct Hubitat idiom and works properly
 
 See `.squad/files/daikin-research/daikin-upstream-prs-assessment.md` for detailed code analysis and citations.
 
+
+---
+
+## cypher-driver-opportunities-survey
+
+---
+author: cypher
+date: 2026-05-18T15:28:26-07:00
+status: recommendation
+subject: Driver opportunity survey + fit rubric (HA-vs-Hubitat gap analysis)
+---
+
+# Driver Opportunities — Cypher Shortlist
+**Author:** Cypher (Integration / Protocol Engineer)  
+**Date:** 2026-05-18  
+**Status:** Recommendation — for Mads's review
+
+---
+
+## 1. Executive Summary
+
+Five candidates stand out clearly above the rest. **Enphase Envoy** is the single strongest Pool A pick: a local-first solar gateway with a plain HTTP REST API, zero maintained Hubitat driver, and extremely high PNW market penetration. **Tesla Wall Connector Gen 3** is the easiest win in the entire list — unauthenticated LAN REST, two endpoints, done. In Pool B, **Tibber** is the correct energy-price trigger: the developer token is free, the GraphQL query is four lines, and the API has never been cloud-killed. Rounding out the top tier: **Reolink** (local doorbell-as-trigger, officially API-sanctioned) and **Mitsubishi mini-split via ESPHome** (ESPHome REST pattern already in our skills, biggest PNW HVAC segment). Everything else is either cloud-fragile, binary-protocol hostile, or already covered by Maker API.
+
+---
+
+## 2. Pool A — Physical Device Candidates
+
+| Brand / Device | HA integration | Hubitat status | Protocol shape | Local? | Demand signal | Fit score | Notes |
+|---|---|---|---|---|---|---|---|
+| **Enphase Envoy / IQ Gateway** | ✅ Active — `ha.io/integrations/enphase_envoy` | ❌ None (stale 2021 community attempt) | `GET /api/v1/production` → JSON; fw7+ adds JWT (12-month cache) | ✅ Full local | Very high — r/Hubitat, Hubitat forum solar threads | **9** | Flag: fw7+ needs one-time cloud token fetch to seed the JWT. After that, purely local. |
+| **Tesla Wall Connector Gen 3** | ✅ Active — `ha.io/integrations/tesla_wall_connector` | ❌ None | `GET /api/1/vitals` → JSON — no auth, unauthenticated LAN | ✅ Full local | High — Hubitat EV threads | **9** | Simplest protocol in this list. Returns state, session_energy_wh, grid_v, vehicle_power_w. Mains-connected, always on LAN. |
+| **Mitsubishi Electric mini-split (ESPHome CN105 bridge)** | ✅ ESPHome — `ha.io/integrations/esphome` | ❌ None | ESPHome REST (climate domain) — pattern in `hubitat-asynchttpget-pattern` skill | ✅ Full local | Very high — PNW heat pump dominant brand | **8** | Requires user to own CN105-to-ESP bridge (esphome-mitsubishi-cn105 firmware). Driver pattern already coded for Touchstone. Flag for feasibility report. |
+| **Reolink camera / doorbell** | ✅ Active (Reolink-authorized) — `ha.io/integrations/reolink` | ❌ None maintained | `POST /api.cgi?cmd=Login` for token; `GET /api.cgi?cmd=GetMdState&token=<t>` for state | ✅ Full local | High — doorbell-as-trigger request in multiple forum threads | **8** | Official Reolink endorsement removes cloud-kill risk. Doorbell motion + visitor press → trigger. |
+| **OpenEVSE** | ✅ Active — `ha.io/integrations/openevse` | ❌ None | `GET /status` → JSON, `POST /rapi` for commands; local HTTP, optional basic auth | ✅ Full local | Medium — DIY EV charger audience | **7** | Popular with maker/hobbyist EV crowd. Smaller total addressable audience than Tesla WC but simpler protocol. |
+| **Rachio sprinkler** | ✅ Active — `ha.io/integrations/rachio` | ⚠️ Stale community driver (2022) | REST `api.rach.io/1/public/…` with `X-Rachio-Auth` key; webhook push for real-time | ☁️ Cloud only | High — major PNW garden brand | **7** | HA warns: webhook push requires Hubitat to be internet-reachable. Smart hose timers use polling only. Cloud-kill risk: **medium** (Rachio is VC-funded, track record OK so far). |
+| **SolarEdge** | ✅ Active — `ha.io/integrations/solaredge` | ⚠️ Stale community driver | Cloud REST `monitoring.solaredge.com/site/{id}/overview` + API key | ☁️ Cloud only | Medium-high — large US install base | **6** | Rate-limited to 300 calls/day. No local API without optional Modbus module. Hubitat can't do Modbus natively. Cloud-kill risk: **low** (vendor wants monitoring). |
+| **Husqvarna Automower** | ✅ Active — `ha.io/integrations/husqvarna_automower` | ❌ None | REST with OAuth2 bearer; free developer portal at developer.husqvarnagroup.cloud | ☁️ Cloud only | Medium — EU robotic mower segment | **6** | Free developer registration confirmed active. OAuth2 complexity manageable via `cognito-from-hubitat` skill pattern. EU/Scandinavian fit for Mads's context. |
+| **Flo by Moen** | ✅ Active — `ha.io/integrations/flo` | ⚠️ Dead community driver (2020) | Cloud REST (unofficial reverse-engineered API — not a published SDK) | ☁️ Cloud only | Medium | **5** | **Cloud-kill risk: HIGH** — API is unofficial, no developer program. Moen can break it like Chamberlain broke MyQ. Do not invest. |
+| **Pentair ScreenLogic (pool)** | ✅ Active — `ha.io/integrations/screenlogic` | ❌ None | Proprietary binary TCP via ScreenLogic gateway (python-screenlogic lib) | ✅ Local | High — pool automation is top requested | **5** | Protocol: binary framing, not HTTP/JSON. Not sandbox-safe for Hubitat without sidecar service. Flag as "requires sidecar" before writing anything. |
+| **Velux KLF 200 (motorized windows/blinds)** | ✅ Active — `ha.io/integrations/velux` | ❌ None | Proprietary binary TCP SLIP frames via KLF 200 gateway | ✅ Local gateway | Low-medium | **4** | Same problem as Pentair — binary protocol kills sandbox. Skip unless a REST proxy appears. |
+| **Flexit Nordic ERV/HRV** | ✅ Active — `ha.io/integrations/flexit_bacnet` | ❌ None | BACnet over UDP/Ethernet | ✅ Local | Low (EU niche) | **3** | BACnet requires UDP library. Hubitat sandbox has no BACnet support. Skip. |
+
+---
+
+## 3. Pool B — Cloud Service / Trigger Candidates
+
+| Service | HA integration | Hubitat status | Protocol shape | Local option? | Demand signal | Fit score | Notes |
+|---|---|---|---|---|---|---|---|
+| **Tibber energy price** | ✅ Active — `ha.io/integrations/tibber` | ❌ None | `POST https://api.tibber.com/v1-beta/gql` + Bearer token; GraphQL 4-line query | ☁️ None (price data is inherently cloud) | High — huge Scandinavia user base, Mads is Danish | **9** | Free developer token. Returns `current { total currency level }`. No pagination, no rate limit documented. Cloud-kill risk: **very low** (it's their growth funnel). |
+| **PurpleAir AQI** | ✅ Active — `ha.io/integrations/purpleair` | ❌ None | `GET https://api.purpleair.com/v1/sensors/{id}?fields=pm2.5_atm,…` with `X-API-Key` | ☁️ API only (sensor data is in cloud; owned sensors can serve local JSON via LAN too) | High — PNW wildfire smoke season driver | **8** | Free tier: 1M points included. pm2.5, AQI, temp, humidity. Owned PurpleAir sensors also expose local JSON at `http://<sensor-ip>/json`. Local path possible. Cloud-kill risk: **low** (commercial API, active community). |
+| **Nord Pool energy price** | ✅ Active — `ha.io/integrations/nordpool` | ❌ None | `GET https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices?market=N2EX_DayAhead&…` — **no auth required** | ☁️ None | Medium — EU spot-price contracts | **7** | Literally no auth. Returns today + tomorrow day-ahead price arrays. EU-only relevance. 15-min MTU transition in progress. Cloud-kill risk: **very low** (market infrastructure). |
+| **Ecowitt weather station (gateway push)** | ✅ Active — `ha.io/integrations/ecowitt` | ❌ None | Device pushes HTTP POST to a configurable URL every N seconds; no polling needed | ✅ Local push (to Hubitat app endpoint) | Medium | **7** | **Shape change:** this is a push receiver, not a polling driver. Needs a Hubitat app with `mappings` endpoint, not a driver. Flag: implement as App, not Driver. Would receive wind/rain/temp/soil/lightning from Ecowitt GW2000+. |
+| **Rachio webhook (Pool B angle)** | — (same as Pool A row) | — | Webhook `POST` to Hubitat Maker API endpoint on zone start/stop | ☁️ Cloud push | Medium | **6** | This is the Maker API pattern — no driver needed. Rachio sends webhook to Hubitat endpoint on zone events. Document in repo README rather than building a driver. |
+| **NOAA weather alerts** | ✅ Active (via `weather` + `template`) | ❌ None | `GET https://api.weather.gov/alerts/active?zone=WAC053` — no auth, REST/GeoJSON | ✅ No auth | Medium — tornado/severe weather alerts for automations | **6** | PNW relevance moderate (storms, not tornadoes). Free, never going away (government). Simple driver: poll every 5 min, fire alert event when active warnings exist. |
+| **Octopus Energy (Agile pricing)** | ✅ Active — `ha.io/integrations/octopus_energy` | ❌ None | `GET https://api.octopus.energy/v1/products/AGILE-22-07-22/electricity-tariffs/E-1R-AGILE-22-07-22-L/standard-unit-rates/` — no auth | ☁️ None (UK only) | Low-Medium — UK users only | **5** | UK electricity market only. Mads is in PNW — low personal fit. Good if there's a UK user base request. Cloud-kill risk: **low**. |
+| **GitHub Actions webhook receiver** | No HA integration | ❌ None | Maker API pattern covers this | N/A | Very low | **2** | Use Maker API + HMAC signature check in a Rule. No driver needed. |
+
+---
+
+## 4. Top 5 Ranked Picks
+
+### #1 — Enphase Envoy / IQ Gateway (Pool A)
+**Why:** Largest addressable audience in the repo after garage doors. PNW has high solar penetration. The local REST endpoint (`/api/v1/production`) requires zero auth on firmware <7 and returns real watts + lifetime Wh in a clean JSON object. Firmware 7+ adds JWT authentication — the JWT is fetched once from Enlighten cloud, valid 12 months, then used purely locally. No community Hubitat driver exists. This is a clean gap with strong demand.  
+**Effort:** M — small driver, but need to handle fw7 JWT token seeding (one cloud call in `initialize()`, stored in `state.token`).  
+**Key risks:** Enphase keeps changing Envoy firmware auth. The fw7 JWT path requires the user to enter Enlighten cloud credentials at install time; those credentials are only used once. Need robust error message if token expires.  
+**Hardware needed:** Enphase IQ Gateway (any Envoy model fw 3.9+). Common — borrow or purchase used.
+
+### #2 — Tesla Wall Connector Gen 3 (Pool A)
+**Why:** The simplest protocol in this entire document. `GET http://<ip>/api/1/vitals` → JSON. No auth. No cloud dependency. Auto-discovery via mDNS (HA does this, but polling by IP is fine for Hubitat). Returns charging state, session energy, grid voltage, vehicle power, handle temp. Hubitat capabilities: `EnergyMeter`, `PowerMeter`, custom state attribute. A single-file driver, under 200 lines.  
+**Effort:** S — one endpoint, one polling loop, no auth, no parent/child needed.  
+**Key risks:** Gen 3 only — Gen 1/2 have no WiFi. If Tesla removes the local API in firmware update, driver breaks (low probability — they've kept it open through 2026).  
+**Hardware needed:** Tesla Wall Connector Gen 3 with WiFi. Very common in PNW tech households.
+
+### #3 — Tibber Energy Price (Pool B)
+**Why:** Tibber is the dominant smart-electricity provider in Scandinavia, growing rapidly in DE/NL. Mads is Danish. The API is explicitly developer-friendly with a free token at `developer.tibber.com/settings/accesstoken`. One GraphQL POST returns current price, tier (`VERY_CHEAP`/`CHEAP`/`NORMAL`/`EXPENSIVE`/`VERY_EXPENSIVE`), and currency. This is the correct primitive for energy-aware automations (charge EV when CHEAP, run laundry when VERY_CHEAP). No maintained Hubitat driver exists.  
+**Effort:** S — single GraphQL query, Bearer token, poll every 60 min (price changes hourly). Parent/child not needed.  
+**Key risks:** Tibber is cloud-only by nature (energy pricing is not local). Tibber could restrict the API, but it's their developer acquisition funnel. Cloud-kill risk: very low.  
+**Hardware needed:** Tibber customer account. Non-customers can still poll public price data for their region with a demo token.
+
+### #4 — Reolink Camera / Doorbell (Pool A)
+**Why:** Reolink officially authorized the HA integration, which means their local HTTP API is sanctioned — not reverse-engineered and at risk of being killed. The CGI API (`/api.cgi?cmd=…`) provides motion detection state, doorbell visitor press events, and camera status over LAN. The doorbell-as-trigger use case is the highest-value automation primitive most users lack. No maintained Hubitat driver exists.  
+**Effort:** M — login to get session token, then poll motion + visitor events; multiple entity types (motion sensor, contact sensor for button); token refresh on 401.  
+**Key risks:** API is proprietary (not ESPHome standard); firmware updates could change endpoint paths. Official endorsement reduces but doesn't eliminate this risk.  
+**Hardware needed:** Any Reolink camera with local API (most 2020+ models). Doorbell models: E1 Outdoor, Video Doorbell WiFi.
+
+### #5 — Mitsubishi Electric Mini-Split via ESPHome CN105 Bridge (Pool A)
+**Why:** Mitsubishi Electric dominates the PNW mini-split market. No official local API exists — but the community-maintained `esphome-mitsubishi-cn105` firmware (GitHub: geoffdavis/esphome-mitsubishi-cn105) exposes the unit via ESPHome REST, which is the exact same pattern we already used for the ratgdo driver and know from our skills. Driver writing cost is low.  
+**Effort:** S for the driver; M total (user must own CN105-to-ESP32 bridge hardware and flash ESPHome firmware — ~$15 parts + 30 min setup).  
+**Key risks:** Requires the user to buy and flash a CN105 bridge; not plug-and-play. Driver is not useful without bridge hardware. Some users may have MelCloud cloud integration instead — that path has cloud-kill risk (Mitsubishi has restricted third-party MelCloud access before).  
+**Hardware needed:** CN105-capable ESP32 board (e.g., M5StickC Plus, ~$15) flashed with esphome-mitsubishi-cn105. Driver development does NOT require a real Mitsubishi unit if using ESPHome simulator.
+
+---
+
+## 5. Honorable Mentions
+
+- **OpenEVSE** — Local HTTP REST, solid API, but audience is narrow (DIY EV charger builders, not mainstream).
+- **Husqvarna Automower** — Free OAuth2 developer portal, EU/Scandinavian fit, but OAuth2 flow in Hubitat is non-trivial and audience is garden enthusiasts.
+- **Nord Pool energy price** — Complements Tibber; no-auth REST, EU spot prices. Low effort but EU-only. Build after Tibber.
+- **NOAA weather alerts** — Useful PNW trigger (atmospheric river, freeze warning). No auth. But narrow automation use case — could be done in 1 hour.
+- **Rachio sprinkler** — High PNW demand, but the existing stale driver is close to functional, and Rachio's webhook push model requires internet-accessible Hubitat. Lower priority than local-first picks.
+- **SolarEdge** — Higher cloud-kill risk than Enphase, rate-limited 300 calls/day. Do Enphase first.
+
+---
+
+## 6. Anti-List — Do Not Pursue
+
+| Candidate | Reason |
+|---|---|
+| **Ring doorbell** | Cloud-only. Amazon/Ring has a hostile track record with third-party API access. Cat-and-mouse breaking pattern. Apply `cloud-killed-api-evaluation` skill: multiple "broken again" reports, no developer program for individuals. |
+| **Wyze devices** | Cloud-only, repeatedly broke unauthorized API access. No local API. Pattern identical to post-2023 MyQ. Do not write a driver. |
+| **Nest / Google Home** | Cloud-only. Google requires Works with Google Home approval (commercial process). Individual developers cannot participate. Dead end. |
+| **Arlo cameras** | Cloud-only. Arlo broke third-party API access in 2022 and has maintained restrictions since. No local API. |
+| **Flo by Moen (water shutoff)** | Unofficial reverse-engineered API — no developer program. Moen can break it without notice (MyQ precedent). The water shutoff value is HIGH but the API risk is unacceptable without a hardware alternative. |
+| **Velux KLF 200** | Local, but binary SLIP-framed TCP protocol — no REST abstraction. Not Hubitat-sandbox-safe without a sidecar HTTP proxy. |
+| **Flexit Nordic ERV** | BACnet over UDP — not natively supported in Hubitat sandbox. No REST path available. |
+| **Pentair ScreenLogic** | Local but binary TCP protocol (python-screenlogic lib). Not Hubitat-sandbox-safe without a sidecar. Flag to revisit if a REST proxy firmware appears. |
+| **MelCloud (Mitsubishi cloud)** | Mitsubishi has restricted MelCloud third-party access before. Use the local ESPHome CN105 path instead. |
+
+---
+
+## 7. Sources
+
+| Candidate | URL | Retrieved |
+|---|---|---|
+| Enphase Envoy HA integration | https://www.home-assistant.io/integrations/enphase_envoy/ | 2026-05-18 |
+| Tesla Wall Connector HA integration | https://www.home-assistant.io/integrations/tesla_wall_connector/ | 2026-05-18 |
+| ESPHome HA integration | https://www.home-assistant.io/integrations/esphome/ | 2026-05-18 |
+| Reolink HA integration | https://www.home-assistant.io/integrations/reolink/ | 2026-05-18 |
+| Rachio HA integration | https://www.home-assistant.io/integrations/rachio/ | 2026-05-18 |
+| Tibber HA integration | https://www.home-assistant.io/integrations/tibber/ | 2026-05-18 |
+| PurpleAir HA integration | https://www.home-assistant.io/integrations/purpleair/ | 2026-05-18 |
+| Nord Pool HA integration | https://www.home-assistant.io/integrations/nordpool/ | 2026-05-18 |
+| Ecowitt HA integration | https://www.home-assistant.io/integrations/ecowitt/ | 2026-05-18 |
+| SolarEdge HA integration | https://www.home-assistant.io/integrations/solaredge/ | 2026-05-18 |
+| Husqvarna Automower HA integration | https://www.home-assistant.io/integrations/husqvarna_automower/ | 2026-05-18 |
+| Flo by Moen HA integration | https://www.home-assistant.io/integrations/flo/ | 2026-05-18 |
+| Pentair ScreenLogic HA integration | https://www.home-assistant.io/integrations/screenlogic/ | 2026-05-18 |
+| Velux HA integration | https://www.home-assistant.io/integrations/velux/ | 2026-05-18 |
+| OpenEVSE HA integration | https://www.home-assistant.io/integrations/openevse/ | 2026-05-18 |
+| esphome-mitsubishi-cn105 (GitHub) | https://github.com/geoffdavis/esphome-mitsubishi-cn105 | 2026-05-18 |
+| Tibber developer portal | https://developer.tibber.com/settings/accesstoken | 2026-05-18 |
+| Husqvarna developer portal | https://developer.husqvarnagroup.cloud | 2026-05-18 |
+| cloud-killed-api-evaluation skill | `.squad/skills/cloud-killed-api-evaluation/SKILL.md` | 2026-05-18 |
+
+---
+
+*Deep feasibility reports flagged: Enphase fw7 JWT auth, Mitsubishi CN105 ESPHome entity shape. Request follow-up from Cypher if pursuing either.*
+
+
+---
+
+## trinity-driver-fit-rubric
+
+---
+author: trinity
+date: 2026-05-18T15:28:26-07:00
+status: standing-team-policy
+subject: Driver-candidate fit rubric — weighted scoring system with hard disqualifiers
+---
+
+# Driver Fit Rubric for hubitat-drivers
+
+**Date:** 2026-05-18T15:28:26-07:00  
+**Author:** Trinity (Lead/Architect)  
+**Audience:** Mads (owner), Cypher (for candidate list), Tank (for implementation)  
+**Purpose:** Filter incoming driver candidates — separates "good fit for repo" from "interesting but not for us"
+
+---
+
+## Part 1: House Style — What This Repo IS
+
+**Core thesis:** Single-author-maintainable drivers for home automation, strongly preferring local-first protocols. Every driver must be reliable enough to "install and forget." Users trust Hubitat ecosystem conventions.
+
+### Device Classes We Embrace
+
+- **Thermostats & HVAC** — Daikin (local LAN), SunStat (cloud parent/child pattern)
+- **Lighting & Effects** — Gemstone (cloud REST, OAuth2 parent/child pattern, favorites-first UX)
+- **Fireplaces & Accessories** — Touchstone (local Tuya TCP socket, persistent connection, real-time push)
+- **Actuators & Binary Control** — On/off devices with optional cloud fallback
+
+### Non-Negotiable Patterns
+
+1. **Local-first preference** — If a device offers both local LAN control and cloud, implement local. Cloud is second choice.
+2. **Single protocol per driver** — Daikin = HTTP, Touchstone = Tuya TCP, not "HTTP with fallback to cloud."
+3. **Parent/child for multi-device clouds** — SunStat parent (auth + polling) + child thermostats. Eliminates per-device setup.
+4. **Clean Hubitat ecosystem citizen** — All event + state + scheduler + network behavior pass 7-point audit (see `.squad/skills/hubitat-driver-citizen-checklist`).
+5. **Mads owns or will buy the device** — All drivers must be hardware-tested by the author. No "untested but should work" drivers.
+6. **Graceful degradation** — Cloud breaks? Local survives. Endpoint missing on some firmware? Driver probes once, then disables, doesn't crash.
+
+### What We Don't Do
+
+- Multi-protocol or complex fallback chains ("try MQTT, fall back to HTTP, then cloud")
+- "Works great with a paid gateway" integrations
+- Reflection, JNI, or advanced Groovy features blocked by sandbox
+- Large external dependencies bundled in driver
+- Safety-critical devices without audit-trail logging at `log.info`
+
+---
+
+## Part 2: Scoring Rubric — Weighted Criteria
+
+### Scoring Scale
+
+- **✅ YES (full points)** — Criterion clearly met
+- **🟡 PARTIAL (50% points)** — Criterion met with caveats
+- **❌ NO (0 points)** — Criterion not met
+
+### Criteria (Max 100 pts)
+
+| Criterion | Max Pts | Details |
+|-----------|---------|---------|
+| **Local vs. Cloud Protocol** | 20 | **20 pts:** Local LAN HTTP/JSON, Tuya, or similar (Daikin, Touchstone example). **10 pts:** Cloud REST with public stable API (Gemstone, SunStat example). **5 pts:** Cloud API with known stability issues or auth workarounds required. **0 pts:** Cloud-only killed API, OAuth2 browser flow required, MQTT-only. |
+| **Mads Can Test** | 15 | **15 pts:** Mads owns the device or can buy for <$100. **7 pts:** Device costs $100–$500 but fills a major gap. **0 pts:** >$500 or requires unavailable hardware. |
+| **User Demand Signal** | 15 | **15 pts:** 2+ community forum threads requesting, or abandoned prior driver showing demand. **10 pts:** 1 forum thread or moderate workaround adoption. **5 pts:** Mads noticed it, no community proof yet. **0 pts:** Mads's idea alone, no external signal. |
+| **Sandbox-Safe** | 15 | **15 pts:** Pure Groovy + Hubitat SDK, no reflection/JNI, secrets fit in state field. **10 pts:** Secrets need long-secret pattern (parent/child token store, documented). **5 pts:** Requires custom workaround but feasible. **0 pts:** Requires reflection, JNI, MQTT persistent subscriber, or binary protobuf decoding. |
+| **Vendor API Stability** | 15 | **15 pts:** Local vendor API stable >3 years (Daikin BRP069B, Tuya v3.3), no known breaking changes, reverse-engineered is OK if community-stable. **10 pts:** Cloud API stable but proprietary (Gemstone, Watts). **5 pts:** Cloud API with history of breakage or undocumented changes. **0 pts:** Known dead/killed API (MyQ post-Oct-2023), frequent breaking changes. |
+| **Effort to Ship** | 10 | **10 pts:** Straightforward single-device local control (<40h estimate). **5 pts:** Parent/child cloud or multi-device local (40–80h estimate). **0 pts:** >80h or requires new architectural pattern. |
+| **Maintenance Burden** | 10 | **10 pts:** Local protocol, vendor publishes API docs, stable firmware. **5 pts:** Cloud API or community-reverse-engineered, needs monitoring for changes. **0 pts:** Killed API, frequent vendor updates, closed protocol. |
+
+**Total: 100 points**
+
+### Thresholds
+
+| Score | Decision |
+|-------|----------|
+| **80–100** | ✅ **Strong Fit** — Prioritize. Likely belongs in repo. |
+| **65–79** | 🟡 **Conditional Fit** — Check hard disqualifiers; decide based on strategic value. |
+| **50–64** | ❌ **Weak Fit** — Interesting but not urgent. Defer until ecosystem matures. |
+| **<50** | 🔴 **No Fit** — Recommend not pursuing unless user demand surges. |
+
+---
+
+## Part 3: Hard Disqualifiers
+
+**Any candidate hitting ANY of these is OUT, regardless of score:**
+
+1. **Cloud API is officially dead or hostile to third-party access** (MyQ post-Oct-2023, any vendor issuing C&D to open-source projects)
+2. **Requires reflection, JNI, or external native libraries** (nothing can bypass Hubitat sandbox)
+3. **Device costs >$500 or is hardware-unavailable** (can't test = can't maintain)
+4. **Requires browser OAuth2 redirect** (Hubitat driver model doesn't support browser windows; use parent/child token pattern instead)
+5. **Persistent MQTT subscriber** (Hubitat Groovy sandboxed, can't hold open MQTT connection; polling or local socket only)
+6. **Binary protocol with no Groovy decoder** (protobuf, CBOR, proprietary binary; JSON/HTTP are OK)
+7. **Safety-critical device without audit logging at log.info** (garage door, lock, gate — no debug-only logging for these)
+8. **Requires >1KB secrets in driver preferences** (won't fit; use parent/child long-secret pattern instead)
+9. **Multi-protocol with undocumented fallback logic** (too complex to maintain; one protocol per driver)
+10. **Uses getClass(), reflection, or sandbox-restricted Groovy** (throws SecurityException at runtime)
+
+---
+
+## Part 4: Cloud-Service Trigger Patterns
+
+### Context
+
+Most hub integrations that poll a cloud service fit one of these patterns. Understand the shape so Cypher can recognize candidates and Trinity can pick the right one.
+
+### Pattern A: Cloud-Polling Parent + Child Devices
+
+**Shape:** Parent device polls cloud API on schedule. Children emit events when parent updates state.
+
+- **Example:** SunStat (parent polls Watts API every 5 min → children emit thermostat state)
+- **Code reuse:** `.squad/skills/hubitat-parent-child-cloud-driver` — Parent holds tokens, manages auth lifecycle, children are simple state mirrors
+- **Hubitat pattern:** `parent.parseDeviceState(body)` → child.emitIfChanged
+- **Pros:** Scales to many devices (10+ thermostats on one account). Centralizes credentials. User configures once per account.
+- **Cons:** Poll latency (best case ~5 min). No real-time push from cloud.
+- **Testing:** Mads needs the cloud account (email/password, refresh token, etc.). Some services (Watts) require API key extraction from Home Depot app.
+- **Recommendation:** Pick this if the device class naturally has many units per account (HVAC, lights, locks).
+
+### Pattern B: Cloud-Polling Single-Device (No Parent/Child)
+
+**Shape:** Driver polls cloud API directly, emits attributes on device.
+
+- **Example:** Gemstone (driver polls Gemstone cloud for light state every 5 min)
+- **Code reuse:** `.squad/skills/hubitat-cloud-oauth-app` — Handle OAuth2 token refresh, asynchttpGet, callback error guards
+- **Hubitat pattern:** `on()` → `asynchttpGet` → callback → `emitIfChanged`
+- **Pros:** Simple architecture. One device = one virtual Hubitat device.
+- **Cons:** Not scalable if user has multiple controllers (must create one Hubitat device per zone, authenticate independently).
+- **Testing:** Mads needs the cloud account. Multi-zone installations need multiple Gemstone account credentials.
+- **Recommendation:** Pick this only if device class is single-unit per installation (one set of LED lights, not 10 thermostats).
+
+### Pattern C: Webhook Relay (Cloud → Maker API → Driver Event)
+
+**Shape:** Cloud sends a POST to Hubitat's Maker API. Maker API routes webhook to a relay endpoint handler in the driver. Driver parses and emits event.
+
+- **Example:** Not yet implemented in this repo. Hypothetical doorbell: cloud service POSTs "doorbell pressed" → Maker API `/apps/api/doorbell/press` → driver parses → emits `contact: open`
+- **Code reuse:** Not yet documented (would be new pattern for Trinity to define after first use)
+- **Hubitat pattern:** Maker API webhook → custom app relay → driver `parse(json)` → `emitIfChanged`
+- **Pros:** Near-instant cloud → Hubitat event (no polling latency). Works for event-driven services (doorbells, motion sensors).
+- **Cons:** Requires user to enable Maker API. Requires relay app or integration layer. Cloud must send HTTP POST (not all services do). Hubitat public IP exposure risk if not behind firewall.
+- **Testing:** Simpler (no account sign-up needed if cloud service has test webhook sender). But requires routing configuration.
+- **Recommendation:** Pick this for event-driven services (doorbell, motion) where real-time push is critical. Avoid for state-polling (thermostats, locks).
+
+### Pattern D: Hybrid Polling + Webhook
+
+**Shape:** Cloud service primarily sends real-time webhooks. Driver also polls as a safety-net heartbeat (in case webhook is missed).
+
+- **Example:** Not yet implemented. Similar to webhook relay, but with fallback polling every 30 min.
+- **Code reuse:** Combine Pattern C + Pattern B patterns
+- **Pros:** Near-instant responsiveness (webhooks). Resilient to webhook miss (polling fallback).
+- **Cons:** Complex code. Two separate event paths to debug. Higher cloud load.
+- **Recommendation:** Use only if a service actively sends webhooks AND has unreliable delivery (e.g., <99% delivery SLA). Otherwise stick with one pattern.
+
+### Cloud-Service Trigger Pattern Summary Table
+
+| Pattern | Best For | Latency | Complexity | Testing | Example |
+|---------|----------|---------|-----------|---------|---------|
+| **A: Cloud-Polling Parent/Child** | Many devices per account | 5 min best case | Moderate | Needs cloud account + multi-device setup | SunStat |
+| **B: Cloud-Polling Single** | One device per install | 5 min best case | Low | Needs cloud account | Gemstone |
+| **C: Webhook Relay** | Event-driven (doorbell, motion) | <1 sec | Moderate | Needs Maker API + test webhook sender | Hypothetical doorbell |
+| **D: Hybrid Polling + Webhook** | Mission-critical events | <1 sec (webhook), 30 min (poll) | High | Needs both webhook + account setup | Not yet used |
+
+### DO NOT: Common Antipatterns
+
+- **"Poll every 30 seconds"** — Kills cloud API quota, causes rate-limit blocks. Min 5 min unless service guarantees support.
+- **"Webhook + fake auth in webhook body"** — Webhook payloads should NEVER include secrets. Signature verification only.
+- **"Try polling, fall back to webhook"** — Pick ONE pattern. Dual-path debugging is a nightmare.
+- **"Relay webhook to Rule Machine custom action"** — Defeats the point of real-time. Keep it in the driver.
+
+---
+
+## Part 5: Recommended Workflow
+
+### Step 1: Cypher Surveys & Generates Candidate List
+
+- Gathers forum threads, GitHub issues, Home Assistant integrations
+- Produces a **candidate sheet** (name, device class, protocol, effort estimate, user demand signal)
+- **Trinity step not involved** — let Cypher work
+
+### Step 2: Trinity Scores Each Candidate
+
+1. **Print the rubric** (this document)
+2. **For each candidate:**
+   - Check hard disqualifiers first (any YES = OUT)
+   - Score each of the 7 weighted criteria
+   - Sum points
+   - Look up threshold
+   - Note "conditional fit" caveats
+3. **Output:** Ranked shortlist with scores + reasoning (1–2 lines per candidate)
+
+### Step 3: Mads Makes Final Picks
+
+- Trinity presents: "Top 3 are Daikin-class thermostats (90+ pts), Tuya WiFi lights (78 pts), and a garage door opener (42 pts, hard disqualifiers apply)"
+- Mads decides: "Ship the 90+ club. I'll buy a WiFi light to test. Garage door is too risky."
+- Mads allocates budget & timelines
+
+### Step 4: Tank Implements
+
+- Trinity docs the chosen candidates in `.squad/decisions.md` with rubric scores
+- Tank scopes effort + priority
+- Tank ships in iterations (v0.1.0 release per candidate, architecture review by Trinity if needed)
+
+---
+
+## Part 6: Examples (Hypothetical Scoring)
+
+### Example 1: Ecobee Thermostat (Cloud REST, OAuth2 parent/child)
+
+- Local protocol: ❌ NO (0) — cloud-only, no local API
+- Mads can test: ❌ NO (0) — would need to buy; not owned
+- User demand: 🟡 PARTIAL (10) — 1 forum thread, lots of Ecobee owners
+- Sandbox-safe: 🟡 PARTIAL (10) — OAuth2 token refresh OK (parent/child pattern) but no reflection needed
+- Vendor stability: ✅ YES (15) — Ecobee API stable, documented
+- Effort to ship: 🟡 PARTIAL (5) — Parent/child + OAuth2 ≈ 60h estimate
+- Maintenance burden: 🟡 PARTIAL (5) — Cloud API, Ecobee makes breaking changes periodically
+
+**Total: 45 pts (🔴 NO FIT)** — Would be 50–60 range if Mads owned one, but current state is below threshold.
+
+### Example 2: Aqara Zigbee Thermostats (Local Zigbee via Hub Mesh)
+
+- Local protocol: ✅ YES (20) — Zigbee is local LAN
+- Mads can test: 🟡 PARTIAL (7) — Can buy a unit but would be $80–$150
+- User demand: ❌ NO (0) — No community forum signal yet
+- Sandbox-safe: ✅ YES (15) — Pure Groovy, no special features
+- Vendor stability: ✅ YES (15) — Zigbee protocol stable for 10+ years
+- Effort to ship: ✅ YES (10) — Straightforward local control
+- Maintenance burden: ✅ YES (10) — Local protocol = no maintenance risk
+
+**Total: 77 pts (🟡 CONDITIONAL FIT)** — Good candidate IF Mads wants to expand into Zigbee. Check with him on prioritization.
+
+### Example 3: DIY ratgdo Garage Door Opener (Local ESPHome HTTP)
+
+- Local protocol: ✅ YES (20) — Local HTTP REST on ESPHome firmware
+- Mads can test: 🟡 PARTIAL (7) — Hardware ~$50, but requires garage door (not all homes have)
+- User demand: 🟡 PARTIAL (10) — 1–2 forum threads; garage door opener is common request
+- Sandbox-safe: ✅ YES (15) — HTTP + JSON, no special features
+- Vendor stability: ✅ YES (15) — ratgdo firmware is well-maintained, open source
+- Effort to ship: ✅ YES (10) — Straightforward local control (similar to Daikin)
+- Maintenance burden: ✅ YES (10) — Local protocol, stable firmware
+
+**Total: 87 pts (✅ STRONG FIT)** — BUT **HARD DISQUALIFIER APPLIES:** "Safety-critical device without audit logging." Garage door must log all commands at `log.info`. If Trinity adds that requirement, score is still valid.
+
+**Revised recommendation:** 🟡 CONDITIONAL FIT — Assign to Tank only if Mads agrees to add audit logging requirement to spec.
+
+---
+
+## Appendix: Audit Checklist (for Trinity's Review)
+
+When Trinity scores a candidate, verify:
+
+- [ ] Hard disqualifiers checked (use Part 3 checklist above)
+- [ ] Cloud vs. local protocol correctly identified
+- [ ] Mads ownership or budget availability confirmed
+- [ ] User demand signal sourced (forum link, issue #, etc.)
+- [ ] Sandbox constraints researched (APIs, auth, secrets)
+- [ ] Vendor API docs obtained (if public) or reverse-engineering verified
+- [ ] Effort estimate cross-checked with similar drivers (e.g., "similar to Daikin" = ~40h)
+- [ ] Maintenance risk flagged if API historically breaks (cloud-only candidates)
+
+---
+
+## References
+
+- **Existing drivers:** `drivers/daikin-wifi` (local HTTP), `drivers/gemstone-lights` (cloud OAuth), `drivers/sunstat-thermostat` (cloud parent/child), `drivers/touchstone-fireplace` (local Tuya socket)
+- **Skills & patterns:** `.squad/skills/hubitat-parent-child-cloud-driver`, `.squad/skills/hubitat-cloud-oauth-app`, `.squad/skills/hubitat-driver-citizen-checklist`, `.squad/skills/hubitat-sandbox-pitfalls`
+- **MyQ research:** `.squad/decisions.md` — Cypher's garage door feasibility report (demonstrates hard disqualifier reasoning)
+- **Daikin case study:** `.squad/decisions.md` — Daikin BRP069B endpoint audit, endpoint graceful degradation pattern
+
+---
+
+**Last updated:** 2026-05-18T15:28:26-07:00  
+**Next review:** Post-Cypher-candidate-list (iterate on thresholds if needed)
+

@@ -6,6 +6,33 @@
 
 ## Learnings
 
+### Driver Opportunity Shortlist (2026-05-18)
+
+**Full report:** `.squad/decisions/inbox/cypher-driver-opportunities-2026.md`
+
+**Top 5 picks (ranked):**
+
+1. **Enphase Envoy / IQ Gateway (Pool A)** — Local HTTP REST (`/api/v1/production`). Fw7+ adds JWT (12-month cache, seeded once from Enlighten cloud). Largest PNW market gap. No Hubitat driver exists. Effort: M.
+2. **Tesla Wall Connector Gen 3 (Pool A)** — `GET /api/1/vitals`, no auth, unauthenticated LAN. Simplest protocol in the list. Returns charging state + session energy + power. Effort: S.
+3. **Tibber energy price (Pool B)** — GraphQL POST to `api.tibber.com/v1-beta/gql` with Bearer token (free, permanent). Returns `current { total level }`. Hourly poll. Cloud-kill risk: very low (it's their growth funnel). Effort: S.
+4. **Reolink camera/doorbell (Pool A)** — Local HTTP CGI API (`/api.cgi`). Officially Reolink-sanctioned (per HA integration page). Doorbell-as-trigger value. Effort: M (token refresh + multiple entities).
+5. **Mitsubishi mini-split via ESPHome CN105 (Pool A)** — ESPHome REST (climate domain), same pattern as ratgdo. Requires user to own CN105-to-ESP32 bridge hardware. PNW heat pump dominant brand. Effort: S (driver) / M (user setup).
+
+**Cloud-kill risk summaries applied:**
+- Enphase: Low (vendor wants monitoring data shared)
+- Tesla WC: None (local, no cloud dependency)
+- Tibber: Very low (developer API is their growth funnel)
+- Reolink: Low (officially authorized by Reolink)
+- Flo by Moen: HIGH — unofficial API, no developer program → Anti-list
+- Ring: Anti-list (hostile, cat-and-mouse)
+- Wyze: Anti-list (hostile, repeated breaks)
+
+**Anti-list confirmed:** Ring, Wyze, Nest, Arlo, Flo by Moen, Velux KLF 200 (binary TCP), Pentair ScreenLogic (binary TCP), Flexit Nordic (BACnet UDP), MelCloud.
+
+**Flagged for deeper feasibility:** Enphase fw7 JWT token handling; Mitsubishi CN105 ESPHome entity shape mapping.
+
+---
+
 ### MyQ / ratgdo Feasibility Research (2026-05-18)
 
 **Full memo:** `.squad/decisions/inbox/cypher-myq-feasibility.md`
