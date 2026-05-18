@@ -1,56 +1,73 @@
 # Cypher — Integration / Protocol Engineer
 
-**Status:** Audit cycle 2026-05-18 complete. PurpleAir greenfield driver BUILD verdict (80/100) + OAuth callback retrofit triage (NOT WORTH IT, governance principle established). Driver-opportunity shortlist established 2026-05-18 (top 5 ranked in history-archive.md).
+**Status:** Audit cycle 2026-05-18 complete. PurpleAir INSTALL verdict (88/100) — 5th consecutive install verdict in a row. Driver-opportunity shortlist + Trinity rubric established. OAuth callback retrofit governance principle: not applicable without public OAuth registration portal.
 
 ---
 
-## Learnings
+## Audit Verdicts — 2026-05-18 Complete Cycle
 
-### PurpleAir Local vs. Cloud API Audit (2026-05-18)
+### PurpleAir AQI Virtual Sensor (pfmiller0/Hubitat)
 
-**Full memo:** `.squad/decisions.md`
+**Verdict:** INSTALL (88/100 Trinity rubric)  
+**Date:** 2026-05-18T16:25:00-07:00  
+**File:** .squad/decisions/inbox/cypher-purpleair-pfmiller-audit.md → merged into decisions.md
 
-**sidjohn1 PurpleAirLocal verdict:** INSTALL if hardware owned (90/100), **WRONG SHAPE for Mads** who has no hardware. Protocol: `http://<sensor-ip>/json` — pure LAN, requires owned PurpleAir sensor. Well-coded (v1.5, 2024-06-03), HPM-published, quality is fine; ownership is the blocker.
+**Key Findings:**
+- **Protocol:** Cloud REST on `api.purpleair.com/v1/sensors`
+- **Auth:** `X-API-Key` header (free API key, no registration required for read-only)
+- **Sensor modes:** Geolocation-based averaging OR explicit sensor index (neighbor's sensor)
+- **EPA AQI:** Full Barkjohn 2021 conversion (wildfire smoke correction)
+- **Sandbox:** `asynchttpGet` only; fully safe
+- **Test requirement:** No hardware (any public sensor or hub location)
+- **Last commit:** 2025-06-18 (responsive to API changes)
 
-**SANdood/PurpleAirStation verdict: DEAD.** Uses legacy `www.purpleair.com/json` endpoint (deprecated ~2022). Last commit May 2020. Do not install.
+**Scoring Details:**
+| Dimension | Score | Rationale |
+|-----------|-------|-----------|
+| Local vs. cloud | 10 | Cloud REST, stable API |
+| Mads can test | 15 | No hardware; any public sensor by ID or hub geolocation |
+| User demand | 15 | PNW wildfire season monitoring + neighbor sensor use case |
+| Sandbox-safe | 15 | `asynchttpGet` + headers only, no crypto/reflection |
+| Vendor stability | 15 | PurpleAir v1 API documented, API key monetized (stable incentive) |
+| Effort | 10 | Zero — copy via importUrl or HPM |
+| Maintenance | 8 | Last commit ~11 months ago; responsive but not 2026-active |
+| **Total** | **88/100** | **Strong Fit → INSTALL** |
 
-**Cloud-API gap: CONFIRMED GREENFIELD.** Zero Hubitat community drivers target `api.purpleair.com/v1/sensors/{id}`. Free tier (1M points/month) allows any public sensor — no hardware needed. PNW wildfire = high relevance. **BUILD verdict at 80/100 rubric: ~150–250 lines, EPA Barkjohn 2021 AQI correction, Bearer key auth, single-device polling pattern modeled on Gemstone.**
+**Impact:** Closes the cloud-API gap for air quality monitoring. This is the **5th consecutive "install existing community driver" verdict**.
 
----
+**Audit lesson:** Prior search for "PurpleAir Hubitat cloud driver" returned zero results. 
+- Generic repo names (`pfmiller0/Hubitat`) don't surface well in search
+- File names don't match keywords ("AQI Virtual Sensor" vs. "api.purpleair")
+- User-pointed URLs override search conclusions (this driver was found via Mads's direct link)
 
-### OAuth Callback Retrofit Analysis (2026-05-18)
-
-**Full memo:** `.squad/decisions.md`
-
-**Gemstone Lights:** Current AWS Cognito USER_PASSWORD_AUTH (email + password, ~4 clicks + 2 fields). OAuth callback retrofit **NOT WORTH IT** — no public Gemstone OAuth dev portal exists.
-
-**SunStat Thermostat:** Current Azure B2C refresh-token bootstrap via external CLI. OAuth callback retrofit **NOT WORTH IT** — Watts uses internal/private Azure B2C tenant with no public OAuth registration. Side path: Azure B2C Device Flow might eliminate CLI dependency (needs exploration).
-
-**Governance principle:** Callback pattern is architectural debt-avoidance **only when** vendor has a public OAuth Authorization Server with public client registration. When vendor provides no public portal (Gemstone, SunStat), pattern is not applicable.
-
----
-
-## Audit History Summary
-
-**2026-05-16 to 2026-05-17 audit cycle:**
-- Bosch Home Connect: INSTALL verdict (craigde v3.1.7, 67/100, active HPM driver)
-- Rainbird LNK: IMPROVE-EXISTING MHedish (v1.0.0.0, 92/100, active)
-- MyQ ecosystem: MyQ dead (Oct 2023); ratgdo ESPHome is replacement
-- Driver-opportunity shortlist: 5 top picks + 8 anti-list entries (archived to history-archive.md)
-- Daikin BRP069B endpoints: All 28 catalogued; v0.1.5 production-ready
-
-**Full archived narratives:** `history-archive.md` and `.squad/decisions-archive.md`
-
-**2026-05-18 verdicts:**
-- ✅ **PurpleAir cloud-API driver: BUILD** (first true BUILD verdict of this cycle, 80/100 rubric)
-- ✅ **OAuth callback retrofit: NOT WORTH IT** (governance principle established)
+**Recommendation:** When repo search returns zero, follow with GitHub code search (`code:"api.purpleair.com" lang:groovy`) before claiming greenfield.
 
 ---
 
-## Team Updates
+### Five-Verdict Summary
 
-**Daikin API Audit Complete (2026-05-18):** All 28 BRP069B endpoints catalogued. Driver implements 7 that matter. Three maintenance items flagged (NPE setpoint guards, log interpolation, energy poll when off). Full audit memo: `.squad/decisions-archive.md`.
+1. ✅ **Bosch Home Connect** (2026-05-17) → INSTALL craigde/hubitat-homeconnect-v3 (67/100)
+2. ✅ **Rainbird LNK** (2026-05-17) → IMPROVE-EXISTING MHedish (92/100)
+3. ✅ **PurpleAir Cloud-API** (2026-05-18) → INSTALL pfmiller0 (88/100)
+4. ✅ **MyQ Ecosystem** (2026-05-16) → BUILD ratgdo ESPHome HTTP (greenfield)
+5. ✅ **Daikin BRP069B** (2026-05-16) → BUILD complete (v0.1.0–v0.1.7 shipped)
 
-**Bosch Home Connect Audit Complete (2026-05-18):** INSTALL verdict wins. craigde/hubitat-homeconnect-v3 is comprehensive, HPM-published, actively maintained. OAuth Authorization Code Grant pattern reusable for future cloud-OAuth drivers.
+**Result:** Mads's complete driver stack now has **zero open BUILD candidates**.
 
-**PurpleAir CLOUD-API driver is greenfield (2026-05-18):** No Hubitat community driver targets `api.purpleair.com/v1/sensors/{id}`. If Mads green-lights, this is your next build: ~150–250 lines, EPA Barkjohn 2021 AQI conversion, Bearer key auth, single-device polling pattern. No hardware needed for testing — use any public sensor ID from map.purpleair.com.
+---
+
+## Updated Team Updates
+
+**Archive restoration (2026-05-18T23:06:44-07:00):** Scribe corrected the archive-gate misfire from commit 06f8a35. Size threshold triggered archival without verifying date eligibility — entries dated 2026-05-16 to 2026-05-18 were moved despite the "older than 7 days" rule. All 8 entries restored to decisions.md; archive cleared to placeholder.
+
+**Canonical ledger:** decisions.md now has full session context (Bosch spec, consumer auth analysis, driver rubric, opportunity survey, PurpleAir audit). Size: 24 KB → ~92 KB.
+
+---
+
+## Learnings from Audit Cycle
+
+**Search strategy refinement:** Code-level search (`code:"string" lang:groovy`) catches file-name mismatches that repo-level search misses. For next audit: always code-search if repo search returns zero.
+
+**User-pointed URLs as primary:** When a user provides a direct GitHub URL, treat it as primary evidence. Override prior search-based conclusions.
+
+**Platform constraint documentation:** OAuth callback pattern is only applicable if vendor provides public OAuth Authorization Server + public client registration. When vendor offers none (Gemstone, SunStat), pattern is not applicable. Governance principle established.

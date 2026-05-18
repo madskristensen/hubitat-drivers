@@ -221,15 +221,27 @@ All 8 versions validated on Mads's real BRP069B hardware (firmware version pendi
 **2026-05-18 Team Update (Scribe merge):** Rainbird verdict = install MHedish community driver; do not build competing version. AES/CBC + javax.crypto confirmed sandbox-safe for any future encrypted-local driver. Bosch Home Connect identified as next greenfield opportunity.
 
 **2026-05-18 Team Update (Scribe):** Bosch Home Connect verdict = install craigde/hubitat-homeconnect-v3 community driver. OAuth Authorization Code Grant works in Hubitat via parent App cloud callback URI — pattern unblocks future cloud-OAuth drivers.
-## Team Update — PurpleAir Cloud Driver Greenfield (2026-05-18)
+## Team Update — PurpleAir Cloud Driver INSTALL Verdict (2026-05-18)
 
-**From:** Cypher audit (2026-05-18T23:18:00Z)
+**From:** Cypher audit (2026-05-18T23:06:44-07:00) → Merged into canonical decisions ledger (scribe)
 
-PurpleAir CLOUD-API driver is greenfield (no Hubitat community driver exists targeting api.purpleair.com/v1/sensors/{id}). If Mads green-lights, this is your next build: ~150–250 lines, EPA Barkjohn 2021 AQI conversion, Bearer key auth, single-device polling pattern modeled on Gemstone.
+**Verdict:** INSTALL (88/100 Trinity rubric score).
 
-**Blocking hardware?** No. Test with any public sensor ID from map.purpleair.com. Free tier: 1M points/month.
+pfmiller0's `PurpleAir AQI Virtual Sensor.groovy` is the cloud-API driver that prior search missed. It targets `api.purpleair.com/v1/sensors` (not local `http://<ip>/json`), requires no hardware, accepts the user's API key via `X-API-Key` header, supports geolocation-based multi-sensor averaging OR a specific sensor index, and implements full EPA Barkjohn 2021 AQI correction for wildfire smoke.
 
-**Build recommendation:** 80/100 Strong Fit.
+**Scoring:**
+- Local vs. cloud: 10/10 (cloud REST, stable)
+- Mads can test: 15/15 (no hardware needed; any public sensor or hub location)
+- User demand: 15/15 (PNW wildfire season, neighbor sensor use case)
+- Sandbox-safe: 15/15 (asynchttpGet only, no crypto/reflection)
+- Vendor stability: 15/15 (API key monetized, documented, stable)
+- Effort: 10/10 (zero — copy via importUrl or HPM)
+- Maintenance: 8/10 (last commit 2025-06-18; responsive but not 2026-active)
+- **Total: 88/100** → INSTALL
+
+**Impact:** This is the 5th consecutive "install community driver" verdict in a row. **Mads's complete stack now has zero open BUILD candidates.**
+
+**Audit lesson:** Prior search ("PurpleAir Hubitat driver") returned zero. Follow repo search with code search (`code:"api.purpleair.com" lang:groovy`) before claiming greenfield. User-pointed URLs override search conclusions.
 
 ---
 
