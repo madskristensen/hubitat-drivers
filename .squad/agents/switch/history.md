@@ -178,3 +178,5 @@ QA and testing specialist for Hubitat drivers. Focuses on real-device validation
 Your cross-driver reliability analysis (8 anti-patterns) directly informed this v0.1.4 audit. Hardware verification pending on Mads's BRP069B unit.
 
 **2026-05-18 Team Update:** MyQ feasibility research completed; verdict = build ratgdo ESPHome HTTP driver (local, no cloud). Cypher confirmed ratgdo firmware actively maintained; Trinity sketched architecture. Awaiting Mads hardware decision. See .squad/decisions.md for full report.
+
+**2026-05-18 Team Update (Scribe merge):** Rainbird verdict = install existing community driver; no new code to test this round.
