@@ -1,6 +1,6 @@
-﻿# Decisions
+# Decisions
 
-Generated 2026-05-17T20:29:23Z
+Generated 2026-05-18T17:59:14Z
 
 ---
 
@@ -33,7 +33,7 @@ subject: Bosch Home Connect fridge door-open driver — feasibility & API spec
 ---
 # Decisions
 
-Generated 2026-05-17T20:29:23Z
+Generated 2026-05-18T17:59:14Z
 
 ---
 
@@ -866,3 +866,130 @@ drivers/
 - Sunstat pattern reference: `drivers/sunstat-thermostat/sunstat-thermostat-parent.groovy`
 - Hubitat Cloud OAuth App pattern: https://docs.hubitat.com/index.php?title=App_OAuth
 
+
+---
+
+## tank-touchstone-v0128
+
+---
+author: tank
+date: 2026-05-18T20:29:23-07:00
+status: ready-for-review
+subject: Touchstone v0.1.28 — parse buffer dedupe (perf todos #2/#4)
+---
+
+## 2026-05-18 — Tank — Touchstone v0.1.28 (perf todos #2/#4)
+
+### What changed
+- In `drivers/touchstone-fireplace/touchstone-fireplace.groovy`, `parse()` now builds the concatenated receive buffer locally and passes it into `consumeReceiveBuffer(buffer)`; only leftover partial-frame hex is written back to `state.rxBuffer`, and the state key is removed when the chunk was fully consumed.
+- Added parse-only event dedupe helpers and routed parsed `heatLevel`, `flameColor`, `flameBrightness`, `charcoalColor`, `flameSpeed`, `heatingSetpoint`, and `temperature` updates through them so unchanged push/refresh frames stop creating duplicate Events rows.
+- Left the existing command-path `emitAttribute(..., "digital")` behavior intact, so user-issued writes still produce immediate digital echoes after a real outbound DP write.
+- Bumped the Touchstone driver metadata/changelog to `0.1.28`, updated `drivers/touchstone-fireplace/packageManifest.json` to `0.1.28`, and documented the reusable parse-path dedupe rule in `.squad/skills/hubitat-event-hygiene/SKILL.md`.
+
+### Why
+- Both requested perf items were on the hot inbound socket path. Avoiding full-buffer state writes and unchanged parse events cuts Hubitat state/database churn on every heartbeat, refresh, and physical-remote push without changing Tuya frame parsing behavior.
+- Separating parse dedupe from command echoes preserves UX: automations still get an immediate digital confirmation when they actually changed device state, but the later device echo no longer clutters event history with redundant rows.
+
+---
+
+## tank-gemstone-v0415
+
+---
+author: tank
+date: 2026-05-18T20:29:23-07:00
+status: ready-for-review
+subject: Gemstone v0.4.15 — cloneMap copy hygiene + refresh dedupe (perf todos #3/#4)
+---
+
+## 2026-05-18 — Tank — Gemstone v0.4.15 (perf todos #3/#4)
+
+### What changed
+- In `drivers/gemstone-lights/gemstone-lights.groovy`, `cloneMap()` no longer round-trips through JSON. It now recursively clones only mutable containers (`Map`, `List`) and reuses scalar values, which matches the real hot-path shapes used by Gemstone patterns, queued requests, callback data, and cached effect patterns.
+- Added refresh-only event dedupe helpers and routed `handleRefreshResponse()` switch/level/hue/saturation emits through them so unchanged poll payloads stop creating duplicate Events rows.
+- Left the existing command-path `sendEvent(..., type: "digital")` behavior alone for `on/off/setLevel/setColor/setColorTemperature` and effect activation; only refresh telemetry now skips unchanged emits.
+- Bumped Gemstone metadata/changelog to `0.4.15`, updated `drivers/gemstone-lights/packageManifest.json` to `0.4.15`, and captured the reusable copy-hygiene rule in `.squad/skills/hubitat-hot-path-copy-hygiene/SKILL.md`.
+
+### Why
+- Both requested items sat on Gemstone's hot paths. Removing JSON serialization from internal map copies cuts avoidable CPU/GC work during refreshes, retries, queueing, and effect activation while still isolating mutable nested structures from `state`.
+- Dedupe on the refresh/poll path keeps Hubitat's event history stat-oriented instead of echoing identical cloud telemetry, without taking away the immediate digital confirmation users expect after a real command.
+
+---
+
+## tank-touchstone-v0129
+
+---
+author: tank
+date: 2026-05-18T20:29:23-07:00
+status: ready-for-review
+subject: Touchstone v0.1.29 — drop lastDps + byte copy helpers (perf todos #6/#7)
+---
+
+## 2026-05-18 — Tank — Touchstone v0.1.29 (perf todos #6/#7)
+
+### What changed
+- Removed the hot-path `state.lastDps = dps` write from `processFrame()` after re-grepping the driver and confirming there are no `state.lastDps` readers to migrate.
+- Added one-time `state.remove("lastDps")` cleanup in `initialize()` so upgraded devices drop the stale state key without reintroducing parse-path state churn.
+- Reworked `concatBytes()`, `sliceBytes()`, `startsWithBytes()`, and `protocol33HeaderBytes()` to use primitive `int` counters, plus `System.arraycopy(...)` for contiguous copies in concat/slice/header assembly.
+- Bumped the Touchstone driver metadata/changelog to `0.1.29`, updated `drivers/touchstone-fireplace/packageManifest.json` to `0.1.29`, and captured the byte-helper optimization pattern in `.squad/skills/tuya-local-groovy/SKILL.md`.
+
+### Why
+- Both requested fixes live on the Tuya v3.3 send/receive hot path. Removing dead state writes and boxed byte-copy loops reduces Hubitat overhead without touching AES framing, the pure-Groovy CRC32 implementation, or any reflection-sensitive sandbox areas.
+
+### Guardrails kept
+- No reflection APIs introduced.
+- Pure-Groovy CRC32 path left unchanged.
+- Helper surface stays on plain `byte[]`; only the counter/copy mechanics changed.
+
+---
+
+## tank-sunstat-sc4
+
+---
+author: tank
+date: 2026-05-18T20:29:23-07:00
+status: ready-for-review
+subject: SunStat v0.1.10 — cache Floor.W warmth, skip redundant PATCH (SC-4 closes audit)
+---
+
+## 2026-05-18 — Tank — SunStat v0.1.10 (SC-4)
+
+### What changed
+- In `drivers/sunstat-thermostat/sunstat-thermostat-child.groovy`, `parseDeviceStateInternal()` now caches `data.Schedule.Floor.W` into `state.floorWarmth` alongside the existing `state.floorAway` cache.
+- `setFloorMinTemp(temp)` now compares the clamped request against that cached warmth value and returns early with the standard debug skip log when the thermostat already matches, before issuing the read-modify-write PATCH.
+- Bumped the synced SunStat parent/child/package-manifest versions to `0.1.10`; the parent change is version-sync only.
+
+### Why
+- `setFloorMinTemp()` has to PATCH both `Schedule.Floor.W` and `.A` together. Without a cached warmth value, repeated floor-min assertions still performed a no-op cloud write even when the thermostat already matched.
+- This closes SC-4, the last unshipped repo-backed item from Trinity's redundant-write audit, so the SunStat audit board is now empty.
+
+### Guardrails kept
+- Null or unknown cached warmth still falls through to the PATCH, so fresh installs and first-poll devices keep working.
+- Existing `state.floorAway` read-modify-write behavior is unchanged.
+- No user-command digital events were removed; only confirmed no-op writes are skipped.
+
+---
+
+## tank-capability-markers
+
+---
+author: tank
+date: 2026-05-18T20:29:23-07:00
+status: ready-for-review
+subject: Cloud driver metadata — add Polling/Actuator capabilities (final perf todo)
+---
+
+## 2026-05-18 — Tank — Cloud driver metadata hygiene
+
+### What changed
+- In `drivers/gemstone-lights/gemstone-lights.groovy`, added `capability "Polling"` to the metadata definition and bumped the driver + `drivers/gemstone-lights/packageManifest.json` to `0.4.16`.
+- In `drivers/sunstat-thermostat/sunstat-thermostat-parent.groovy`, added `capability "Polling"` and `capability "Actuator"` to the parent metadata definition and bumped the parent to `0.1.11`.
+- Synced `drivers/sunstat-thermostat/sunstat-thermostat-child.groovy` and `drivers/sunstat-thermostat/packageManifest.json` to `0.1.11` so the SunStat release stays parent/child aligned.
+
+### Why
+- Both cloud drivers already implement `poll()`, but Hubitat app discovery keys off declared capabilities. Adding `Polling` advertises the existing command without changing behavior.
+- The SunStat parent exposes commands (`discoverDevices`, `setHome`, `setAway`, `setAwayMode`, `setRefreshToken`) and should advertise `Actuator` as the marker that it accepts commands. This closes the final perf/quality todo from Tank's 2026-05-18 board.
+
+### Guardrails kept
+- No explicit `command "poll"` declarations were added; `capability "Polling"` already defines that contract.
+- `capability "Actuator"` is treated as marker-only; no duplicate commands were introduced.
+- SunStat child behavior is unchanged in `0.1.11`; the child bump is version-sync only.
