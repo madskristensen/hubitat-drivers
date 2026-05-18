@@ -4,9 +4,9 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: v0.1.18 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
+> **Status: v0.1.19 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
 >
-> **Latest: v0.1.18** — **Persistent socket + real-time push updates.** The driver now keeps the Tuya TCP socket open continuously, sends a heartbeat every ~10 s to hold the connection, and receives spontaneous push frames from the device (e.g., physical remote presses). Hubitat attributes now update within ~2 s of any physical remote action — no more stale dashboard values between poll cycles. A new `socketState` attribute (`open` / `closed` / `reconnecting` / `error`) is visible on dashboards. If the network drops or the device reboots, the driver reconnects automatically with backoff (5 s → 30 s → 60 s → 5 min cap). The safety-net poll interval is reduced to 5 minutes (was 60 s) since push frames now carry live state.
+> **Latest: v0.1.19** — **Child lock command (DP 108).** Added `setChildLock(on|off)` command to lock/unlock the physical buttons on the fireplace from Hubitat automations. The `childLock` attribute reflects the current lock state and updates in real time via push frames. Also adds the `childLock` attribute to dashboards.
 >
 > **Killer feature:** Works out-of-the-box for Touchstone Sideline Elite; adapts to other Touchstone models (Steel, Forte, Onyx, etc.) and generic Tuya WiFi fireplaces via configurable Device Profiles and in-driver discovery — no Python, no manual tinytuya wizard needed.
 
@@ -42,6 +42,7 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 - **`charcoalColor`** — Charcoal/log color palette (Sideline Elite DP 104; 12 named labels verified from Tuya app)
 - **`online`** — Connection status (`online` / `offline` / `unknown`)
 - **`socketState`** — Persistent socket state (`open` / `closed` / `reconnecting` / `error`); visible on dashboards for at-a-glance connectivity health
+- **`childLock`** — Physical button lock state (`on` / `off`); `on` means physical buttons on the unit are locked (Sideline Elite DP 108)
 
 > **Breaking change (v0.1.6):** The `power` attribute has been removed. It was an exact duplicate of `switch` and emitted two identical events per state change. Use `switch` for all on/off automations.
 
@@ -71,6 +72,7 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 | **`setFlameBrightness(level)`** | `"Dimmest"` / `"Dim"` / `"Medium"` / `"Brighter"` / `"Brightest"` | Set flame lighting level (DP 102) |
 | **`setFlameSpeed(speed)`** | `"Slow"` / `"Medium"` / `"Fast"` | Set flame animation speed (Sideline Elite DP 103) |
 | **`setCharcoalColor(color)`** | `"Orange"` / `"Red"` / `"Blue"` / `"Yellow"` / `"Green"` / `"Purple"` / `"Cyan"` / `"Magenta"` / `"White"` / `"Pink"` / `"Rainbow"` / `"Spotlight"` | Set charcoal/log color palette (DP 104). Labels verified from Tuya app. "Spotlight" is a best-guess label (see [Verified palette labels](#verified-palette-labels)). |
+| **`setChildLock(state)`** | `"on"` / `"off"` | Lock or unlock the physical buttons on the unit (Sideline Elite DP 108). When locked, the physical buttons on the fireplace do not respond. Useful for child-safety automations. |
 
 #### Flame color palette (DP 101 — verified Tuya app labels)
 

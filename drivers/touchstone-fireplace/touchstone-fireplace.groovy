@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.19 — 2026-05-17 — child lock command (DP 108): setChildLock on/off locks physical buttons
  *   0.1.18 — 2026-05-17 — persistent socket + Tuya push subscriptions (physical remote now syncs in real time)
  *   0.1.17 — 2026-05-17 — rename setLogColor → setCharcoalColor with verified labels
  *   0.1.16 — 2026-05-17 — gate v0.1.15 diagnostic flame-color logs
@@ -79,8 +80,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.18"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.18"
+@Field static final String DRIVER_VERSION = "0.1.19"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.19"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -183,6 +184,7 @@ metadata {
         command "discoverDPs"
         command "captureBaseline"
         command "captureDiff"
+        command "setChildLock", [[name: "state*", type: "ENUM", constraints: ["off", "on"]]]
 
         attribute "flameColor",       "string"
         attribute "flameBrightness",  "string"
@@ -195,6 +197,7 @@ metadata {
         attribute "dp103",            "string"
         attribute "dp107",            "string"
         attribute "dp108",            "string"
+        attribute "childLock",        "enum",   ["on", "off"]
         attribute "tempUnit",         "enum",   ["F", "C"]
     }
 
@@ -546,6 +549,17 @@ def setRawDP(dpId, String value) {
     Object coerced = coerceRawValue(value)
     log.info "[Touchstone][RawDP] Writing DP ${targetDp}=${formatDpValue(coerced)} (${dpValueType(coerced)})"
     sendDpWrite(targetDp.toString(), coerced, "raw DP ${targetDp}", WRITE_REFRESH_DELAY_SECONDS)
+}
+
+def setChildLock(lockState) {
+    String normalized = safeStr(lockState)?.trim()?.toLowerCase()
+    if (!(normalized in ["on", "off"])) {
+        log.warn "[Touchstone] setChildLock: invalid state '${lockState}' — use 'on' or 'off'"
+        return
+    }
+    log.info "[Touchstone] Child lock: ${normalized}"
+    emitAttribute("childLock", normalized, "${device.displayName} child lock set to ${normalized}", "digital")
+    sendDpWrite("108", normalized == "on", "child lock", WRITE_REFRESH_DELAY_SECONDS)
 }
 
 // ---------------------------------------------------------------------------
@@ -1380,7 +1394,10 @@ private void applyDps(Map<String, Object> dps) {
             emitAttribute("dp107", safeStr(dps["107"]), "${device.displayName} DP 107 is ${dps["107"]}")
         }
         if (dps.containsKey("108")) {
+            Boolean lockBool = asBoolean(dps["108"])
+            String lockValue = lockBool != null ? (lockBool ? "on" : "off") : safeStr(dps["108"])
             emitAttribute("dp108", safeStr(dps["108"]), "${device.displayName} DP 108 is ${dps["108"]}")
+            emitAttribute("childLock", lockValue, "${device.displayName} child lock is ${lockValue}")
         }
     }
 

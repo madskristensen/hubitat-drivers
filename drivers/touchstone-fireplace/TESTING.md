@@ -1,4 +1,4 @@
-# Manual Test Plan — Touchstone / Tuya Fireplace Driver
+﻿# Manual Test Plan — Touchstone / Tuya Fireplace Driver
 
 **Driver:** `touchstone-fireplace.groovy`
 **Test Target:** Touchstone Sideline Elite (and other Tuya WiFi fireplaces)
@@ -1297,3 +1297,31 @@ Use this checklist to declare the driver "works" before recommending it to other
 ---
 
 *Once all checkboxes above are marked, the driver is ready for community beta release.*
+
+
+### Test 38: Child Lock — setChildLock on/off
+
+**What:** Verify the child lock command (DP 108) locks and unlocks the physical buttons on the fireplace.
+
+**Pre-conditions:** Device profile = Sideline Elite. `socketState = open`. `online = online`. `switch = on` (fireplace powered on with display active so button presses are observable).
+
+**Steps:**
+
+1. In the device page, press **`setChildLock`** -> select **`on`** -> press **Set**.
+2. Watch Logs page.
+3. Try pressing a physical button on the fireplace unit.
+4. In the device page, press **`setChildLock`** -> select **`off`** -> press **Set**.
+5. Try pressing a physical button on the fireplace unit.
+6. Run `refresh()` and observe the `childLock` attribute value.
+
+**Expected:**
+
+- After step 1: Logs show `[Touchstone] Child lock: on`.
+- After step 1: `childLock` attribute updates to `on` within ~3 s (optimistic emit).
+- After step 3: Physical buttons on the fireplace do not respond (buttons locked).
+- After step 4: Logs show `[Touchstone] Child lock: off`.
+- After step 4: `childLock` attribute updates to `off`.
+- After step 5: Physical buttons on the fireplace respond normally.
+- After step 6: `childLock` reflects the lock state returned by the device.
+
+**Pass criteria:** Physical buttons locked when `childLock = on`; unlocked when `childLock = off`.
