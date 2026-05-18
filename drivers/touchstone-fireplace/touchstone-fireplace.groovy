@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.13
+ * Version: 0.1.14
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.14 — 2026-05-17 — colors back to NUMBER; drop setDpRaw legacy alias
  *   0.1.13 — 2026-05-17 — named-enum dropdowns for brightness and color palettes
  *   0.1.12 — 2026-05-17 — work around Hubitat Commands-tab dropdown +1 bug
  *   0.1.11 — 2026-05-17 — remove dead setLogBrightness; fix write-side off-by-one
@@ -32,6 +33,12 @@
  *   0.1.1 — 2026-05-17 — Generalized device profiles, in-driver DP discovery, and auditable raw DP writes
  *   0.1.0 — 2026-05-17 — Initial Tuya Local scaffold for power, heat level, flame/log lighting, temperature polling, raw DP surfacing, and socket retry/backoff
  */
+// v0.1.14 — Reverted setFlameColor and setLogColor from v0.1.13's named ENUM back to NUMBER input
+//           (ranges 1-6 and 1-12). The invented color labels (Red, Orange, ..., Crimson, Coral, ...)
+//           were guesses without hardware verification; numeric input is honest about the fact that
+//           the indices are user-discoverable. setFlameBrightness keeps its named ENUM since
+//           Dimmest/Dim/Medium/Brighter/Brightest are universally meaningful regardless of hardware.
+//           Also removed the legacy setDpRaw() command alias (use setRawDP() instead).
 // v0.1.13 — Reverted setFlameBrightness, setFlameColor, and setLogColor back to ENUM — but now with
 //           human-readable named labels instead of numeric strings. Non-numeric ENUM labels do NOT trigger
 //           the Hubitat Commands-tab dropdown +1 quirk (that was specific to pure numeric-string values).
@@ -62,8 +69,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.13"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.13"
+@Field static final String DRIVER_VERSION = "0.1.14"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.14"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -92,10 +99,10 @@ import javax.crypto.spec.SecretKeySpec
 @Field static final String PROFILE_SIDELINE = "Sideline Elite (tested)"
 @Field static final String PROFILE_GENERIC = "Generic Tuya Fireplace"
 @Field static final String PROFILE_CUSTOM = "Custom"
-@Field static final List<String> FLAME_COLOR_OPTIONS = ["Red", "Orange", "Yellow", "Green", "Blue", "Purple"]
+@Field static final List<String> FLAME_COLOR_OPTIONS = ["1", "2", "3", "4", "5", "6"]
 @Field static final List<String> FLAME_BRIGHTNESS_OPTIONS = ["Dimmest", "Dim", "Medium", "Brighter", "Brightest"]
 @Field static final List<String> FLAME_SPEED_OPTIONS = ["Slow", "Medium", "Fast"]
-@Field static final List<String> LOG_COLOR_OPTIONS = ["Crimson", "Coral", "Amber", "Gold", "Lime", "Mint", "Teal", "Sky", "Indigo", "Violet", "Magenta", "Rose"]
+@Field static final List<String> LOG_COLOR_OPTIONS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
 @Field static final List<String> HEAT_LEVEL_OPTIONS = ["off", "low", "high"]
 @Field static final List<String> BASE_STATUS_DPS = ["1", "2", "3", "5", "13", "14", "15"]
 @Field static final List<String> SIDELINE_DISCOVERY_DPS = ["101", "102", "103", "104", "105", "107", "108"]
@@ -103,12 +110,8 @@ import javax.crypto.spec.SecretKeySpec
 @Field static final Map<String, String> CUSTOM_DP_SETTING_NAMES = [power: "powerDp", flameColor: "flameColorDp", flameBrightness: "flameBrightnessDp", logColor: "logColorDp", heatLevel: "heatLevelDp", tempSetF: "tempSetFDp", tempSetC: "tempSetCDp"]
 @Field static final Map<String, String> HEAT_LEVEL_TO_DP = ["off": "0", "low": "1", "high": "2"]
 @Field static final Map<String, String> DP_TO_HEAT_LEVEL = ["0": "off", "1": "low", "2": "high"]
-@Field static final Map<String, String> FLAME_COLOR_TO_DP = ["Red": "1", "Orange": "2", "Yellow": "3", "Green": "4", "Blue": "5", "Purple": "6"]
-@Field static final Map<String, String> DP_TO_FLAME_COLOR = ["1": "Red", "2": "Orange", "3": "Yellow", "4": "Green", "5": "Blue", "6": "Purple"]
 @Field static final Map<String, String> FLAME_BRIGHTNESS_TO_DP = ["Dimmest": "1", "Dim": "2", "Medium": "3", "Brighter": "4", "Brightest": "5"]
 @Field static final Map<String, String> DP_TO_FLAME_BRIGHTNESS = ["1": "Dimmest", "2": "Dim", "3": "Medium", "4": "Brighter", "5": "Brightest"]
-@Field static final Map<String, String> LOG_COLOR_TO_DP = ["Crimson": "1", "Coral": "2", "Amber": "3", "Gold": "4", "Lime": "5", "Mint": "6", "Teal": "7", "Sky": "8", "Indigo": "9", "Violet": "10", "Magenta": "11", "Rose": "12"]
-@Field static final Map<String, String> DP_TO_LOG_COLOR = ["1": "Crimson", "2": "Coral", "3": "Amber", "4": "Gold", "5": "Lime", "6": "Mint", "7": "Teal", "8": "Sky", "9": "Indigo", "10": "Violet", "11": "Magenta", "12": "Rose"]
 
 metadata {
     // Keep namespace stable for existing imports/upgrades.
@@ -128,17 +131,15 @@ metadata {
 
         // TODO (Switch): verify these community-derived raw Tuya enum ranges on real Touchstone hardware.
         // Keep the command inputs as raw strings for now so the driver does not pretend to know labels it has not verified.
-        command "setFlameColor", [[name: "color", type: "ENUM", description: "Flame color palette (DP 101). ⚠️ Labels are placeholders — verify on hardware.", constraints: FLAME_COLOR_OPTIONS]]
+        command "setFlameColor", [[name: "color", type: "NUMBER", description: "Flame color palette (DP 101, 1–6)", range: "1..6"]]
         command "setFlameBrightness", [[name: "level", type: "ENUM", description: "Flame brightness (DP 102)", constraints: FLAME_BRIGHTNESS_OPTIONS]]
         command "setFlameSpeed", [[name: "speed*", type: "ENUM", constraints: FLAME_SPEED_OPTIONS,
             description: "Flame animation speed (Sideline Elite DP 103). Slow/Medium/Fast — verify labels on real hardware."]]
-        command "setLogColor", [[name: "color", type: "ENUM", description: "Log/ember color palette (DP 104). ⚠️ Labels are placeholders — verify on hardware.", constraints: LOG_COLOR_OPTIONS]]
+        command "setLogColor", [[name: "color", type: "NUMBER", description: "Log/ember color palette (DP 104, 1–12)", range: "1..12"]]
         command "setHeatLevel", [[name: "level*", type: "ENUM", constraints: HEAT_LEVEL_OPTIONS]]
         command "setHeatingSetpoint", [[name: "temperature*", type: "NUMBER", description: "Writes the mapped Fahrenheit or Celsius setpoint DP based on the preferred unit preference."]]
         command "setRawDP", [[name: "dpId*", type: "NUMBER"], [name: "value*", type: "STRING",
             description: "Advanced: raw DP write. true/false become booleans; whole numbers become integers; everything else is sent as a string."]]
-        command "setDpRaw", [[name: "dpId*", type: "NUMBER"], [name: "value*", type: "STRING",
-            description: "Legacy alias for setRawDP()."]]
         command "discoverDPs"
         command "captureBaseline"
         command "captureDiff"
@@ -195,10 +196,10 @@ metadata {
               required: true
 
         if (settings?.deviceProfile != PROFILE_GENERIC) {
-            input name: "defaultFlameColor", type: "enum",
+            input name: "defaultFlameColor", type: "number",
                   title: "Default flame color (optional)",
-                  description: "Applied ~1.5s after Hubitat turns the fireplace on. Leave blank to keep the fireplace firmware's last-known flame color.",
-                  options: FLAME_COLOR_OPTIONS,
+                  description: "Applied ~1.5s after Hubitat turns the fireplace on. Enter a palette index 1–6. Leave blank to keep the fireplace firmware's last-known flame color.",
+                  range: "1..6",
                   required: false
 
             input name: "defaultFlameBrightness", type: "enum",
@@ -213,10 +214,10 @@ metadata {
                   options: FLAME_SPEED_OPTIONS,
                   required: false
 
-            input name: "defaultLogColor", type: "enum",
+            input name: "defaultLogColor", type: "number",
                   title: "Default log color (optional)",
-                  description: "Applied ~1.5s after Hubitat turns the fireplace on. Leave blank to keep the fireplace firmware's last-known log color.",
-                  options: LOG_COLOR_OPTIONS,
+                  description: "Applied ~1.5s after Hubitat turns the fireplace on. Enter a palette index 1–12. Leave blank to keep the fireplace firmware's last-known log color.",
+                  range: "1..12",
                   required: false
         }
 
@@ -368,9 +369,9 @@ def captureDiff() {
 }
 
 def setFlameColor(color) {
-    String label = safeStr(color)?.trim()
-    if (!(label in FLAME_COLOR_OPTIONS)) {
-        log.warn "[Touchstone] setFlameColor: invalid color '${color}' — use ${FLAME_COLOR_OPTIONS.join(', ')}"
+    Integer num = safeInt(color, null)
+    if (num == null || num < 1 || num > 6) {
+        log.warn "[Touchstone] setFlameColor: invalid color '${color}' — must be 1–6"
         return
     }
 
@@ -379,9 +380,9 @@ def setFlameColor(color) {
         return
     }
 
-    String dpValue = FLAME_COLOR_TO_DP[label]
-    infoLog "${device.displayName} flame color → ${label}"
-    emitAttribute("flameColor", label, "${device.displayName} flame color set to ${label}", "digital")
+    String dpValue = num.toString()
+    infoLog "${device.displayName} flame color → ${dpValue}"
+    emitAttribute("flameColor", dpValue, "${device.displayName} flame color set to ${dpValue}", "digital")
     sendDpWrite(flameColorDp.toString(), dpValue, "flame color", WRITE_REFRESH_DELAY_SECONDS)
 }
 
@@ -404,9 +405,9 @@ def setFlameBrightness(level) {
 }
 
 def setLogColor(color) {
-    String label = safeStr(color)?.trim()
-    if (!(label in LOG_COLOR_OPTIONS)) {
-        log.warn "[Touchstone] setLogColor: invalid color '${color}' — use ${LOG_COLOR_OPTIONS.join(', ')}"
+    Integer num = safeInt(color, null)
+    if (num == null || num < 1 || num > 12) {
+        log.warn "[Touchstone] setLogColor: invalid color '${color}' — must be 1–12"
         return
     }
 
@@ -415,9 +416,9 @@ def setLogColor(color) {
         return
     }
 
-    String dpValue = LOG_COLOR_TO_DP[label]
-    infoLog "${device.displayName} log color → ${label}"
-    emitAttribute("logColor", label, "${device.displayName} log color set to ${label}", "digital")
+    String dpValue = num.toString()
+    infoLog "${device.displayName} log color → ${dpValue}"
+    emitAttribute("logColor", dpValue, "${device.displayName} log color set to ${dpValue}", "digital")
     sendDpWrite(logColorDp.toString(), dpValue, "log color", WRITE_REFRESH_DELAY_SECONDS)
 }
 
@@ -478,10 +479,6 @@ def setHeatingSetpoint(temp) {
     infoLog "${device.displayName} heating setpoint → ${clamped}°${unit}"
     emitAttribute("heatingSetpoint", clamped, "${device.displayName} heating setpoint set to ${clamped}°${unit}", "digital", unit)
     sendDpWrite(targetDp.toString(), clamped, "heating setpoint", WRITE_REFRESH_DELAY_SECONDS)
-}
-
-def setDpRaw(dpId, String value) {
-    setRawDP(safeStr(dpId), value)
 }
 
 def setRawDP(dpId, String value) {
@@ -782,13 +779,12 @@ def applyOnPowerOnDefaults() {
     Boolean appliedAny = false
 
     String flameColor = safeStr(settings.defaultFlameColor)?.trim()
-    if (flameColor && FLAME_COLOR_TO_DP.containsKey(flameColor)) {
+    if (flameColor && (flameColor in FLAME_COLOR_OPTIONS)) {
         Integer flameColorDp = dpFor("flameColor")
         if (flameColorDp != null) {
-            String flameColorDpValue = FLAME_COLOR_TO_DP[flameColor]
             emitAttribute("flameColor", flameColor, "${device.displayName} default flame color set to ${flameColor}", "digital")
             infoLog "Applied default: flameColor=${flameColor}"
-            sendDpWrite(flameColorDp.toString(), flameColorDpValue, "${POWER_ON_DEFAULT_REASON_PREFIX}flame color", WRITE_REFRESH_DELAY_SECONDS)
+            sendDpWrite(flameColorDp.toString(), flameColor, "${POWER_ON_DEFAULT_REASON_PREFIX}flame color", WRITE_REFRESH_DELAY_SECONDS)
             appliedAny = true
         } else {
             log.warn "[Touchstone] defaultFlameColor is set but flame color is not mapped for profile '${activeDeviceProfile()}'"
@@ -824,13 +820,12 @@ def applyOnPowerOnDefaults() {
     }
 
     String logColor = safeStr(settings.defaultLogColor)?.trim()
-    if (logColor && LOG_COLOR_TO_DP.containsKey(logColor)) {
+    if (logColor && (logColor in LOG_COLOR_OPTIONS)) {
         Integer logColorDp = dpFor("logColor")
         if (logColorDp != null) {
-            String logColorDpValue = LOG_COLOR_TO_DP[logColor]
             emitAttribute("logColor", logColor, "${device.displayName} default log color set to ${logColor}", "digital")
             infoLog "Applied default: logColor=${logColor}"
-            sendDpWrite(logColorDp.toString(), logColorDpValue, "${POWER_ON_DEFAULT_REASON_PREFIX}log color", WRITE_REFRESH_DELAY_SECONDS)
+            sendDpWrite(logColorDp.toString(), logColor, "${POWER_ON_DEFAULT_REASON_PREFIX}log color", WRITE_REFRESH_DELAY_SECONDS)
             appliedAny = true
         } else {
             log.warn "[Touchstone] defaultLogColor is set but log color is not mapped for profile '${activeDeviceProfile()}'"
@@ -1231,9 +1226,8 @@ private void applyDps(Map<String, Object> dps) {
     String flameColorDpId = dpIdFor("flameColor")
     if (flameColorDpId && dps.containsKey(flameColorDpId)) {
         String flameColorVal = safeStr(dps[flameColorDpId])
-        String flameColorLabel = DP_TO_FLAME_COLOR[flameColorVal]
-        if (flameColorLabel) {
-            emitAttribute("flameColor", flameColorLabel, "${device.displayName} flame color is ${flameColorLabel}")
+        if (flameColorVal in FLAME_COLOR_OPTIONS) {
+            emitAttribute("flameColor", flameColorVal, "${device.displayName} flame color is ${flameColorVal}")
         } else {
             log.warn "[Touchstone] applyDps: ignoring unrecognised flameColor DP value '${flameColorVal}'"
         }
@@ -1253,9 +1247,8 @@ private void applyDps(Map<String, Object> dps) {
     String logColorDpId = dpIdFor("logColor")
     if (logColorDpId && dps.containsKey(logColorDpId)) {
         String logColorVal = safeStr(dps[logColorDpId])
-        String logColorLabel = DP_TO_LOG_COLOR[logColorVal]
-        if (logColorLabel) {
-            emitAttribute("logColor", logColorLabel, "${device.displayName} log color is ${logColorLabel}")
+        if (logColorVal in LOG_COLOR_OPTIONS) {
+            emitAttribute("logColor", logColorVal, "${device.displayName} log color is ${logColorVal}")
         } else {
             log.warn "[Touchstone] applyDps: ignoring unrecognised logColor DP value '${logColorVal}'"
         }
