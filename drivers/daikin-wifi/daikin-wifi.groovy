@@ -1,7 +1,7 @@
 ﻿/**
  * Daikin WiFi Thermostat
  * Author:  Mads Kristensen
- * Version: 0.1.4
+ * Version: 0.1.5
  * License: MIT
  *
  * Local LAN control for Daikin WiFi adapters (BRP069B series, BRP15B61, and similar
@@ -14,6 +14,7 @@
  *   original. Credit and thanks to @eriktack for the foundational research.
  *
  * Changelog:
+ *   0.1.5 — 2026-05-18 — hotfix: close unclosed triple-quote string literal in parseSpecialMode (driver wouldn't load); fix empty log interpolation
  *   0.1.4 — 2026-05-18 — feat: econo/powerful mode (setSpecialMode + specialMode attr), get_model_info runtime capability cache, full event hygiene audit
  *   0.1.3 — 2026-05-18 — feat: add setSwingMode command + swingMode attribute (off/vertical/horizontal/3d) — Daikin f_dir 0-3 mapping
  *   0.1.2 — 2026-05-18 — fix: replace HubAction (constructor not found on user firmware) with asynchttpGet — modern Hubitat HTTP-over-LAN pattern
@@ -30,7 +31,7 @@ import groovy.json.JsonOutput
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String  DRIVER_VERSION            = "0.1.4"
+@Field static final String  DRIVER_VERSION            = "0.1.5"
 @Field static final Integer DAIKIN_PORT               = 80
 @Field static final Integer LAST_ACTIVITY_THROTTLE_MS = 60000
 @Field static final Integer ENERGY_POLL_MINUTES       = 30
@@ -698,11 +699,11 @@ def parseSpecialMode(hubitat.scheduling.AsyncResponse response, Map data) {
     traceLog "parseSpecialMode: ${body}"
 
     Map kv = parseKV(body)
-    if (kv.ret != "OK") { log.warn "[Daikin] get_special_mode: ret="; return }
+    if (kv.ret != "OK") { log.warn "[Daikin] get_special_mode: ret=${kv.ret}"; return }
 
     // adv field: "" / "0" = neither, "2" = econo, "12" = powerful.
     // Some firmware variants return compound strings like "2-fff10000"; extract leading token.
-    String advRaw  = kv.adv ?: """
+    String advRaw  = kv.adv ?: ""
     String advCode = advRaw.split("-")[0].trim()
     String specialMode = ADV_TO_SPECIAL_MODE[advCode] ?: "off"
 
