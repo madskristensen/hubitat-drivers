@@ -6,6 +6,9 @@
 
 ## Latest Work (2026-05-18)
 
+### Gemstone Lights v0.4.12 — Close G-1 effect idempotency
+- v0.4.12 added skip-if-match guard in activateEffectWithPattern() — Trinity's G-1 🔴 finding from the redundant-write audit; degenerate 1-effect cycle edge case accepted and documented in decisions inbox
+
 ### Touchstone v0.1.25 — Close T-2 + T-3 switch idempotency
 - v0.1.25 added skip-if-already-on/off guard to on()/off() — Trinity audit T-2 (🔴 audible) and T-3 (🟡 wire) closed; applyOnPowerOnDefaults runIn correctly skipped in the already-on path
 

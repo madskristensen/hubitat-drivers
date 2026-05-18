@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.11
+ * Version: 0.4.12
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.12 — 2026-05-18 — skip redundant setEffect pattern PUT when effect already active (audit G-1)
  *   0.4.11 — 2026-05-17 — lastActivity attribute (ISO 8601 timestamp of last successful API call)
  *   0.4.10 — 2026-05-17 — multi-zone / multi-controller support
  *     - New 'controllerName' preference: binds this Hubitat device to a specific Gemstone physical controller by name (case-insensitive, trimmed)
@@ -47,7 +48,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.11"
+@Field static final String DRIVER_VERSION = "0.4.12"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -993,6 +994,11 @@ private void activateEffectWithPattern(String patternId, String resolvedName, Ma
     sendEvent(name: "switch", value: "on", descriptionText: "${device.displayName} turned on", type: "digital")
     updateCurrentEffectIndex(effectIndex)
     updateColorMode(COLOR_MODE_EFFECTS)
+    String currentEffect = safeString(device.currentValue("effectName"))
+    if (resolvedName && currentEffect == resolvedName) {
+        debugLog "setEffect: '${resolvedName}' already active — skipping pattern PUT"
+        return
+    }
     executeOrQueueRequest(buildEffectRequest(pattern, resolvedName))
 }
 
