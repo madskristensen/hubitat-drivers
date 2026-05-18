@@ -126,3 +126,37 @@ Cypher + Trinity completed assessment of `eriktack/hubitat-daikin-wifi` upstream
 - **set_control_info requires all 6 params:** pow, mode, stemp, f_rate, f_dir, shum must all be present on every set_control_info call. The existing sendControlWrite(Map overrides) helper covers this pattern — reads current device attribute values as defaults and the caller supplies only the fields to change. Used for setSwingMode exactly as for setFanRate and setThermostatMode. No new helper needed.
 - **sendControlWrite f_dir default:** Changed from hardcoded "0" to SWING_TO_DAIKIN_F_DIR[device.currentValue("swingMode")] ?: "0" — preserves current swing setting across all other control writes (setThermostatMode, setFanRate, setpoint changes, etc.).
 - **Extension note (v0.1.4 econo/powerful):** Econo and powerful modes use a separate `set_special_mode` endpoint (not set_control_info), so a dedicated sendSpecialModeWrite helper will be needed. The set_control_info 6-param pattern does not apply there.
+
+
+---
+
+## 2026-05-18 — v0.1.4 Learnings
+
+### Daikin get_special_mode / set_special_mode endpoint (adv field bitmap)
+- **get_special_mode response:** et=OK,adv=2-fff10000,... — dv field carries special mode flags.
+- **Community-documented BRP069B4x values:** dv="" or dv=0 = neither mode active; dv=2 = econo (energy-saving); dv=12 = powerful (boost).
+- **Compound adv strings:** Some firmware returns compound strings like "2-fff10000". Safest parse: split on - and take the leading numeric token.
+- **set_special_mode params:** ?set_spmode=1&spmode_kind=2 (enable econo), ?set_spmode=1&spmode_kind=12 (enable powerful), ?set_spmode=0&spmode_kind=<kind> (disable). The spmode_kind value must match what was enabled.
+- **⚠️ UNVERIFIED on Mads's hardware** — exact adv values and compound-string format need real-hardware confirmation in v0.1.5 if behaviour differs.
+
+### get_model_info field names + state.modelInfo caching pattern
+- **URL:** GET /aircon/get_model_info — call once in initialize() (fire-and-forget).
+- **Community-documented BRP069B4x fields:** model (or n_model), ev (or n_ver), n_hum (1=humidity sensor present), swing_l (1=horizontal swing), swing_v (1=vertical swing).
+- **Caching pattern:** Store parsed fields in state.modelInfo Map: {name, firmware, hasHumiditySensor, supportsSwing, supportsSwingH, supportsSwingV}.
+- **Error handling:** If get_model_info returns error or non-OK ret, log.warn and continue — driver functions without the cache.
+- **No functional gating in v0.1.4** — cached for diagnostics + future use only.
+- **⚠️ UNVERIFIED** — exact field names on Mads's firmware revision need hardware confirmation.
+
+### Event hygiene audit checklist
+- Check: all sendEvent calls in parse handlers should go through mitIfChanged() — not raw sendEvent.
+- Check: mitIfChanged signature includes descriptionText on every call.
+- Check: lastActivity emitted through mitLastActivity() with throttle guard (not raw sendEvent in hot path).
+- Check: no displayed: false (SmartThings-era noise, Hubitat ignores it).
+- Check: no isStateChange: true unless intentionally re-emitting unchanged values (which breaks hygiene).
+- v0.1.4 audit result: driver was already clean on all five checks. No fixes needed.
+
+### v0.1.0+ roadmap from Trinity's memo — NOW FULLY SHIPPED
+- Trinity's original capability gap list (econo/powerful mode, get_model_info, event hygiene) is fully implemented as of v0.1.4.
+- v0.1.3 shipped swing mode (setSwingMode + swingMode attribute).
+- v0.1.4 shipped the remaining three: setSpecialMode, get_model_info cache, hygiene audit.
+- Future work: on-device timer (deferred — use Hubitat rules), parent/child multi-unit (deferred — Mads has one unit), EZ Dashboard JSON_OBJECT attributes (deferred, was v0.1.2 candidate per Cypher).
