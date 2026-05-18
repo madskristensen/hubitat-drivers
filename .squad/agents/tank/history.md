@@ -215,3 +215,5 @@ All 8 versions validated on Mads's real BRP069B hardware (firmware version pendi
 - After reskill: history.md = ~7 KB (lean active record)
 - Archived: history-archive.md appended with Daikin v0.1.0–v0.1.7 summary
 - Skills: 5 touched/created; 3 new, 1 bumped (low→medium), 1 reviewed (high, no change)
+
+**2026-05-18 Team Update:** MyQ feasibility research completed; verdict = build ratgdo ESPHome HTTP driver (local, no cloud). Cypher confirmed ratgdo firmware actively maintained; Trinity sketched architecture. Awaiting Mads hardware decision. See .squad/decisions.md for full report.

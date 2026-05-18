@@ -6,6 +6,42 @@
 
 ## Learnings
 
+### MyQ / ratgdo Feasibility Research (2026-05-18)
+
+**Full memo:** `.squad/decisions/inbox/cypher-myq-feasibility.md`
+
+**Key facts for future tasks:**
+
+1. **MyQ cloud API is permanently dead for third parties.** Chamberlain blocked it October 2023. Home Assistant removed the integration December 2023. `homebridge-myq` officially retired. No developer program for individuals. `chamberlaingroup.com/developer` returns 404.
+
+2. **ratgdo ESPHome firmware is the replacement ecosystem.** Hardware: ratgdo (ratcloud.llc, ~$45) and Konnected GDO blaQ (konnected.io, $89). Both run ESPHome firmware and expose identical REST API on port 80. Firmware actively maintained — latest release April 25, 2026 (commit aeeb338).
+
+3. **ESPHome REST API for garage door (cover entity):**
+   - GET `/cover/Garage Door` → `{"state":"OPEN","value":1.0,"current_operation":"IDLE"}`
+   - POST `/cover/Garage Door/open` → opens
+   - POST `/cover/Garage Door/close` → closes
+   - POST `/cover/Garage Door/stop` → stops
+   - POST `/cover/Garage Door/set?position=0.5` → partial position
+   - GET `/binary_sensor/Obstruction` → `{"state":"ON","value":true}`
+   - GET `/binary_sensor/Motion` → motion (Security+ 2.0 only)
+   - GET/POST `/light/Light` → light control
+   - SSE at `/events` provides push but is **not usable from Hubitat** (streaming HTTP blocked by sandbox)
+
+4. **MQTT firmware topics (legacy, v2.5 era):**
+   - Status: `<prefix>/<device>/status/door` → "opening"/"open"/"closing"/"closed"
+   - Command: `<prefix>/<device>/command/door` → "open"/"close"/"stop"
+   - Light: status and command similarly. **Cannot use from Hubitat** (no MQTT client in sandbox).
+
+5. **Konnected blaQ explicitly markets Hubitat support** with a demo GIF on product page as of 2026-05-18. Protocol-identical to ratgdo ESPHome firmware.
+
+6. **No Hubitat ratgdo driver found on GitHub** (search returned 0 results 2026-05-18). Real gap exists.
+
+7. **Recommended driver shape:** ratgdo ESPHome REST HTTP driver using `asynchttpGet` polling at 5s interval. Capabilities: `GarageDoorControl`, `ContactSensor`, `Switch` (light), `HealthCheck` (full Pattern A — local LAN). Entity names should be user-configurable.
+
+8. **Cloud-killed API evaluation pattern documented** as new skill: `.squad/skills/cloud-killed-api-evaluation/SKILL.md`.
+
+---
+
 ### Daikin BRP069B Complete Endpoint Catalog (Session cypher-5, 2026-05-18)
 
 Full reference for any future Daikin driver work. Sources: ael-code/daikin-control README, Apollon77/daikin-controller src/DaikinACRequest.ts + DaikinAC.ts v2.2.1.

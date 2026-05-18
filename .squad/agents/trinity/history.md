@@ -100,6 +100,29 @@ Most SmartThings-era Hubitat thermostat ports missing `supportedThermostatModes`
 
 ---
 
+## Learnings — 2026-05-18 (MyQ Architecture Sketch)
+
+### Garage Door / Safety-Critical Driver Patterns
+
+- **`Switch` capability on garage doors is a hard no.** Rule Machine's "turn off all switches" automation category makes Switch capability on a garage door actively dangerous. Any new actuator driver for a safety-critical device (garage door, gate, lock) must explicitly skip Switch.
+- **Audit-trail logging at INFO is mandatory for safety-critical commands.** Unlike HVAC commands where debug-level gating is fine, `open()` and `close()` on a garage door must always log at `log.info` regardless of `logEnable`. This is an audit trail, not a debug trace.
+- **Auto-close timers belong in Rule Machine, not the driver.** The driver's job is state + command; time-based safety logic is a user-defined rule. Never implement auto-close in the driver layer.
+- **Rate-limit bidirectional commands on physical-state machines.** For garage doors (and future gate/lock drivers): guard `close()` against already-closing/closed state, and `open()` against already-opening/open state. Double-commanding some opener firmware causes an unintended state reversal.
+- **Obstruction detection deserves a first-class attribute.** If the protocol exposes a safety beam or obstruction sensor, surface it as `obstructed: enum ["true","false","unknown"]` and emit at `log.warn` level — not just log.info. Safety events should stand out in logs.
+
+### Cloud-Killed-API Lessons
+
+- **Separate risk tiers clearly.** A cloud driver for a killed API (e.g., MyQ post-Oct-2023) should be labeled "best effort, may break" in its README. Never bundle it with a local hardware path — they have completely different reliability profiles and install requirements.
+- **Separate HPM packages for separate hardware paths.** Cloud vs. local = separate `packageManifest.json` files. Users installing ratgdo-garage should never see MyQ-cloud prompts.
+- **Local hardware bridge (ratgdo-class) = preferred over cloud reverse-engineering** when hardware cost is reasonable (~$35). The repo's strong local preference applies doubly to safety-critical devices.
+
+### Parent/Child for Multi-Device Cloud Accounts
+
+- **SunStat parent/child pattern applies directly to MyQ cloud.** Account parent (auth + polling) + door children + light children. The only new wrinkle: each child needs a `door` attribute (GarageDoorControl) plus the ContactSensor mirror — same emitIfChanged discipline as thermostats.
+- **Light children are a clean separation.** Don't add Light/Switch capability to the door driver. Keep opener light as a separate child with Switch + Light capabilities. Users can control lights independently without triggering door movement.
+
+---
+
 ## Next Session Focus
 
 - [ ] Tank: Implement setpointDisplay on Daikin + SunStat (v0.1.6 phase, 0.5h each)

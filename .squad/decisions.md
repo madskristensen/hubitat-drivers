@@ -467,3 +467,588 @@ For any LAN or cloud driver where an endpoint may or may not exist depending on 
 5. **Guard the command path** with `if (state.{endpoint}Unsupported) { log.warn ... ; return }` to inform the user without crashing.
 6. **Reset in `initialize()`** so a firmware update re-probes automatically.
 7. **Do NOT emit a fake attribute value** when unsupported — leave the attribute at its initial state.
+
+---
+# MyQ / Garage Door Opener — Hubitat Driver Feasibility Report
+
+**Author:** Cypher (Integration / Protocol Engineer)
+**Date:** 2026-05-18T15:13:58-07:00
+**Requested by:** Mads Kristensen
+**Status:** Complete — Recommendation: Build ratgdo ESPHome HTTP driver
+
+---
+
+## 1. Executive Summary
+
+The Chamberlain/LiftMaster MyQ **cloud API is permanently closed to third parties** (blocked October 2023, confirmed hostile stance as of this report date). There is no public developer program accessible to individuals or open-source projects — partners pay a per-access fee, and Home Assistant was explicitly turned away. The community cloud-workaround ecosystem (`pymyq`, `homebridge-myq`) is **abandoned** as of late 2023; no living repo is known to be working reliably in 2026. The recommended path is a **local ESPHome REST driver targeting the ratgdo or Konnected GDO blaQ hardware** — both run identically on ESPHome firmware, expose a stable documented REST+SSE API on port 80, and have active firmware maintenance through April 2026. Konnected explicitly advertises Hubitat support. A poll-only driver (no SSE, ~5s interval) is feasible today with `asynchttpGet`, providing the `DoorControl` + `ContactSensor` + `Switch` capability set with sub-10-second latency.
+
+---
+
+## 2. Official MyQ API Status
+
+### 2a. The October 2023 Block
+
+On **October 25, 2023**, Chamberlain Group CTO Dan Phillips published a statement:
+
+> "Chamberlain Group recently made the decision to prevent unauthorized usage of our myQ ecosystem through third-party apps."
+
+The statement pointed to `myq.com/works-with-myq` as the list of authorized partners. The authorized list (retrieved 2026-05-18) includes: **Vivint, Alarm.com, Resideo, IFTTT, Control4, Crestron, Ezlo, RTI, Sensi, and several vehicle OEMs (Honda, Acura, Kia, Mercedes-Benz, etc.)**. No open-source platforms, no SmartThings, no Hubitat.
+
+The Home Assistant team reached out to Chamberlain Group multiple times and received no official response. Their conclusion (published 2023-11-01, per the HA myq integration page):
+
+> "We cannot continue to work around Chamberlain Group if they keep blocking access to third parties, the MyQ integration will be removed from Home Assistant in the upcoming 2023.12 release on December 6, 2023."
+
+It was removed. The integration page now redirects to ratgdo as the recommended replacement.
+
+### 2b. Developer/Partner Program
+
+**No publicly accessible developer program exists for individual hobbyists.** The partner program requires a commercial relationship with Chamberlain Group and payment for API access. This is confirmed by:
+
+- The HA team's statement: "partner companies pay Chamberlain Group for the privilege of letting MyQ owners control their own garage doors."
+- `chamberlaingroup.com/developer` — returns HTTP 404 (checked 2026-05-18).
+- `chamberlaingroup.com/partners` — returns HTTP 404 (checked 2026-05-18).
+
+### 2c. IFTTT
+
+IFTTT is listed as an authorized partner and remains available. However:
+
+- IFTTT is cloud-to-cloud (no local control).
+- IFTTT Webhooks can trigger open/close but provide no reliable state feedback.
+- Cannot be driven from Hubitat in a clean, stable way without a custom IFTTT integration app.
+- **Confidence: Low** this is useful for a Hubitat driver.
+
+### 2d. Verdict — Official API
+
+**Dead end. No path for individual developers, open-source projects, or Hubitat.** Do not pursue.
+
+---
+
+## 3. Community Cloud-Integration Landscape
+
+### 3a. `pymyq` (arraylabs/pymyq)
+
+- **Repo:** https://github.com/arraylabs/pymyq
+- **Auth mechanism:** Email/password + reverse-engineered REST endpoints (`https://api.myqdevice.com/api/v5.1/Login` → bearer token, then `/api/v5.2/accounts/{id}/devices`).
+- **Last known state:** Repo is still public with an `aiohttp`-based client. The commit log page is not rendering cleanly (JavaScript-only response), suggesting the repo may be stale.
+- **Current status (2026-05-18):** **Almost certainly non-functional.** Chamberlain actively blocks the undocumented endpoints. The Home Assistant team abandoned it December 2023. No recent issues or commits found.
+- **Confidence this works today:** Very low.
+
+### 3b. Home Assistant `myq` Core Integration
+
+- **Removed from Home Assistant in 2023.12** (December 6, 2023).
+- The integration page (`home-assistant.io/integrations/myq/`) now contains the full removal notice and redirects to ratgdo.
+- **Status:** Dead.
+
+### 3c. `homebridge-myq` (hjdhjd/homebridge-myq)
+
+- **Repo:** https://github.com/hjdhjd/homebridge-myq
+- **Status:** The README now reads: "`homebridge-myq` is officially retired, for now."
+- The author (hjdhjd) has fully migrated to `homebridge-ratgdo` targeting the ratgdo hardware.
+- **Status:** Dead. Author recommends ratgdo.
+
+### 3d. Existing Hubitat Community MyQ Drivers
+
+- Multiple threads exist in the Hubitat community forum, but none are accessible (HTTP 404 on specific topic URLs tried).
+- GitHub search `hubitat ratgdo` returns **0 repositories** as of 2026-05-18 — no dedicated Hubitat ratgdo driver has been published publicly on GitHub.
+- Konnected explicitly advertises a Hubitat integration on their product page (`konnected.io/products/smart-garage-door-opener-blaq-myq-alternative`) with a GIF showing Hubitat integration. The mechanism is ESPHome REST polling (same as what we'd build).
+
+### 3e. Cat-and-Mouse History
+
+The MyQ cloud integration has been broken and patched continuously since ~2019:
+- 2019: First major breakage; community worked around it.
+- 2021–2022: Multiple auth endpoint changes.
+- 2023-Q3: Chamberlain began active enforcement, HA integration in constant repair.
+- October 2023: Formal statement; endpoints blocked at infrastructure level.
+- December 2023: HA removes integration; homebridge-myq retires.
+
+**Pattern:** Chamberlain treats community access as hostile and actively monitors/blocks it. Any cloud workaround would be a one-to-six-month window before the next breakage. This repo is local-first; cloud MyQ is specifically the anti-pattern we avoid.
+
+---
+
+## 4. Local-Control Hardware Alternatives
+
+### 4a. ratgdo (Recommended Target Hardware)
+
+**What it is:** An ESP32/ESP8266 control board that wires to the garage door opener's wall-button terminals (3-wire connection: GND, +12V serial data, obstruction sensor). Supports Security+ 2.0 (yellow learn button), Security+ 1.0 (purple/red learn button), and dry-contact openers.
+
+**Firmware options:**
+1. **ESPHome firmware** (recommended for home automation platforms) — from `ratgdo/esphome-ratgdo`
+2. **MQTT firmware** (older, v2.5-era) — from `PaulWieland/ratgdo` / `ratgdo/mqtt-ratgdo`
+3. **HomeKit firmware** — from `ratgdo/homekit-ratgdo`
+
+**Active maintenance (ESPHome firmware):**
+- Latest release: Firmware Release 1428, commit `aeeb338`, **April 25, 2026** (3 weeks before this report)
+- Prior release: Release 1427, April 23, 2026
+- Release cadence: Weekly-to-biweekly updates. Project is actively maintained.
+
+**Hardware versions:** v2.0, v2.5, v2.53i (ESP8266), v3.2, v32 (ESP32). Newest boards (ratgdo32) are ESP32-based.
+
+**Price:** ratgdo v2.5i with installation kit ~$45. ratgdo32 controller + kit from ratcloud.llc.
+
+#### 4a-i. ESPHome REST API (PRIMARY INTERFACE)
+
+When running ESPHome firmware, ratgdo exposes a standard ESPHome web server on **port 80** at `http://<device-ip>/`. The REST API follows ESPHome's documented `/<domain>/<entity_name>/[action]` pattern.
+
+**Garage door cover entity** (primary control):
+
+| Operation | Method | URL | Description |
+|---|---|---|---|
+| Get state | GET | `/cover/Garage Door` | Returns JSON with state/value/current_operation |
+| Open door | POST | `/cover/Garage Door/open` | Opens door |
+| Close door | POST | `/cover/Garage Door/close` | Closes door |
+| Stop door | POST | `/cover/Garage Door/stop` | Stops mid-travel |
+| Toggle door | POST | `/cover/Garage Door/toggle` | Toggle open/close |
+| Set position | POST | `/cover/Garage Door/set?position=0.5` | Set to specific position (0.0=closed, 1.0=open) |
+
+**GET `/cover/Garage Door` response:**
+```json
+{
+  "id": "cover/Garage Door",
+  "state": "OPEN",
+  "value": 1.0,
+  "current_operation": "IDLE",
+  "position": 1.0
+}
+```
+
+- `state`: `"OPEN"` or `"CLOSED"`
+- `value`: Float 0.0–1.0
+- `current_operation`: `"OPENING"`, `"CLOSING"`, or `"IDLE"`
+
+**Light control:**
+
+| Operation | Method | URL |
+|---|---|---|
+| Get state | GET | `/light/Light` |
+| Turn on | POST | `/light/Light/turn_on` |
+| Turn off | POST | `/light/Light/turn_off` |
+
+**Obstruction sensor:**
+
+| Operation | Method | URL | Response |
+|---|---|---|---|
+| Get state | GET | `/binary_sensor/Obstruction` | `{"id":…,"state":"ON","value":true}` |
+
+**Motion sensor** (Security+ 2.0 only):
+
+| Operation | Method | URL | Response |
+|---|---|---|---|
+| Get state | GET | `/binary_sensor/Motion` | `{"id":…,"state":"ON","value":true}` |
+
+**SSE event stream** (real-time push):
+
+- URL: `http://<device-ip>/events`
+- Protocol: Server-Sent Events (`text/event-stream`)
+- Pushes `state` events for all entities as JSON
+- **⚠️ NOT usable from Hubitat** — SSE is a streaming HTTP connection; Hubitat's sandbox does not support persistent connections or streaming responses. Must poll instead.
+
+**Authentication:** None by default. Optional HTTP Basic Auth with the device name as username and the OTA password. If auth is configured, set `Authorization: Basic <b64>` header on all requests.
+
+**Entity name caveat:** Entity names depend on the ESPHome YAML configuration. The example names above ("Garage Door", "Light", "Obstruction") are the ratgdo defaults but can be customized. Safer approach: use the `/` root page which lists all entities, or document the default names and let users override in driver settings.
+
+#### 4a-ii. MQTT Firmware (Legacy)
+
+The original `PaulWieland/ratgdo` (MQTT) firmware uses these topics:
+
+```
+Subscribe (status from device):
+  <prefix>/<device_name>/status/door     → "opening", "open", "closing", "closed"
+  <prefix>/<device_name>/status/light    → "on", "off"
+  <prefix>/<device_name>/status/obstruction → "obstructed", "clear"
+
+Publish (commands to device):
+  <prefix>/<device_name>/command/door    → "open", "close", "stop"
+  <prefix>/<device_name>/command/light   → "on", "off"
+```
+
+**Hubitat limitation:** Hubitat has **no built-in MQTT client**. A driver cannot subscribe to MQTT topics. This path would require an external MQTT-to-Hubitat bridge (e.g., Node-RED or MQTT Bridge app). **Not recommended as a first-class driver.**
+
+### 4b. Konnected GDO blaQ
+
+- **Product:** https://konnected.io/products/smart-garage-door-opener-blaq-myq-alternative — $89
+- **Firmware:** Runs **ESPHome firmware** pre-loaded (`konnected-io/konnected-esphome`, updated May 12, 2026)
+- **Compatibility:** Same Security+ protocol as ratgdo; also supports Security+ 1.0, 2.0, dry contact. Works with all Chamberlain/LiftMaster learn button colors.
+- **Hubitat support:** Explicitly advertised. The product page shows a GIF of Hubitat integration (captured 2026-05-18).
+- **API:** Identical to ratgdo ESPHome REST API — same entity domains and actions. `homebridge-ratgdo` explicitly supports both ratgdo and Konnected blaQ devices ("Support for all current Ratgdo-branded devices as well as for variants like Konnected blaQ that use ESPHome").
+- **Differences from ratgdo:** Premium build quality, includes installation kit, vehicle presence sensor available on higher-end models. Commits to Matter support when garage door type is added to the spec.
+- **Verdict:** A driver targeting ratgdo ESPHome firmware covers Konnected blaQ automatically. They are protocol-identical.
+
+### 4c. Shelly Relays (Generic Dry Contact)
+
+- **Approach:** Wire a Shelly 1/1PM to the garage door's dry contact terminals. Use a reed switch for door position.
+- **Compatibility:** Works with older/simpler openers (non-Security+ 2.0). **Does not work with Security+ 2.0** — the serial bus protocol blocks unauthorized relay pulses.
+- **Local API:** Shelly Gen1: `http://<ip>/relay/0?turn=on&timer=1` (momentary pulse). Gen2: REST JSON API.
+- **Hubitat:** Existing Shelly community drivers cover this. Not a new driver problem.
+- **Verdict:** Valid for dry-contact openers. Not relevant for Security+ 2.0 (most modern Chamberlain/LiftMaster).
+
+### 4d. Meross Smart Garage Door Openers
+
+- Not investigated in depth. Meross devices generally use a cloud API (meross.com) with no official local API documented. Not a local-first option. Skip.
+
+### 4e. Generic Contact + Relay Template
+
+- Could work for simple openers. No ratgdo needed. But provides no obstruction sensing, light control, or Security+ 2.0 support. Lowest-common-denominator option. Already handled by existing Hubitat virtual devices + rules.
+
+---
+
+## 5. Recommended Driver Shape
+
+### **Recommendation: (b) ratgdo ESPHome REST HTTP driver**
+
+**Single driver, targeting ratgdo/Konnected ESPHome firmware, using asynchttpGet polling.**
+
+#### Rationale
+
+1. **Local-first policy match:** This repo is explicitly local-first. The ESPHome REST API runs on the device's LAN address at port 80. No cloud dependency, no auth overhead (by default), no quota.
+
+2. **Stable, actively maintained API:** ESPHome's web server API is versioned and documented. ratgdo firmware releases weekly. The REST API contract (cover/binary_sensor domains) has been stable across ESPHome versions.
+
+3. **Covers both ratgdo and Konnected blaQ** — the two dominant hardware options in the community post-MyQ exit. One driver, two hardware options.
+
+4. **Hubitat sandbox compatibility:** `asynchttpGet` + polling on a 5s schedule works correctly. We've already proven this pattern on Daikin. No SSE/WebSocket/MQTT needed.
+
+5. **Capabilities:**
+   - `GarageDoorControl` (open/close/door contact state)
+   - `ContactSensor` (door open/closed)
+   - `Switch` (light on/off — optional child or attribute)
+   - `MotionSensor` (optional — Security+ 2.0 only)
+   - `Sensor` (obstruction status attribute)
+   - `HealthCheck` / `lastActivity` — use **Pattern A (full HealthCheck)** because the device is local LAN. A GET to `/cover/Garage Door` is the ping probe.
+
+6. **No hardware purchase required to validate protocol** — the ESPHome REST API spec is fully documented and the entity schema is deterministic from the ratgdo ESPHome YAML configs.
+
+#### What to Build (Tank's scope)
+
+```
+Driver: ratgdo-esphome
+Capabilities: GarageDoorControl, ContactSensor, Switch (light), HealthCheck
+Attributes: door (open/closed), contact (open/closed), switch (on/off), obstruction (string), motion (string), lastActivity (string), healthStatus (enum)
+
+Commands: open(), close(), stop(), toggle(), lightOn(), lightOff()
+
+Poll cycle (runEvery5Seconds): GET /cover/Garage Door, GET /binary_sensor/Obstruction
+Optional slow cycle (runEvery1Minute): GET /binary_sensor/Motion, GET /light/Light
+
+Settings: IP address (required), Entity name prefix (default = ratgdo defaults), poll interval (default 5s), enable motion sensor (bool), enable light control (bool), auth enabled (bool), username/password (if auth enabled)
+```
+
+#### Rejected Alternatives
+
+| Option | Reason Rejected |
+|---|---|
+| **(a) Pure cloud MyQ driver** | API is blocked. No path for open-source. Will break again. |
+| **(c) ratgdo MQTT driver** | Hubitat has no MQTT client. Requires external broker + bridge. Adds user infrastructure burden. |
+| **(d) ESPHome native_api driver** | Binary protobuf protocol over port 6053. No Groovy protobuf library. Cannot decode in sandbox. |
+| **(e) Generic contact + relay** | Doesn't solve Security+ 2.0 (the problem case). Already coverable with virtual devices. No new driver needed. |
+| **(f) Don't build — recommend existing** | No existing Hubitat driver on GitHub (search returned 0 results 2026-05-18). Community Hubitat forum threads on the topic appear to 404. This is a real gap. |
+
+---
+
+## 6. Risk Register
+
+| Risk | Likelihood | Severity | Trigger / Warning Sign | Mitigation |
+|---|---|---|---|---|
+| **ESPHome entity name drift** — ratgdo firmware renames entities (e.g., "Garage Door" → "door") | Medium | Medium | Breaking after OTA update; GET returns 404 | Make entity names user-configurable in driver settings. Provide auto-detect command that reads `/` root index. |
+| **ESPHome REST API schema change** — field names or JSON structure changes | Low | High | Parse failures on poll response | Pin driver docs to API version. Guard all field reads with null checks. |
+| **ratgdo project abandonment** | Low | Medium | No commits in 3+ months | Active as of April 2026. MQTT firmware is an older fallback. ESPHome itself is independent. |
+| **Konnected diverges from ratgdo API** | Low | Low | Entity names differ | Already handled by configurable entity names. |
+| **SSE push events missed (polling gap)** | Certain | Low-Medium | Door state stale for up to 5s | Accept 5s latency as design constraint. Document this. Reduce to 2s if user wants faster response (increases load). |
+| **Security+ 2.0 firmware changes by Chamberlain** | Very Low | High | ratgdo stops controlling door | Chamberlain would have to ship a signed firmware update to openers. Unlikely; would anger all users. |
+| **Hubitat removes asynchttpGet** | Very Low | High | All LAN HTTP drivers break simultaneously | Not specific to this driver. Mitigation is not feasible at driver level. |
+| **IP address changes** | Medium | High | Polling returns connection refused | Require static IP or DHCP reservation. Document prominently. |
+
+---
+
+## 7. Open Questions for Trinity
+
+1. **GarageDoorControl vs DoorControl capability:** Hubitat has `GarageDoorControl` (open/close/door attribute) as the standard garage capability. Should the driver also declare `ContactSensor` redundantly, or just `GarageDoorControl`? Some RM rules prefer `ContactSensor` for automation triggers. This is an architecture/UX decision.
+
+2. **Child device pattern for light?** The ratgdo exposes a separate light controllable independently of the door. Should the light be a separate child device with `Switch` capability, or an attribute + commands on the parent? SunStat uses parent/child for independent actuators; Daikin uses attributes. Door + light are logically separate — child device feels right but adds complexity.
+
+3. **Partial position support:** ratgdo ESPHome supports setting the door to any position (0.0–1.0). Hubitat has no standard capability for this. Should we expose a custom `setPosition(value)` command, or ignore partial positions and stick to open/closed/stop?
+
+4. **Polling interval tradeoff:** 5s polling is 12 GET requests/minute to a local device. Fine for a single door. For users with 2+ doors (multiple driver instances), is there a concern about hub load? Touchstone uses 5s too — probably fine to set same default.
+
+5. **Motion sensor child vs attribute:** Security+ 2.0 motion events are short-duration (someone walks past the opener). Should motion be a child `MotionSensor` device or a `MotionSensor` capability on the parent? Child is cleaner for RM automation — you can use "Motion Sensor: Active" triggers directly.
+
+---
+
+## 8. Sources & Citations
+
+| Source | URL | Retrieved | Notes |
+|---|---|---|---|
+| Chamberlain CTO statement on API block | https://chamberlaingroup.com/press/a-message-about-our-decision-to-prevent-unauthorized-usage-of-myq | 2026-05-18T15:00-07:00 | Full text retrieved. Dated October 25, 2023. Update note added November 7, 2023. |
+| MyQ authorized partners list | https://www.myq.com/works-with-myq | 2026-05-18T15:05-07:00 | Lists: Vivint, Alarm.com, Resideo, IFTTT, Control4, Crestron, Ezlo, RTI, Sensi, Honda, Acura, Kia, Nissan, INFINITI, Mercedes-Benz, VW, Mitsubishi, STEER Tech |
+| Chamberlain developer page | https://chamberlaingroup.com/developer | 2026-05-18T15:00-07:00 | Returns HTTP 404 |
+| HA myQ integration removal notice | https://www.home-assistant.io/integrations/myq/ | 2026-05-18T15:02-07:00 | Full removal notice, December 2023 timeline, ratgdo recommendation |
+| pymyq library | https://github.com/arraylabs/pymyq | 2026-05-18T15:03-07:00 | Repo exists, last activity unknown (commits page JS-only). Auth: email/password → bearer token. Likely non-functional. |
+| homebridge-myq retirement notice | https://github.com/hjdhjd/homebridge-myq | 2026-05-18T15:06-07:00 | README: "officially retired, for now." Author moved to homebridge-ratgdo. |
+| ratgdo project home | https://paulwieland.github.io/ratgdo/ | 2026-05-18T15:10-07:00 | Active hardware project. ESP8266/ESP32 firmware. ESPHome/HomeKit/MQTT options. |
+| ratgdo MQTT firmware | https://github.com/PaulWieland/ratgdo | 2026-05-18T15:11-07:00 | MQTT topic schema documented. v2.5 era. |
+| ratgdo MQTT topic docs (config page) | https://paulwieland.github.io/ratgdo/02_configuration.html | 2026-05-18T15:12-07:00 | MQTT topic format: `<prefix>/<device>/[command|status]/[door|light|obstruction]` |
+| ratgdo ESPHome firmware repo | https://github.com/ratgdo/esphome-ratgdo | 2026-05-18T15:04-07:00 | Latest release: 1428, commit aeeb338, **April 25, 2026**. Active maintenance confirmed. |
+| ratgdo ESPHome release history | https://github.com/ratgdo/esphome-ratgdo/releases | 2026-05-18T15:15-07:00 | 10+ releases in 2026. Weekly cadence. |
+| ratgdo HomeKit firmware | https://github.com/ratgdo/homekit-ratgdo | 2026-05-18T15:07-07:00 | For ESP8266 v2.5 boards. Separate repo for ESP32 (homekit-ratgdo32). |
+| ratgdo new store / firmware page | https://ratcloud.llc/pages/firmware | 2026-05-18T15:08-07:00 | New store launched July 9, 2024. ratgdo32 available for purchase. |
+| ESPHome Web API documentation | https://esphome.io/web-api/ | 2026-05-18T15:09-07:00 | Full REST API spec. Cover entity: GET state, POST open/close/stop/toggle/set. Binary sensor: GET state. |
+| Konnected GDO blaQ product page | https://konnected.io/products/smart-garage-door-opener-blaq-myq-alternative | 2026-05-18T15:13-07:00 | $89. ESPHome firmware pre-loaded. Hubitat integration GIF shown. "Made for ESPHome." Commit to Matter when spec supports GDO type. |
+| Konnected GitHub org | https://github.com/konnected-io | 2026-05-18T15:14-07:00 | konnected-esphome updated May 12, 2026. gdolib updated May 12, 2026. Active. |
+| homebridge-ratgdo (hjdhjd) | https://github.com/hjdhjd/homebridge-ratgdo | 2026-05-18T15:15-07:00 | Supports ratgdo ESPHome and Konnected blaQ. Uses ESPHome REST API. Protocol-identical confirmed. |
+| ratgdo NodeRED/MQTT example | https://paulwieland.github.io/ratgdo/04_nodered_example.html | 2026-05-18T15:11-07:00 | MQTT payload values: "opening", "open", "closing", "closed", "obstructed", "clear", "locked", "unlocked", "on", "off" |
+
+
+---
+# Architecture Sketch: MyQ-Class Garage Door Driver
+
+**Date:** 2026-05-18  
+**Author:** Trinity (Lead / Architect)  
+**Status:** Draft — pending Cypher's protocol feasibility findings  
+**Feeds into:** Cypher's MyQ/ratgdo research task (parallel)
+
+---
+
+## 1. Capability Shape
+
+### Recommended Capability Set
+
+| Capability | Recommendation | Rationale |
+|---|---|---|
+| `GarageDoorControl` | ✅ REQUIRED | Canonical Hubitat garage door capability. Provides `open()`, `close()` commands and `door` attribute (`open`, `closed`, `opening`, `closing`, `unknown`). Without this, the driver is not first-class. |
+| `ContactSensor` | ✅ INCLUDE | Mirrors `door` as `contact` (`open`/`closed`). Many automations (RM, HSM) check ContactSensor, not GarageDoorControl. Cost = 1 extra event per state change. |
+| `Refresh` | ✅ INCLUDE | Standard "poll now" capability. Needed for both cloud (force immediate poll) and local HTTP (demand check). |
+| `Initialize` | ✅ INCLUDE | Standard lifecycle hook. Re-establishes connection or polling schedule after hub reboot. |
+| `Actuator` | ✅ INCLUDE | Semantic marker: this device takes commands. Required for RM "All actuators" groups. |
+| `Sensor` | ✅ INCLUDE | Semantic marker: this device has state. Required for RM "All sensors" groups. |
+| `HealthCheck` | ⚠️ CONDITIONAL | Local path only (ratgdo). Cloud path: `lastActivity` only — no probing (API quota). See healthcheck-vs-lastactivity skill. |
+| `Switch` | ❌ SKIP | `on=open, off=closed` is dangerous in the garage door domain. Encourages automations that "turn off" a garage door without thinking. Opens the door to misuse by Rule Machine beginners. Hard no. |
+| `Battery` | ⚠️ CONDITIONAL | Include only if the API/protocol reports battery level. MyQ wall buttons and some sensors have batteries — expose if available, omit otherwise. |
+| `Light` | ❌ NOT IN THIS DRIVER | MyQ opener lights exist but belong in a **child device** (see §2). Mixing light control into the door driver creates confusing capability surface. |
+
+### Attribute Design
+
+```
+door          : enum  ["open", "closed", "opening", "closing", "unknown"]
+contact       : enum  ["open", "closed"]           // mirrors door
+lastActivity  : string                             // ISO-8601 timestamp, cloud path
+healthStatus  : enum  ["online", "offline", "unknown"]  // local path only
+obstructed    : enum  ["true", "false", "unknown"] // if API reports obstruction
+```
+
+- **`obstructed`** deserves an attribute even though few APIs expose it. Cloud MyQ does; ratgdo may also. Emit it if available; leave it absent if not. Use `unknown` as initial safe value.
+- **`contact` mirrors `door`**: emit both on same state change. If `door` = "opening" or "closing", emit `contact` = "open".
+- **Log every open/close at INFO unconditionally** (audit trail — see §5).
+
+---
+
+## 2. Parent/Child Decision Tree
+
+```
+Does this driver manage ONE physical opener?
+  YES, single opener, no light:
+    → Single-device driver (no parent/child).
+  YES, single opener, WITH light via same API endpoint:
+    → Single parent (opener) + 1 child (light).
+    → Parent: GarageDoorControl + ContactSensor + Refresh + ...
+    → Light child: Switch + Light capability
+  Is this a CLOUD driver managing MULTIPLE openers under one account?
+    YES → Parent/child required.
+    → Parent: holds auth tokens, polling schedule, discoverDevices()
+    → Child per door: GarageDoorControl + ContactSensor + Refresh
+    → Child per light (if API exposes it): Switch + Light
+    → Reuse SunStat parent/child pattern exactly (hubitat-parent-child-cloud-driver skill)
+  Is this a LOCAL (ratgdo) driver?
+    → One physical ratgdo = one Hubitat device.
+    → No parent/child needed unless ratgdo-home firmware supports multiple doors from one bridge.
+    → Start single-device. Add parent/child later if multi-door ratgdo scenarios emerge.
+```
+
+### Light Child Device
+
+- **When to create:** only if the API/protocol reports opener light state AND supports light on/off commands.
+- **isComponent:** `false` — let users rename it (same as SunStat child pattern).
+- **Child DNI:** `"myq-light-${openerCloudId}"` (cloud) or `"ratgdo-light-${deviceNetworkId}"` (local).
+- **Capabilities:** `Switch`, `Light`, `Actuator`. No `GarageDoorControl` bleed.
+- **Parent-to-child push:** same `child.parseLightState(body)` pattern as SunStat's `child.parseDeviceState(body)`.
+
+---
+
+## 3. Three Driver Path Sketches
+
+### Path A — Cloud MyQ (Chamberlain/LiftMaster API)
+
+> ⚠️ HIGH RISK. Chamberlain killed third-party API access Oct 2023. Any viable path relies on reverse-engineered auth or unofficial clients (e.g., `pymyq`, `node-liftmaster`). Cypher must assess viability before committing here.
+
+**Repo patterns reused:** SunStat (parent/child, cloud REST, token bootstrap, lastActivity health)
+
+```
+Auth bootstrap:
+  → User obtains refresh token via external tool (same as SunStat Cognito pattern)
+  → Paste into password-type preference (long-secret, >1KB — see hubitat-long-secrets skill)
+  → initialize() lifts token into state, schedules polling
+
+Poll cadence:
+  → 30s interval (same ceiling as Gemstone; cloud API quota concern)
+  → On command (open/close): optimistic state emit → API call → confirm via next poll
+  → Event hygiene: emitIfChanged on door/contact; touchActivity() on every 2xx (not on 4xx/timeout)
+
+Command latency:
+  → Send open/close command → emit door="opening"/"closing" immediately (optimistic)
+  → Poll 5s after command to confirm → emit door="open"/"closed" if confirmed
+  → No state machine needed if API confirms immediately; add pseudo-boost (runIn 5s poll) if not
+
+Health monitoring:
+  → lastActivity ONLY (Pattern B from healthcheck-vs-lastactivity skill)
+  → NO HealthCheck capability (avoids quota-consuming pings)
+
+Key risk:
+  → API breakage with zero notice (it's already happened once)
+  → Token rotation: rotated refresh_token MUST be persisted after every use (SunStat lesson)
+```
+
+**Parent/child shape:** Parent holds account auth + discovery. One child per door. One child per light (if API reports it).
+
+**Folder:** `drivers/myq-garage/` with `myq-garage-parent.groovy` + `myq-garage-child.groovy`
+
+---
+
+### Path B — ratgdo Local (Hardware Bridge)
+
+> ✅ PREFERRED if hardware is available. ratgdo is an ESP32-based local hardware bridge that speaks Hubitat directly over HTTP or MQTT. No cloud dependency. Totally different driver — NOT a MyQ driver, it's a "ratgdo on a MyQ opener" driver.
+
+**Repo patterns reused:** Gemstone (local HTTP polling, asynchttpGet), Daikin (LAN HTTP, local polling cadence, probe-then-disable-via-state-flag)
+
+```
+Discovery:
+  → User enters ratgdo IP in driver preference (same as Daikin/Gemstone)
+  → No discovery protocol needed — single device per IP
+
+Protocol options (Cypher to confirm):
+  → HTTP polling: GET /status every N seconds → parse JSON → emit door/contact/light
+  → HTTP commands: POST /open, POST /close, POST /light/on, POST /light/off
+  → MQTT subscribe: ratgdo publishes state topics; Hubitat MQTT not natively available
+    (MQTT path requires a Hubitat MQTT bridge app — adds dependency, higher complexity)
+  → Recommend HTTP polling if ratgdo supports it; MQTT only if no HTTP status endpoint
+
+Poll cadence:
+  → 5–10s interval for door state (doors move fast; 30s is too slow)
+  → asynchttpGet with 10s timeout (same as Daikin pattern)
+  → On command: optimistic emit + immediate re-poll (runIn 1, "refresh")
+
+Health monitoring:
+  → Local polling = free probing → full HealthCheck capability (Pattern A)
+  → ping() = fire a GET /status, expect 2xx within 5s
+  → healthStatus: online/offline/unknown
+
+Safety nuance:
+  → ratgdo may expose obstruction sensor (if present) via API field → emit `obstructed` attribute
+  → Rate-limit close() at driver level: if door is already closing, log.warn + return
+
+Folder: drivers/ratgdo-garage/
+  → ratgdo-garage.groovy (single device, no parent/child)
+  → packageManifest.json (separate from cloud driver)
+```
+
+**This is a separate driver, not a variant of the cloud driver.** Different install, different capabilities, different risk profile.
+
+---
+
+### Path C — Generic Relay + Contact Sensor
+
+> ℹ️ Low-value for this repo. This is just a virtual device composed from a relay (Switch) and a ContactSensor. No reverse-engineering, no Chamberlain dependency, but also no value-add over Hubitat's existing built-in virtual drivers.
+
+```
+Shape:
+  → Single device: Switch (relay for open/close motor trigger) + ContactSensor (magnetic sensor on door)
+  → GarageDoorControl wrapping a virtual relay + contact would need a Hubitat App, not a driver
+
+Assessment:
+  → "Driver" here is really just docs + Rule Machine setup instructions
+  → No Groovy code needed; Hubitat's built-in virtual devices handle this
+  → If Mads wants this path: write a docs/guides/ entry, not a driver
+
+Verdict: NOT a driver in this repo. Document as a guide only.
+```
+
+---
+
+## 4. Folder & Packaging
+
+```
+drivers/
+  myq-garage/                  # Cloud path (if viable)
+    myq-garage-parent.groovy
+    myq-garage-child.groovy
+    packageManifest.json       # separate HPM entry from ratgdo
+    README.md
+  ratgdo-garage/               # Local path (preferred)
+    ratgdo-garage.groovy
+    packageManifest.json       # separate HPM entry
+    README.md
+```
+
+- **Separate HPM packages, separate manifests.** These are unrelated install experiences — one requires hardware purchase, one requires a cloud account. Bundling them confuses users.
+- **Separate README per driver.** Cloud README must warn prominently about API fragility. ratgdo README must list hardware prerequisites and ratgdo firmware version.
+- **No shared code between paths.** Sharing Groovy across drivers is not an established pattern in this repo and creates coupling risk. Both are small enough to be self-contained.
+- **packageManifest.json convention:** follow existing manifests (see Gemstone/SunStat examples) — `id`, `name`, `namespace`, `author`, `version`, `minimumHEVersion`, `documentationLink`, `releaseNotes`, `dateReleased`, `drivers[]`.
+
+---
+
+## 5. Garage-Door-Specific Safety Considerations
+
+These are unique to the garage door domain and have no peer in existing repo drivers:
+
+1. **Log every open/close at INFO, unconditionally.**  
+   Garage doors closing on people or pets is a real safety risk. Every `open()` and `close()` command must be logged at `log.info` regardless of `logEnable`. This is an audit trail requirement, not a debug feature. Pattern: `log.info "${device.displayName}: close() commanded by ${device.currentValue("door") ?: 'unknown'} state"`
+
+2. **No auto-close timer in the driver.**  
+   Auto-close logic belongs in Rule Machine or Safety Monitor. The driver should not implement any "close after X minutes" behavior — this is too consequential for a driver-level default. Document clearly in README.
+
+3. **`close()` rate-limiting.**  
+   If the door is already `closing`, a second `close()` call should log.warn and return without sending a second command. The door is already responding; double-sending a close command to some openers causes a re-open. Guard: `if (device.currentValue("door") in ["closing", "closed"]) { log.warn ...; return }`.
+
+4. **`open()` when already open.**  
+   Similarly, guard `open()` against already-open state: `if (device.currentValue("door") in ["opening", "open"]) { log.warn ...; return }`.
+
+5. **Obstruction detection.**  
+   If the API/protocol exposes an obstruction sensor (ratgdo does via the safety beam), surface it as an `obstructed` attribute. Do NOT suppress or hide obstruction events. Consider emitting at `log.warn` level (not just `log.info`) when obstruction is detected.
+
+6. **Optimistic state vs. confirmed state.**  
+   Emit `door = "opening"/"closing"` immediately on command (optimistic), then confirm via next poll. If poll does not confirm within a reasonable timeout (e.g., 30s), emit `door = "unknown"` and log a warning. Do not leave stale optimistic state in place indefinitely.
+
+7. **No `Switch` capability on this driver.**  
+   Confirmed skip (see §1). Rule Machine's "Turn off all switches" automations must not trigger a garage door close. Switch capability makes this impossible to prevent.
+
+---
+
+## 6. Open Questions for Mads
+
+Before committing to either driver path, need answers to:
+
+| # | Question | Blocking? | Path(s) Affected |
+|---|---|---|---|
+| 1 | **Do you have a MyQ opener?** (Chamberlain or LiftMaster brand?) | Yes — determines if real-device testing is possible | Cloud (Path A) |
+| 2 | **Do you have a ratgdo device?** (or budget/willingness to buy one — ~$35 USD) | Yes — ratgdo is the preferred local path | Local (Path B) |
+| 3 | **Acceptable API fragility risk?** The cloud MyQ path may break again with no notice. Is this a "best effort, may break" driver, or do you need reliability? | Risk appetite decision | Cloud (Path A) |
+| 4 | **Primary use case?** (Security/automation trigger vs. dashboard display vs. voice control) | Informs capability priority | All paths |
+| 5 | **Does your opener have a built-in light?** And do you want to control it from Hubitat? | Determines if light child device is worth building | All paths |
+| 6 | **ratgdo firmware preference?** ratgdo2 (older) vs. ESPHome-based ratgdo (newer). HTTP API differs. Cypher needs to assess both. | Affects protocol sketch | Local (Path B) |
+
+---
+
+## 7. Recommendation
+
+**Hold for Cypher's verdict on protocol viability before writing any Groovy.**
+
+Rationale:
+- If ratgdo exposes a clean local HTTP API → **build Path B (ratgdo-garage) first.** It's local, reliable, and follows established repo patterns (Gemstone/Daikin). Low risk, high confidence.
+- If cloud MyQ auth is still viable (reverse-engineered) → **build Path A (myq-garage) as "best effort."** Clearly label it fragile in the README. Reuse SunStat parent/child patterns exactly.
+- Path C (generic relay) → document only; no driver code.
+
+**Pre-commit signal:** If Cypher confirms ratgdo HTTP status + command endpoints exist → green-light ratgdo driver immediately. This is the one path where hardware availability (question #2 above) is the only remaining blocker.
+
+**Do not build both paths simultaneously.** Pick the one Mads can test on real hardware first. The other can follow once the primary driver is shipped and stable.
+
+---
+
+*Filed: 2026-05-18T15:13:58-07:00 | Author: Trinity | Next: awaiting Cypher's MyQ feasibility report*
+
