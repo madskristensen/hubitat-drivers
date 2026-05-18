@@ -1,7 +1,7 @@
 /**
  * SunStat Connect Plus — Child Driver (Thermostat)
  * Author:  Mads Kristensen
- * Version: 0.1.9
+ * Version: 0.1.10
  * License: MIT
  *
  * Hubitat capability surface for the Watts® Home SunStat Connect Plus
@@ -9,6 +9,7 @@
  * driver (SunStat Connect Plus) via parent.sendDevicePatch(...).
  *
  * Changelog:
+ *   0.1.10 — 2026-05-18 — cache Schedule.Floor.W and skip redundant setFloorMinTemp PATCH (audit SC-4)
  *   0.1.9 — 2026-05-18 — funnel poll telemetry through emitIfChanged (temperature/setpoints/energy/floor); dedupes event history on unchanged polls (perf audit fix #5)
  *   0.1.8 — 2026-05-18 — skip redundant PATCH calls when device already matches (audit SP-1, SC-1, SC-2, SC-3); SC-4 deferred
  *   0.1.7 — 2026-05-17 — lastActivity attribute (ISO 8601 timestamp of last successful API call)
@@ -27,7 +28,7 @@ import groovy.json.JsonSlurper
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION                    = "0.1.9"
+@Field static final String DRIVER_VERSION                    = "0.1.10"
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_F        = 110L
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_C        = 43L
 
@@ -379,6 +380,11 @@ def setFloorMinTemp(temp) {
     if (clamped != rounded) {
         log.warn "[SunStat] setFloorMinTemp(${input}) clamped to ${clamped} (range ${floorMin}..${floorMax})"
     }
+    BigDecimal currentWarmth = state.floorWarmth != null ? safeBigDecimal(state.floorWarmth, null) : null
+    if (currentWarmth != null && currentWarmth == clamped) {
+        debugLog "setFloorMinTemp: already ${clamped} — skipping PATCH"
+        return
+    }
     // Read current away value from cached state (default 0 = disabled)
     BigDecimal currentAway = safeBigDecimal(state.floorAway, 0.0)
     String descTxt = "${device.displayName} floorMinTemp set to ${clamped}"
@@ -490,7 +496,11 @@ private void parseDeviceStateInternal(Map body) {
         }
     }
 
-    // Cache floor away value for setFloorMinTemp read-modify-write
+    // Cache floor warmth/away values for setFloorMinTemp read-modify-write
+    def floorWarmth = data?.Schedule?.Floor?.W
+    if (floorWarmth != null) {
+        state.floorWarmth = floorWarmth
+    }
     def floorAway = data?.Schedule?.Floor?.A
     if (floorAway != null) {
         state.floorAway = floorAway

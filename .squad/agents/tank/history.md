@@ -6,6 +6,11 @@
 
 ## Latest Work (2026-05-18)
 
+### 2026-05-18T17:11:04Z — SunStat v0.1.10 shipped (SC-4 closes audit)
+- **SunStat v0.1.10**: cached `Schedule.Floor.W` into `state.floorWarmth` alongside `state.floorAway`, then added a skip-if-match guard in `setFloorMinTemp()` so redundant floor-min writes no longer issue a no-op PATCH.
+- Bumped parent + child + `drivers/sunstat-thermostat/packageManifest.json` to v0.1.10 for release sync; parent change is version-sync only.
+- **Status:** SHIPPED — SunStat redundant-write audit board is now empty (all repo-backed audit items closed).
+
 ### 2026-05-18T15:30:00Z — Audit shipping spree: 5 driver releases closed 16/17 findings
 - **Touchstone v0.1.25** (b4122ee): T-2 + T-3 (switch idempotency)
 - **Touchstone v0.1.26** (ffe2e9d): T-4 through T-10 (7× wire-only yellows batch)

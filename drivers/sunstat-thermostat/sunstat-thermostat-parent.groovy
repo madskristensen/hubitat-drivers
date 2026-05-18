@@ -1,7 +1,7 @@
 /**
  * SunStat Connect Plus — Parent Driver
  * Author:  Mads Kristensen
- * Version: 0.1.9
+ * Version: 0.1.10
  * License: MIT
  *
  * Token-based device discovery, polling, and command routing for the
@@ -13,6 +13,7 @@
  * command on the parent device. The driver rotates the token automatically after that.
  *
  * Changelog:
+ *   0.1.10 — 2026-05-18 — version synced to child (v0.1.10); no parent behavior change
  *   0.1.9 — 2026-05-18 — throttle lastActivity emit + child fan-out to ≥60s; cuts unchanged-event DB churn on polls (perf audit fix #1)
  *   0.1.8 — 2026-05-18 — skip redundant PATCH calls when device already matches (audit SP-1, SC-1, SC-2, SC-3); SC-4 deferred
  *   0.1.7 — 2026-05-17 — lastActivity attribute (ISO 8601 timestamp of last successful API call)
@@ -33,8 +34,8 @@ import groovy.json.JsonSlurper
 // Constants — all literals; NO cross-@Field references (Hubitat sandbox rule)
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION               = "0.1.9"
-@Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.8"
+@Field static final String DRIVER_VERSION               = "0.1.10"
+@Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.10"
 @Field static final String WATTS_API_BASE               = "https://home.watts.com/api"
 @Field static final String WATTS_TOKEN_URL              = "https://login.watts.io/tfp/wattsb2cap02.onmicrosoft.com/B2C_1A_Residential_UnifiedSignUpOrSignIn/oauth2/v2.0/token"
 @Field static final String WATTS_CLIENT_ID              = "c832c38c-ce70-4ebc-83b6-b4548083ac90"
