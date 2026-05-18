@@ -99,7 +99,55 @@ QA and testing specialist for Hubitat drivers. Focuses on real-device validation
 
 ---
 
+### 2026-05-18T03:18:12Z — HealthCheck + lastActivity Health Monitoring Shipped
+
+**Four new test areas for hardware validation:**
+
+1. **Touchstone v0.1.21 — HealthCheck capability + ping() command**
+   - **Test 40:** HealthCheck probe — `ping()` returns online within 2s on working device
+     - Pre-condition: Fireplace powered on, connected to network, Touchstone driver initialized
+     - Action: Press `ping` command from Hubitat device page (or call via Rule Machine)
+     - Expected: Dashboard shows `healthStatus = "online"` within 2 seconds
+     - Expected: Driver logs show "ping received" or equivalent success indicator
+     - **Risk:** 5-second timeout must fire if device goes offline during ping; watch for false "offline" on transient network blip
+     - **Pass criteria:** Ping resolves to online within 2s; timeout works if device is actually unreachable
+     - **Commit:** 6ab7ac3
+
+   - **Test 41:** HealthCheck offline detection — `healthStatus = "offline"` after device unplugged
+     - Pre-condition: Touchstone driver running with persistent socket, healthStatus currently online
+     - Action: Unplug fireplace from power for 30+ seconds
+     - Expected: Dashboard does NOT immediately flip to offline (waits for heartbeat failure + reconnect backoff cycle)
+     - Expected: After >= 2 failed reconnect attempts (~35 seconds), `healthStatus = "offline"`
+     - Expected: Logs show "Reconnect attempt 1", "Reconnect attempt 2", then offline transition
+     - **Risk:** Timing is dependent on heartbeat interval (10s) and reconnect backoff (5s, 30s, 60s) — may take 60+ seconds total
+     - **Pass criteria:** Offline state eventually reached after hardware disconnection; no premature flips
+
+2. **Gemstone v0.4.11 — lastActivity attribute on cloud REST API calls**
+   - **Test:** lastActivity timestamp updates on every successful API call
+     - Pre-condition: Gemstone driver installed, authenticated to cloud, at least one light group discovered
+     - Action: Observe initial `lastActivity` attribute (ISO 8601 timestamp)
+     - Action: Refresh the driver (from device page or Rule Machine)
+     - Expected: `lastActivity` timestamp updated to current time
+     - Action: Send a command (e.g., `on` to a light group)
+     - Expected: `lastActivity` timestamp updated again
+     - **Risk:** Cloud may be very fast or slow; verify timestamp is actually changing, not stuck
+     - **Pass criteria:** lastActivity advances on each refresh + command cycle
+
+3. **SunStat v0.1.7 — lastActivity attribute on parent + child cascade**
+   - **Test:** Parent and child lastActivity updates on poll cycle
+     - Pre-condition: SunStat parent + child devices installed, authenticated to Watts, thermostat paired
+     - Action: Observe initial `lastActivity` on both parent and child devices
+     - Action: Trigger a poll cycle (from parent device page)
+     - Expected: Both parent `lastActivity` and child `lastActivity` timestamps update
+     - Action: Send a command to child (e.g., `setHeatingSetpoint`)
+     - Expected: Child `lastActivity` updates; parent may or may not update (depending on response path)
+     - **Risk:** Parent-child cascade timing; verify child receives update from parent callback
+     - **Pass criteria:** Both parent and child show recent timestamps after poll; no stale attributes
+
+---
+
 ## Team updates
 
 - 2026-05-17: Participated in top-3 driver improvements batch — sunstat v0.1.6, touchstone v0.1.6, gemstone v0.4.9.
 - 2026-05-18: Queued for validation: Touchstone v0.1.18 persistent socket (Tests 34–37) + Gemstone v0.4.10 multi-zones (Tests 19–22) + Touchstone v0.1.19 child lock (Test 38) + Touchstone v0.1.20 discovery (Test 39) + HPM bundle v1.0.0 (multi-driver bundle install). Five validation areas pending hardware.
+- 2026-05-18: New health monitoring validation areas: Touchstone v0.1.21 HealthCheck ping (Tests 40–41) + Gemstone v0.4.11 lastActivity (Test 42) + SunStat v0.1.7 lastActivity cascade (Test 43). Eight total validation areas queued.

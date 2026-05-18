@@ -2,6 +2,49 @@
 
 ---
 
+## 2026-05-17: README Pre-Release Scrub (Tank-16)
+
+**Date:** 2026-05-17  
+**Author:** Tank (Copilot)  
+**Task:** Remove pre-1.0 migration, breaking-change, and upgrade-path content from all READMEs
+
+Removed pre-1.0 migration, breaking-change, and upgrade-path content from root README and all three driver READMEs (Gemstone, Touchstone, SunStat). Each now reads as if this is the first and only version. No mention of version history, backward compatibility, or upgrade paths. Changelog sections listing v0.4.x changes are gone. Groovy driver Changelog: blocks remain (developer-facing). Commit e4a68d5.
+
+---
+
+## ⚠️ USER DIRECTIVE — NO MIGRATION/BREAKING-CHANGE NOTES IN DRIVER READMEs
+
+**By:** Mads Kristensen (via Copilot)  
+**Date:** 2026-05-17  
+**Status:** ACTIVE — affects all future README work
+
+Do not include any "breaking changes," "what's new in this version," "things to be aware of when updating," migration guides, or upgrade-path notes in any driver README (root README + drivers/*/README.md). "No one has installed these drivers yet but me. we're still developing them."
+
+Affects all driver READMEs going forward. Existing migration-style sections must be scrubbed. The driver .groovy Changelog: block at the top of each file is the changelog (developer-facing); READMEs describe what the driver DOES, not what it USED TO DO. Revisit when post-1.0.
+
+---
+
+## 2026-05-17: Asymmetric Health Monitoring — HealthCheck vs lastActivity (Tank-17)
+
+**Date:** 2026-05-17  
+**Author:** Tank (Driver Developer)  
+**Status:** Shipped (v0.1.21, v0.4.11, v0.1.7)
+
+**Local TCP drivers (Touchstone):** Add the full HealthCheck capability with ping(), healthStatus, and lastActivity.
+
+**Cloud REST drivers (Gemstone, SunStat):** Add lastActivity only. No HealthCheck, no ping().
+
+Touchstone: local LAN TCP (free, no rate limits). The persistent socket can silently die between heartbeat windows. ping() provides on-demand socket validation. healthStatus = offline after >= 2 consecutive reconnect attempts.
+
+Gemstone + SunStat: API calls consume cloud quota. lastActivity is a passive timestamp — advances automatically on every successful 2xx response.
+
+Implementation: Touchstone v0.1.21 has capability HealthCheck with ping(). Gemstone v0.4.11 + SunStat v0.1.7 have lastActivity attribute hooked into all successful API response paths. New reusable pattern documented in .squad/skills/hubitat-healthcheck-vs-lastactivity/SKILL.md.
+
+---
+# Decisions
+
+---
+
 ## ⚠️ USER DIRECTIVE — NO JVM-BASED TESTING FRAMEWORKS
 
 **By:** Mads Kristensen (via Copilot)  
@@ -2147,6 +2190,7 @@ discoveryComplete()
 - `packageManifest.json` (bundle root): 1.0.0 → 1.0.1
 
 ---
+
 
 
 
