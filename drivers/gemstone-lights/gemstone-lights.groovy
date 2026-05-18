@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.13
+ * Version: 0.4.14
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.14 — 2026-05-18 — throttle lastActivity emit to ≥60s; cuts unchanged-event DB churn on polls (perf audit fix #1)
  *   0.4.13 — 2026-05-18 — skip redundant on/off/setLevel/setColor/setColorTemperature PUTs when device already matches (audit G-2 through G-6)
  *   0.4.12 — 2026-05-18 — skip redundant setEffect pattern PUT when effect already active (audit G-1)
  *   0.4.11 — 2026-05-17 — lastActivity attribute (ISO 8601 timestamp of last successful API call)
@@ -49,7 +50,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.13"
+@Field static final String DRIVER_VERSION = "0.4.14"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -1380,6 +1381,15 @@ private void handleAuthFailure(String logMessage, String statusValue) {
 }
 
 private void touchActivity() {
+    // Throttle to ≥60s between emissions: lastActivity is a coarse "last successful
+    // API call" timestamp; emitting on every async callback produces hundreds of
+    // events/day with no information gain. 60s preserves at-a-glance freshness
+    // without filling Hubitat's event-history DB.
+    Long lastEmittedAt = (state.lastActivityEmittedAt ?: 0L) as Long
+    if ((now() - lastEmittedAt) < 60000L) {
+        return
+    }
+    state.lastActivityEmittedAt = now()
     sendEvent(name: "lastActivity",
               value: new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX"),
               descriptionText: "${device.displayName} last activity")
