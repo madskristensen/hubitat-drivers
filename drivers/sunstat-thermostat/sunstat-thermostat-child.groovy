@@ -1,7 +1,7 @@
 /**
  * SunStat Connect Plus — Child Driver (Thermostat)
  * Author:  Mads Kristensen
- * Version: 0.1.6
+ * Version: 0.1.7
  * License: MIT
  *
  * Per-thermostat capability surface for the Watts® Home SunStat Connect Plus
@@ -9,6 +9,7 @@
  * driver (SunStat Connect Plus) via parent.sendDevicePatch(...).
  *
  * Changelog:
+ *   0.1.7 — 2026-05-17 — lastActivity attribute (ISO 8601 timestamp of last successful API call)
  *   0.1.6 — 2026-05-17 — Pseudo-boost implementation (driver-managed temporary setpoint override)
  *   0.1.5 — 2026-05-17 — Version synced to parent (v0.1.5); no behavior change in child
  *   0.1.2 — 2026-05-16 — Energy reporting, schedule toggle, hold attribute, outdoor temperature, setpoint stepping, floor bounds clamping
@@ -24,7 +25,7 @@ import groovy.json.JsonSlurper
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION                    = "0.1.6"
+@Field static final String DRIVER_VERSION                    = "0.1.7"
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_F        = 110L
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_C        = 43L
 
@@ -61,6 +62,7 @@ metadata {
         attribute "energyYesterday",     "number"
         attribute "energyMonth",         "number"
         attribute "energyLastMonth",     "number"
+        attribute "lastActivity",        "string"
     }
 
     preferences {
@@ -158,6 +160,11 @@ def logsOff() {
 def refresh() {
     debugLog "refresh() — delegating to parent poll"
     parent?.refresh()
+}
+
+void setLastActivity(String timestamp) {
+    sendEvent(name: "lastActivity", value: timestamp,
+              descriptionText: "${device.displayName} last activity")
 }
 
 // ---------------------------------------------------------------------------

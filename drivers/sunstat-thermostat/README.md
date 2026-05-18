@@ -50,6 +50,7 @@ This driver uses a **parent/child pattern**:
 | **setpointStep** | number | Device's setpoint increment (typically 1°F or 0.5°C). The driver rounds `setHeatingSetpoint` and `setFloorMinTemp` to this step before sending. |
 | **deviceOnline** | enum (`true` / `false`) | Whether the thermostat is connected to Wi-Fi |
 | **awayMode** | enum (`"home"`, `"away"`, `"unsupported"`, `"unknown"`) | Current away mode at this location. Read-only on child devices (mirrors the parent value). |
+| **lastActivity** | string | ISO 8601 timestamp of the last successful Watts cloud API response (set by parent; both parent and child expose this attribute) |
 
 ## Commands
 
@@ -84,6 +85,7 @@ This driver uses a **parent/child pattern**:
 |---|---|---|
 | **awayMode** | enum (`"home"`, `"away"`, `"unsupported"`, `"unknown"`) | Current away mode for this Watts location (affects all thermostats at once) |
 | **locationSupportsAway** | enum (`"true"`, `"false"`) | Whether this Watts location supports away mode (detected on first discovery) |
+| **lastActivity** | string | ISO 8601 timestamp of the last successful Watts cloud API response |
 
 ## Install via HPM (recommended)
 

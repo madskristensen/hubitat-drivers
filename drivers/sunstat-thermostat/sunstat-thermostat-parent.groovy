@@ -1,7 +1,7 @@
 /**
  * SunStat Connect Plus — Parent Driver
  * Author:  Mads Kristensen
- * Version: 0.1.6
+ * Version: 0.1.7
  * License: MIT
  *
  * Cloud auth, device discovery, polling, and command routing for the
@@ -13,6 +13,7 @@
  * command on the parent device. The driver rotates the token automatically after that.
  *
  * Changelog:
+ *   0.1.7 — 2026-05-17 — lastActivity attribute (ISO 8601 timestamp of last successful API call)
  *   0.1.6 — 2026-05-17 — Pseudo-boost implementation in child driver (driver-managed temporary setpoint override; no native boost API)
  *   0.1.5 — 2026-05-17 — Async polling fan-out (asynchttpGet/Patch replaces blocking httpGet/Patch on poll + patch paths); proactive token refresh rescheduled on initialize() when token is already valid; HTTP 429 warn-and-skip handling; child version synced to parent
  *   0.1.4 — 2026-05-16 — Fix API envelope unwrapping ({errorNumber, errorMessage, body} not unwrapped — caused "Could not resolve a Watts location ID"); URL-encode locationId in URL paths (Watts uses display names like "Misty Gray" as locationIds — spaces broke URL parsing); add diagnostic info logging in discovery
@@ -30,8 +31,8 @@ import groovy.json.JsonSlurper
 // Constants — all literals; NO cross-@Field references (Hubitat sandbox rule)
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION               = "0.1.6"
-@Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.6"
+@Field static final String DRIVER_VERSION               = "0.1.7"
+@Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.7"
 @Field static final String WATTS_API_BASE               = "https://home.watts.com/api"
 @Field static final String WATTS_TOKEN_URL              = "https://login.watts.io/tfp/wattsb2cap02.onmicrosoft.com/B2C_1A_Residential_UnifiedSignUpOrSignIn/oauth2/v2.0/token"
 @Field static final String WATTS_CLIENT_ID              = "c832c38c-ce70-4ebc-83b6-b4548083ac90"
@@ -60,6 +61,7 @@ metadata {
 
         attribute "awayMode",             "enum", ["home", "away", "unsupported", "unknown"]
         attribute "locationSupportsAway", "enum", ["true", "false"]
+        attribute "lastActivity",         "string"
     }
 
     preferences {
@@ -498,6 +500,7 @@ void pollChildDeviceCallback(response, Map data) {
         log.warn "[SunStat] pollChildDeviceCallback: child device not found for DNI ${childDni}"
         return
     }
+    touchActivity()
     child.parseDeviceState(body)
 }
 
@@ -529,6 +532,7 @@ void fetchLocationStateCallback(response, Map data) {
     List locations = parseResponseListFromString(response.data)
     Map loc = locations.find { safeStr(it?.locationId) == locId } as Map
     if (loc) {
+        touchActivity()
         parseLocationState(loc)
     } else {
         debugLog "fetchLocationStateCallback: locId ${locId} not found in /Location response"
@@ -640,6 +644,7 @@ private boolean refreshTokensSync() {
                 }
                 state.tokenExpiresAt = expiresOn ?: (currentEpochSeconds() + 900L)
                 scheduleProactiveRefresh()
+                touchActivity()
                 debugLog "Token refreshed; expires at epoch ${state.tokenExpiresAt}"
                 success = true
             } else {
@@ -667,6 +672,18 @@ private void scheduleProactiveRefresh() {
     Integer delay = Math.max(30, (expiresAt - nowSecs - TOKEN_REFRESH_LEEWAY_SECONDS) as Integer)
     runIn(delay, "proactiveTokenRefresh")
     debugLog "Proactive token refresh scheduled in ${delay} seconds"
+}
+
+// ---------------------------------------------------------------------------
+// Health tracking
+// ---------------------------------------------------------------------------
+
+private void touchActivity() {
+    String ts = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
+    sendEvent(name: "lastActivity", value: ts, descriptionText: "${device.displayName} last activity")
+    childDevices.each { child ->
+        child.setLastActivity(ts)
+    }
 }
 
 // ---------------------------------------------------------------------------
