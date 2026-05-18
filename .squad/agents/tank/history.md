@@ -160,3 +160,10 @@ Cypher + Trinity completed assessment of `eriktack/hubitat-daikin-wifi` upstream
 - v0.1.3 shipped swing mode (setSwingMode + swingMode attribute).
 - v0.1.4 shipped the remaining three: setSpecialMode, get_model_info cache, hygiene audit.
 - Future work: on-device timer (deferred — use Hubitat rules), parent/child multi-unit (deferred — Mads has one unit), EZ Dashboard JSON_OBJECT attributes (deferred, was v0.1.2 candidate per Cypher).
+
+## Learnings
+
+### v0.1.5 hotfix — Groovy triple-quote typo (2026-05-18)
+- **The typo:** ?: """ (3 quotes) opens a Groovy multiline GString that's never closed. Hubitat's parser rejects the entire driver file at load time with a parse error. The intent was ?: "" (empty-string fallback).
+- **Always grep for """ after touching any GString fallback expression.** A single extra quote is invisible at a glance but fatal on load.
+- **Lesson:** Hardware-untested features deserve a paranoid grep pass before commit. Tank-6 audited "no executable HubAction" but missed this Groovy literal subtlety. Add """ to the pre-commit mental checklist alongside isNumber() guards and mitIfChanged hygiene.

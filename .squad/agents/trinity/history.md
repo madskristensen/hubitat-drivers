@@ -165,3 +165,16 @@ Earlier memo (Section "Daikin capability gap analysis > Top capability gaps obse
 **Implication:** The memo's capability gap assessment was built on incomplete observations. While the underlying fork-is-sound verdict still holds, this particular gap was understated in the original analysis. Future audits should validate that attributes are actually being parsed in current driver builds, not assumed from metadata inspection alone.
 
 Trinity's history-archive.md has a snapshot of the original memo for reference; this note serves as the live correction.
+
+### Daikin v0.1.4 Roadmap Complete (Tank-6, 2026-05-18)
+
+**ROADMAP CLOSURE: v0.1.0 capability gap memo items 7–8 (econo/powerful, get_model_info) now shipped.**
+
+Tank-6 completed the final three roadmap items bundled in v0.1.4 (commit 1dd21fe):
+1. **Econo/Powerful mode** — `setSpecialMode("off"|"econo"|"powerful")` command + `specialMode` ENUM attribute, polled every fast-refresh cycle.
+2. **get_model_info runtime cache** — Called once in `initialize()`; caches model name, firmware, humidity sensor presence, swing support flags for diagnostics.
+3. **Event hygiene audit** — All five checks passed; driver was already clean (emitIfChanged on parse paths, descriptionText on all sendEvent, ≥60s lastActivity throttle, zero displayed:false remnants, zero isStateChange:true anti-patterns).
+
+**v0.1.0+ capability gap roadmap: FULLY IMPLEMENTED.** Hardware verification pending on Mads's BRP069B unit.
+
+**Hardware-verifiable risks flagged:** adv field bitmap values (econo=2, powerful=12) and get_model_info field names may differ on Mads's specific firmware revision. Treat as v0.1.5 fix-up territory if hardware testing reveals discrepancies.

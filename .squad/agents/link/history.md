@@ -192,3 +192,12 @@ See history-archive.md for detailed earlier sessions (Gemstone, SunStat, Bosch R
 
 3. **Test on First Install Before Shipping**  
    Both bugs were immediately visible on first Save Preferences after install. Smoke-test drivers on hub before tagging v1.0 releases.
+
+### Daikin v0.1.4 Roadmap Complete (Tank-6, 2026-05-18)
+
+**Daikin WiFi driver v0.1.4 shipped; v0.1.0+ roadmap CLOSED.** Tank-6 bundled final three capability items (commit 1dd21fe):
+1. **Econo/Powerful mode** — setSpecialMode + specialMode ENUM, polled every fast-refresh
+2. **get_model_info cache** — Called in initialize(); caches name, firmware, humidity/swing flags for diagnostics
+3. **Event hygiene audit** — All five checks passed (no anti-patterns detected)
+
+No documentation updates required for v0.1.4 (feature-level only; README and manifests already cover capabilities). Hardware verification pending on Mads's BRP069B unit.

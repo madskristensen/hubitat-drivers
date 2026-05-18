@@ -77,3 +77,12 @@ Two independent firmware failures observed in the Daikin WiFi driver:
 **Skill updated:** hubitat-hubaction-constructors/SKILL.md bumped to confidence **medium**; documents that **ALL Map-based HubAction forms are unreliable across firmware versions.**
 
 **Pattern for future LAN HTTP drivers:** Use asynchttpGet (send-helper + AsyncResponse callback pattern) documented in new skill hubitat-asynchttpget-pattern/SKILL.md (confidence **medium**).
+
+### Daikin v0.1.4 Roadmap Complete (Tank-6, 2026-05-18)
+
+**v0.1.0+ roadmap CLOSED.** Tank-6 shipped the final three capability items in v0.1.4 (commit 1dd21fe):
+1. **Econo/Powerful mode** — setSpecialMode command + specialMode ENUM, polled every fast-refresh via /aircon/get_special_mode
+2. **get_model_info runtime cache** — Called in initialize(); caches name, firmware, humidity/swing sensor flags for diagnostics
+3. **Event hygiene audit** — All five checks passed (emitIfChanged, descriptionText, 60s throttle, no displayed:false, no isStateChange:true anti-patterns)
+
+Your v0.1.0 capability gap research directly enabled this final ship. Hardware verification pending on Mads's BRP069B unit.
