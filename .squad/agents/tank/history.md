@@ -4,6 +4,17 @@
 
 ---
 
+## Team Updates — Daikin PR Assessment Complete (2026-05-18)
+
+**Cypher audit:** Inspected `eriktack/hubitat-daikin-wifi` PRs #2 & #3. **Verdict: Skip both for v0.1.1.**
+- PR #2 (Dashboard Tiles, 2023-03-19): Uses broken escaped-quote JSON workaround. Our v0.1.0 solves correctly via `JsonOutput.toJson()`.
+- PR #3 (EZ Dashboard, 2024-06-26): Adds JSON_OBJECT attribute type declarations + optional setter methods. Not critical for v0.1.1, but **v0.1.2 candidate** if users report EZ Dashboard rendering issues (~1.5 hours polish effort).
+- **v0.1.1 priorities unchanged:** econo mode, get_model_info, event hygiene.
+- **Cypher clean-room boundary:** locked out from implementing PR #3 features (read upstream PR code).
+- Details: `.squad/decisions/decisions.md` (cypher-daikin-upstream-prs-assessment) + `.squad/files/daikin-research/daikin-upstream-prs-assessment.md`
+
+---
+
 ## Team Updates — Daikin Driver Research (2026-05-18)
 
 Cypher + Trinity completed assessment of `eriktack/hubitat-daikin-wifi` upstream. **Recommendation: Fork into this repo as `drivers/daikin-wifi/` v0.1.0.**
@@ -105,6 +116,84 @@ All 8 perf/quality todos shipped across 5 driver releases (Touchstone v0.1.28, G
 ---
 
 ## Learnings
+
+### 2026-05-18 — drivers/daikin-wifi/ v0.1.0 shipped (clean-room implementation)
+
+**Commits:** `29f8389` (revert fork a3ac5cf) → `b26c04f` (clean-room v0.1.0)
+
+**Clean-room boundary pattern:**
+- Read PROSE memos (Cypher's assessment, Trinity's capability gap analysis) for protocol knowledge — never the upstream source.
+- Credit prior art in the file header ("Inspiration / prior art") and README ("Acknowledgments") section.
+- License is Mads's own MIT copyright — NOT inherited from the prior work.
+- Prior-art acknowledgment is not a license grant; no copyright block from the original is included.
+
+**Daikin BRP069B mode-code → Hubitat mode-string mapping (confirmed from BRP069B4 API doc):**
+```
+0 → auto, 1 → auto, 2 → dry, 3 → cool, 4 → heat, 6 → fan, 7 → auto
+pow=0 overrides all codes → "off"
+```
+Inverse: auto→1, cool→3, heat→4, dry→2, fan→6, off→0 (pow=0)
+
+**Daikin sentinel `"-"` field locations confirmed:**
+- `htemp` in `/aircon/get_sensor_info` — indoor temp, rare but possible
+- `otemp` in `/aircon/get_sensor_info` — outdoor temp, common (compressor-off, standby, some firmware variants)
+- `hhum` in `/aircon/get_sensor_info` — humidity, always `"-"` on units without a sensor
+- `stemp` in `/aircon/get_control_info` — can be `"-"` in fan/dry modes (no setpoint applies)
+Guard every numeric parse from these fields with `.isNumber()` before any `.toBigDecimal()` or parsing.
+
+**Separated fast/slow poll pattern:**
+- Fast poll (`refresh()`) — `get_control_info` + `get_sensor_info` — user-configurable 1–30 min
+- Slow poll (`refreshEnergy()`) — `get_week_power_ex` + `get_year_power_ex` — fixed 30-min cron
+Both scheduled in `initialize()` as separate cron entries; reused broadly for any thermostat with energy reporting.
+
+**HubAction callback pattern for local LAN HTTP:**
+```groovy
+sendHubCommand(new hubitat.device.HubAction(
+    [method: "GET", path: path, headers: ["HOST": "${ip}:80"]],
+    hubitat.device.Protocol.LAN,
+    [callback: "handlerMethodName"]
+))
+```
+Each endpoint gets its own callback method (e.g., `handleControlInfo`, `handleSensorInfo`). Avoids state.lastRequest tracking races.
+
+**DNI must be set to hex-encoded IP for Hubitat to route LAN responses:**
+```groovy
+device.deviceNetworkId = ip.tokenize('.').collect { String.format('%02x', it.toInteger()) }.join('').toUpperCase()
+```
+
+---
+
+### 2026-05-18 — drivers/daikin-wifi/ v0.1.0 shipped (fork of eriktack/hubitat-daikin-wifi — REVERTED)
+
+**Commit:** a3ac5cf — `feat(daikin-wifi): fork of eriktack/hubitat-daikin-wifi as v0.1.0`
+
+**Patterns applied:**
+
+- **Sentinel guard (`.isNumber()`):** Both `otemp` and `htemp` fields on `/aircon/get_sensor_info` can return `"-"` (truthy Groovy string, not a number). Applied `?.isNumber()` guard before `Double.parseDouble()` per Cypher's analysis. Reference: `daikin-wifi.groovy` lines 318–325. This independently confirms the `hubitat-sentinel-value-guards` skill (bumped to medium confidence).
+
+- **Pattern A HealthCheck (HTTP polling variant):** The Touchstone pattern uses a persistent TCP socket heartbeat for `ping()`. For a polling HTTP driver, `ping()` returns a HubAction directly (Hubitat auto-sends it). Response arrives in `parse()` which clears `state.pingPending`. `pingTimeout()` fires at 5s if no response. `lastActivity` throttled to ≥60s via `state.lastActivityEmittedAt`. Works correctly for LAN HTTP.
+
+- **`initialize()` lifecycle:** Standard Hubitat pattern — `unschedule(); startScheduledRefresh(); schedule(cron, refreshEnergy); refresh()`. Called from both `installed()` and `updated()`. Sets DNI if IP is configured (`if (settings.ipAddress) { setDNI() }`). Fixes post-reboot polling dead zone.
+
+- **Energy poll throttle:** Removed `get_week_power_ex` and `get_year_power_ex` from both `refresh()` and `updateDaikinDevice()`. New `refreshEnergy()` method scheduled via cron `"0 */30 * * * ?"` (30-minute fixed interval). Energy data changes at most hourly — 30-min cadence is more than adequate.
+
+- **EnergyMeter capability:** One-liner — added `capability "EnergyMeter"` and emitted `energy` attribute (kWh) alongside `energyToday` in the weekly-energy parse path.
+
+- **`emitIfChanged()` helper:** Simple BigDecimal comparison for numeric dedup, fallback to string comparison. Applied to indoor/outdoor temperature on parse path. Full event hygiene sweep deferred to v0.1.1.
+
+**Daikin BRP069B local HTTP protocol notes:**
+- Key endpoints: `GET /aircon/get_sensor_info` (htemp, otemp), `GET /aircon/get_control_info` (pow, mode, stemp, f_rate, f_dir), `GET /aircon/get_week_power_ex`, `GET /aircon/get_year_power_ex`
+- Fields that can return `"-"` sentinel: `otemp` (outdoor sensor unavailable), `htemp` (indoor sensor error, rare), `stemp` (fan/dry mode — correctly guarded in upstream with `.isNumber()` already)
+- Response format: `key=val,key=val,...` string, parsed by replacing `=` → `":"` and `,` → `","`
+- No authentication required on BRP069B. Port 80.
+- API has been stable since ≥2018 based on driver history.
+
+**MIT fork attribution model:**
+- The original Ben Dews copyright notice MUST be preserved verbatim in the file header (MIT license requirement: "The above copyright notice ... shall be included in all copies").
+- Safe pattern: include original copyright block, then add fork attribution (`Fork by: Mads Kristensen — {date}`) and new `Author:` / `Version:` fields above it in a separate header section.
+- Do NOT replace the original copyright line with the fork author's name.
+
+---
 
 ### 2026-05-18 — System.arraycopy sandbox block (Touchstone v0.1.30)
 

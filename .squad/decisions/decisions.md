@@ -1085,3 +1085,104 @@ The primitive for-loop pattern is the correct and final implementation for all b
 ## Rule Going Forward
 
 **Never use `System.arraycopy` in Hubitat Groovy drivers.** Add to the driver review checklist alongside CRC32 and reflection API checks. When reviewing any new byte-copy helper, require a primitive `for` loop.
+
+---
+
+## cypher-daikin-upstream-prs-assessment
+
+---
+author: cypher
+date: 2026-05-18T12:32:14-07:00
+status: ready-for-review
+subject: Adopt Upstream Daikin PRs into v0.1.1?
+---
+
+# Decision: Adopt Upstream Daikin PRs into v0.1.1?
+
+**Date:** 2026-05-18  
+**Author:** Cypher  
+**Status:** ✅ Ready for Mads review
+
+---
+
+## Bottom Line
+
+**Do not adopt either PR into v0.1.1.** Our clean-room v0.1.0 already addresses or surpasses both upstream PRs.
+
+- **PR #2 (Dashboard Tiles):** ❌ Uses incorrect JSON serialization (manual escaped quotes). **Skip.** Our v0.1.0 solves this properly with `JsonOutput.toJson()`.
+- **PR #3 (EZ Dashboard):** 🟡 Adds useful polish (JSON_OBJECT type declarations + optional setter methods) **but not critical for v0.1.1.** Defer to v0.1.2 if users report EZ Dashboard rendering issues.
+
+---
+
+## v0.1.1 Priority Unchanged
+
+**Current v0.1.1 roadmap** (from `.squad/decisions.md`):
+1. Econo mode support
+2. get_model_info capability
+3. Full event hygiene (descriptionText on all events)
+
+Both upstream PRs are lower priority than these deliverables.
+
+---
+
+## PR-by-PR Verdict
+
+### PR #2: Dashboard Tiles (2023-03-19)
+
+| Aspect | Verdict |
+|--------|---------|
+| Behavior | Emit `supportedThermostatModes` and `supportedThermostatFanModes` for dashboard recognition |
+| Quality | ❌ Footgun: uses manual `["\"auto\"","\"cool\"",...]` instead of proper JSON library |
+| Compat | ✅ Already solved in v0.1.0 (using `JsonOutput.toJson()`) |
+| Adoption | 🔴 **Skip** — our implementation is superior |
+
+**Why we're ahead:** Our v0.1.0 uses the correct Hubitat pattern (JsonOutput) instead of a workaround that works only via defensive dashboard parsing.
+
+### PR #3: EZ Dashboard (2024-06-26)
+
+| Aspect | Verdict |
+|--------|---------|
+| Behavior | Declare `supportedThermostatModes`/`supportedThermostatFanModes` as JSON_OBJECT; add `.isNumber()` guard for outdoor-temp unavailable case; optional setter methods |
+| Quality | ✅ Good — targets Hubitat 2.3.3+ schema and fixes real crash vector |
+| Compat | 🟡 Partially: crash fix already in v0.1.0, but missing attribute type declarations |
+| Adoption | 🟡 **Maybe later** — Polish worth v0.1.2 if needed |
+
+**What we're missing:**
+- Explicit `attribute ... JSON_OBJECT` declarations (5 min to add)
+- Two optional setter methods (useful for RM/dashboard runtime overrides, 15 min)
+
+**What we already have:**
+- `.isNumber()` guard for outdoor-sensor-unavailable case ✅
+
+---
+
+## Effort Estimate (if v0.1.2 adopts PR #3)
+
+| Task | Est. Hours |
+|------|-----------|
+| Add attribute type declarations to metadata | 0.1 |
+| Implement `setSupportedThermostatFanModes()` + `setSupportedThermostatModes()` | 0.25 |
+| Test on EZ Dashboard + RM | 1 |
+| **Total** | **~1.5 hours** |
+
+Low friction — only add if users report dashboard issues.
+
+---
+
+## Recommendation
+
+### v0.1.1: No PR adoption
+Focus on econo mode, get_model_info, event hygiene. Both upstream PRs can safely wait.
+
+### v0.1.2: Revisit PR #3 if needed
+Monitor user feedback. If EZ Dashboard rendering issues appear, implement PR #3's attribute type declarations + setter methods. Do not adopt PR #2's JSON approach.
+
+### Never: PR #2's JSON pattern
+Keep `JsonOutput.toJson()` — it's the correct Hubitat idiom and works properly.
+
+---
+
+## Full Assessment
+
+See `.squad/files/daikin-research/daikin-upstream-prs-assessment.md` for detailed code analysis and citations.
+
