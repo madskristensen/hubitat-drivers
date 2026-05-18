@@ -3357,3 +3357,361 @@ The prior audit (cypher-purpleair-audit.md, 2026-05-18T16:12) searched for Purpl
 - EPA Barkjohn formula source cited in driver: https://cfpub.epa.gov/si/si_public_record_report.cfm?dirEntryId=353088&Lab=CEMM
 - Prior audit (now superseded for cloud-gap claim): `.squad/decisions.md` / `.squad/decisions/inbox/cypher-purpleair-audit.md`
 
+
+
+---
+
+# Trinity Audit — pfmiller0 PurpleAir AQI Virtual Sensor
+**Date:** 2026-05-18T16:35:00-07:00
+**Requested by:** Mads Kristensen
+**Auditor:** Trinity (Lead/Architect)
+**Audit type:** Code quality (not protocol fit — protocol already scored 88/100 in decisions.md)
+
+---
+
+## 1. Verdict
+
+**MEDIUM → PR upstream.** Two conversion-algorithm BLOCKERS are the headline; maintainer is actively
+responding (last commit 2025-06-18). Submit PRs for the BLOCKERs first, then follow with the MINOR
+hygiene items. Do NOT fork — pfmiller0 owns the bug surface and is fixing it.
+
+---
+
+## 2. Driver Basics
+
+| Field | Value |
+|---|---|
+| **Repo** | https://github.com/pfmiller0/Hubitat |
+| **File** | `PurpleAir AQI Virtual Sensor.groovy` |
+| **Author** | Peter Miller (`pfmiller0`) |
+| **Version** | 1.3.2 |
+| **Last commit** | 2025-06-18 ("Fix for change in http response, and a few other minor changes") |
+| **Lines of code** | ~500 |
+| **HPM** | importUrl present; no `packageManifest.json` seen in repo |
+| **Protocol** | Cloud REST — `asynchttpGet` ✅ |
+
+---
+
+## 3. Findings
+
+| # | Severity | Category | Finding | Suggested fix | Approx. lines |
+|---|---|---|---|---|---|
+| 1 | **BLOCKER** | Correctness | `apply_conversion()` checks `"AQ and U"` but preference emits `"AQ&U"`. String never matches → AQ&U conversion is silently dead code; users get raw PM2.5 instead of corrected value. | Change check to `"AQ&U"` | `apply_conversion()` ~line 310 |
+| 2 | **BLOCKER** | Correctness | In `sensorCheck()`, `pm25_count` selection checks `"lrapa"` and `"woodsmoke"` (lowercase) against preference values `"LRAPA"` and `"Woodsmoke"` (mixed case). Woodsmoke and LRAPA conversions silently request `pm2.5` (atmospheric) instead of `pm2.5_cf_1` (channel 1 required by both formulas). Correction factor applied to wrong input data — corrupts AQI output. | Change to `"LRAPA"` and `"Woodsmoke"` to match preference strings | `sensorCheck()` ~line 85 |
+| 3 | **MAJOR** | Performance | `state.failCount?:0 + 1` — operator precedence bug. Evaluates as `state.failCount ?: (0 + 1)` i.e., `state.failCount ?: 1`. failCount never increments above 1. The exponential backoff never triggers; on API errors the driver hammers PurpleAir at the normal poll interval instead of backing off progressively. | Change to `(state.failCount ?: 0) + 1` | `httpResponse()` ~line 103 |
+| 4 | **MINOR** | Event hygiene | No `lastActivity` attribute or HealthCheck capability. Cloud REST drivers should implement the `lastActivity`-only Pattern B (see `hubitat-healthcheck-vs-lastactivity` skill). Without it, Rule Machine rules and dashboards have no way to detect if the sensor has stopped polling. | Add `attribute "lastActivity", "string"` and `touchActivity()` helper called on successful 200 response. Reference: Gemstone Lights `drivers/gemstone-lights/gemstone-lights.groovy`. | New ~8 lines |
+| 5 | **MINOR** | Event hygiene | All `sendEvent` calls fire on every poll regardless of value change. At 1-minute polling the driver emits 1,440+ events/day per attribute. `emitIfChanged` pattern would suppress unchanged values. | Wrap AQI/category/sites sendEvents in skip-if-match checks. Reference: `hubitat-event-hygiene` skill. | ~6 lines |
+| 6 | **MINOR** | Event hygiene | `sendEvent(name: "aqi", ..., descriptionText: "${AQIcategory}")` — the event log shows only "Good" with no device name or AQI number. | Change to `"${device.displayName} AQI is ${aqi2_5Value} (${AQIcategory})"` | `httpResponse()` ~line 190 |
+| 7 | **MINOR** | Event hygiene | `sendEvent(name: "sites", value: sites, descriptionText: "AQI reported from site ${sites}")` — no `device.displayName` prefix; `sites` is a List, not a String, so descriptionText may serialize as `[Site A, Site B]`. | Prefix with device.displayName; call `sites.join(", ")` in the descriptionText | ~line 185 |
+| 8 | **NIT** | Code quality | `AQIcategory = getCategory(aqi2_5Value)` inside `httpResponse()` — missing `def`/type declaration. Implicit binding works in Groovy/Hubitat sandbox today but is non-idiomatic and a maintenance risk. | `String AQIcategory = getCategory(aqi2_5Value)` | ~line 165 |
+| 9 | **NIT** | Code quality | `update_interval == "0"` error path calls `runIn(Integer.valueOf(update_interval) * state.failCount * 60, 'refresh')` = `runIn(0, ...)` = immediate refresh, even when user disabled polling. Should guard: `if (update_interval != "0")` before that runIn. | Wrap backoff runIn in `if (update_interval != "0")` guard | `httpResponse()` ~line 105 |
+
+---
+
+## 4. Change Size Estimate
+
+**MEDIUM — ~60–90 lines diff.**
+
+- Finding #1: 1 line fix
+- Finding #2: 2 line fix (two lowercase string literals)
+- Finding #3: 1 line fix
+- Finding #4: ~10 new lines (lastActivity attribute + touchActivity helper + call site)
+- Finding #5: ~15 lines (wrap 3 sendEvents in change-check)
+- Findings #6–9: ~5 lines total
+
+Two BLOCKERs are trivially small code changes (string literal fixes). The MAJOR is also a 1-liner.
+The MINORs are hygiene polish. Total diff is medium but not architectural.
+
+---
+
+## 5. PR vs. Fork Recommendation
+
+**Submit PRs upstream.**
+
+pfmiller0 committed a bug fix in June 2025 — less than 12 months ago. The repo is alive. The two
+BLOCKER bugs (case-mismatch in conversion names) are each 1-line fixes that would survive a quick
+review without controversy. Submit two separate PRs: one for the two conversion BLOCKERs (#1 and #2
+together, one `apply_conversion` fix + one `sensorCheck` fix), one for the failCount backoff bug
+(#3). The hygiene items (#4–9) can follow as a polish PR if the first two are accepted.
+
+If PRs are ignored for >60 days, revisit fork: the driver is small enough (~500 lines) to adopt. Fork
+would live at `drivers/purpleair-aqi/purpleair-aqi.groovy`. But try upstream first.
+
+---
+
+## 6. PR Starter List (ranked by impact)
+
+1. **[BLOCKER] Fix AQ&U and case-mismatch conversion strings**
+   - In `apply_conversion()`: change `"AQ and U"` → `"AQ&U"`
+   - In `sensorCheck()`: change `"lrapa"` → `"LRAPA"`, `"woodsmoke"` → `"Woodsmoke"`
+   - *Impact: AQ&U, Woodsmoke, and LRAPA conversions are currently broken/producing wrong output*
+
+2. **[MAJOR] Fix failCount operator precedence in backoff logic**
+   - In `httpResponse()`: change `state.failCount = state.failCount?:0 + 1` → `state.failCount = (state.failCount ?: 0) + 1`
+   - *Impact: Exponential backoff never works; hub hammers PurpleAir on failures*
+
+3. **[MINOR] Add `lastActivity` attribute and `touchActivity()` helper**
+   - Declare `attribute "lastActivity", "string"` in metadata
+   - Add `private void touchActivity()` pattern (see Gemstone Lights exemplar)
+   - Call after successful 200 response in `httpResponse()`
+   - *Impact: Rule Machine and dashboards gain health observability*
+
+4. **[MINOR] emitIfChanged for AQI/category/sites events**
+   - Wrap the three main sendEvents in change checks to suppress duplicate events at short poll intervals
+
+5. **[MINOR] Fix aqi descriptionText to include device name and AQI value**
+   - `"${device.displayName} AQI is ${aqi2_5Value} (${AQIcategory})"` instead of bare `"${AQIcategory}"`
+
+---
+
+## 7. Maintainer Responsiveness
+
+**RESPONSIVE.** Last commit 2025-06-18 (~11 months before this audit date). Fix was functional
+("change in http response") suggesting active maintenance for real usage. PRs have a reasonable chance
+of acceptance. Submit the BLOCKER PR first with a clear test case (e.g., "select AQ&U conversion,
+check that aqi value changes vs raw pm2.5").
+
+
+---
+
+# Trinity Audit — GvnCampbell Fully Kiosk Browser Controller
+**Date:** 2026-05-18T16:35:00-07:00
+**Requested by:** Mads Kristensen (2x installs: Bathroom tablet + Kitchen tablet)
+**Auditor:** Trinity (Lead/Architect)
+**Audit type:** Code quality
+
+---
+
+## 1. Verdict
+
+**MEDIUM → FORK.** The driver is functionally adequate but has 3 MAJOR findings and its maintainer
+has been completely silent for **4.5 years** (last commit 2021-11-20). With Mads running two
+instances that both need to stay stable, orphaned code at this age needs to be owned. Fork it.
+
+---
+
+## 2. Driver Basics
+
+| Field | Value |
+|---|---|
+| **Repo** | https://github.com/GvnCampbell/Hubitat |
+| **File** | `Drivers/FullyKioskBrowserController.groovy` |
+| **Author** | Gavin Campbell (`GvnCampbell`) |
+| **Version** | 1.41 |
+| **Last commit** | 2021-11-20 — **4.5 years stale** |
+| **Lines of code** | ~350 (22KB) |
+| **HPM** | importUrl present; no `packageManifest.json` seen in repo listing |
+| **Protocol** | Local LAN HTTP — `asynchttpPost` for commands ✅; `asynchttpGet` for refresh ✅ |
+
+---
+
+## 3. Findings
+
+| # | Severity | Category | Finding | Suggested fix | Approx. lines |
+|---|---|---|---|---|---|
+| 1 | **MAJOR** | Security | `serverPassword` preference declared as `type:"string"` → password is shown in cleartext in the driver UI and is embedded in every HTTP URL (`...&password=${serverPassword}&...`). Also logged at debug level via `logger(logprefix+postParams)` in `sendCommandPost()`. | Change pref to `type:"password"`; in `sendCommandPost()` suppress the full params map in debug log or redact the password field. | `preferences` block + `sendCommandPost()` ~lines 65, 205 |
+| 2 | **MAJOR** | Event hygiene | `refreshCallback()` calls `sendEvent` for `battery`, `switch`, `level`, and `currentPageUrl` on every 1-minute poll with no change-check. With `statePolling=true`, this generates 5,760+ low-value events/day across four attributes. | Apply `emitIfChanged` pattern (reference: `hubitat-event-hygiene` skill). Compare `device.currentValue(name)` before calling `sendEvent`. | `refreshCallback()` ~lines 220–225 |
+| 3 | **MAJOR** | Event hygiene | `parse()` emits `sendEvent([name:"switch",value:body.value])`, `battery`, `motion`, `acceleration`, `volume` with **no `descriptionText`** on any event. Events tab Description column is blank for all pushed events from the tablet. | Add `descriptionText: "${device.displayName} ${name} → ${value}"` to every `sendEvent` in `parse()` and `motion()`/`acceleration()`. Reference: `hubitat-event-hygiene` skill. | `parse()` + helpers ~lines 115–145 |
+| 4 | **MINOR** | Security | `serverPassword` is logged at debug level because `logger(logprefix+postParams)` in `sendCommandPost()` logs the full `postParams` Map which includes the URL with `?password=...` embedded. | Change to `logger(logprefix+"[cmd hidden]", "debug")` or redact: log URI host+port only. | `sendCommandPost()` ~line 205 |
+| 5 | **MINOR** | Best practices | `parse()` has no null/exception guard around `parseJson(body)`. If `msg.body` is null or the tablet sends malformed JSON, `parseJson` will throw `JsonException` and drop the event silently. | Wrap in `try { ... } catch (Exception e) { log.error "[parse] JSON parse failed: ${e.message}" }` | `parse()` ~lines 115–120 |
+| 6 | **MINOR** | Logging | The `logger()` function option list is `["none","debug","trace","info","warn","error"]` but the elif logic treats `debug` as "log everything" and `trace` as "log only trace+info". This is reversed from conventional logging convention (trace is most verbose; debug is less). Users selecting "trace" expect MORE output than "debug", but get less. | Either rename the options to clarify ("verbose"/"debug") or rewrite the elif chain to follow standard severity ordering. | `logger()` ~lines 255–275 |
+| 7 | **MINOR** | Maintenance | Version `1.41` exists only in the file comment header — no `@Field static final String DRIVER_VERSION = "1.41"` constant and no HPM-compatible `packageManifest.json`. Hubitat Package Manager cannot track updates. | Add `@Field static final String VERSION = "1.41"` (pattern from pfmiller0 PurpleAir driver); create `packageManifest.json` for HPM. | Header + new manifest file |
+| 8 | **NIT** | Best practices | `checkInterval` event (`sendEvent([name:"checkInterval",value:60])`) is sent in two places: `parse()` default branch and `sendCommandCallback()`. This is the old HealthCheck ping-interval hint mechanism — the driver declares `capability "HealthCheck"` but uses only this legacy event rather than the full `ping()` + `healthStatus` pattern. For a local LAN driver, full HealthCheck with `ping()` delegating to `refresh()` would be better. | Replace `checkInterval` event spam with proper `ping() { refresh() }` and `healthStatus` attribute. Reference: `hubitat-healthcheck-vs-lastactivity` skill Pattern A. | ~10 new lines |
+
+---
+
+## 4. Change Size Estimate
+
+**MEDIUM (~80–120 lines diff).**
+
+- Finding #1 (password type + log redact): ~5 lines
+- Finding #2 (emitIfChanged in refreshCallback): ~15 lines
+- Finding #3 (descriptionText everywhere): ~10 lines
+- Finding #4 (log redact): ~2 lines (same PR as #1)
+- Finding #5 (parse null guard): ~5 lines
+- Finding #6 (logger rewrite): ~15 lines
+- Finding #7 (version constant): 1 line + new manifest file
+- Finding #8 (HealthCheck proper): ~12 lines
+
+Total: ~60–65 lines code changes + manifest. MEDIUM by count but maintainer silence makes this a FORK decision.
+
+---
+
+## 5. PR vs. Fork Recommendation
+
+**Fork into this repo as `drivers/fully-kiosk/fully-kiosk.groovy`.**
+
+GvnCampbell has committed nothing since 2021-11-20. That's 4.5 years of silence. The community
+forum thread (community.hubitat.com/t/release-fully-kiosk-browser-controller/12223) is the canonical
+reference, but the driver is orphaned. Mads runs two instances in active daily use (bathroom + kitchen
+tablets). With the Hubitat platform evolving (firmware 2.9.0 already broke speak(), requiring a fix in
+v1.41 — the last commit), it's a matter of time before the next firmware break hits.
+
+The code is small (~350 lines), well-structured, and the protocol is stable (FKB REST API). Forking
+is low-effort. Upstream PR is not viable — even if the repo accepted a PR, GvnCampbell is clearly not
+reviewing anything.
+
+---
+
+## 6. Fork Scope
+
+**What to keep:**
+- All command methods (bringFullyToFront, loadURL, screenOn/Off, speak, setVolume, etc.) — these are
+  correct implementations of the Fully Kiosk Browser REST API.
+- `configure()` JavaScript injection — the `injectJsCode` approach is the canonical FKB push-event
+  pattern; keep it.
+- `asynchttpPost` / `asynchttpGet` usage — already async, no change needed.
+- Capability set (Switch, SwitchLevel, MotionSensor, Battery, Alarm, AudioVolume, etc.) — correct for
+  this device type.
+
+**What to rewrite/add:**
+1. `serverPassword` → `type:"password"` preference + remove password from debug logs.
+2. `refreshCallback()` → add `emitIfChanged` pattern for all 4 attributes.
+3. `parse()` + helpers → add `descriptionText` to all `sendEvent` calls; add JSON null guard.
+4. `logger()` → simplify to standard `logEnable` bool + `log.debug`/`log.info`/`log.warn`/`log.error`
+   (the fancy multi-level logger is over-engineered for this driver size and has the severity inversion
+   bug; replace with Hubitat community standard `if (logEnable) log.debug ...`).
+5. Proper HealthCheck: replace `checkInterval` event spam with `ping() { refresh() }`.
+6. Add `@Field static final String VERSION = "1.50"` and `packageManifest.json`.
+7. `lastActivity` attribute updated on every successful `refreshCallback` 200 response.
+
+**Suggested home:** `drivers/fully-kiosk/fully-kiosk.groovy`
+**Suggested version bump:** Start at `2.0.0` (fork, clean rewrite of logger + hygiene) to distinguish
+from the upstream 1.41 lineage.
+
+**Two-device support note:** Mads's two tablets (Bathroom + Kitchen) each need their own Hubitat
+device with their own IP/port/password preferences. The current driver is already single-device per
+instance — no parent/child needed. The `controllerName` multi-controller binding pattern
+(`multi-controller-binding` skill) is not needed here since each tablet is physically distinct.
+
+---
+
+## 7. Maintainer Responsiveness
+
+**UNRESPONSIVE (4.5 years).** No basis for PR. Fork is the correct path.
+
+
+---
+
+# Trinity Audit — djdizzyd Advanced Honeywell T6 Pro Thermostat
+**Date:** 2026-05-18T16:35:00-07:00
+**Requested by:** Mads Kristensen (Downstairs thermostat; Upstairs may run generic Hubitat driver)
+**Auditor:** Trinity (Lead/Architect)
+**Audit type:** Code quality
+
+---
+
+## 1. Verdict
+
+**MEDIUM → FORK.** The driver has 1 confirmed BLOCKER (`txtEnable` undefined), 3 MAJORs including a
+silent nil-dereference bug that corrupts thermostat operating-state logic, and the maintainer has been
+completely silent since **2021-01-22 (4+ years)**. For a thermostat driver that affects home climate
+control, orphaned code with active bugs needs to be owned. Fork it.
+
+---
+
+## 2. Driver Basics
+
+| Field | Value |
+|---|---|
+| **Repo** | https://github.com/djdizzyd/hubitat |
+| **File** | `Drivers/Honeywell/Advanced-Honeywell-T6-Pro.groovy` |
+| **Author** | Bryan Copeland (`djdizzyd`) |
+| **Version** | v1.2 |
+| **Last commit** | 2021-01-22 — **4+ years stale** |
+| **Lines of code** | ~500 |
+| **HPM** | importUrl present; no `packageManifest.json` seen in repo |
+| **Protocol** | Z-Wave (event-driven; no HTTP) |
+| **Z-Wave security** | `zwaveSecureEncap()` — modern S2 security encapsulation ✅ |
+
+---
+
+## 3. Findings
+
+| # | Severity | Category | Finding | Suggested fix | Approx. lines |
+|---|---|---|---|---|---|
+| 1 | **BLOCKER** | Correctness | `txtEnable` is referenced throughout (`if (txtEnable) log.info ...`) but is **never declared as a preference**. Only `logEnable` is in `preferences {}`. `txtEnable` is always null/false, so all informational log statements (battery %, AC mains events, etc.) are permanently silenced regardless of user settings. | Either add `input "txtEnable", "bool", title: "Enable description text logging"` to preferences, or replace all `if (txtEnable)` guards with `if (logEnable)`. | ~20 call sites throughout |
+| 2 | **MAJOR** | Correctness | `device.currentValue=="cooling"` (missing attribute name argument) in `zwaveEvent(ThermostatFanStateReport)` and `zwaveEvent(BasicSet)`. `device.currentValue` without args is a method reference — always truthy in Groovy. The condition `device.currentValue=="cooling"` is always `false` (a method object never equals the string "cooling") rather than the intended `device.currentValue("thermostatOperatingState")=="cooling"`. The operating-state polling logic after a fan state change is subtly wrong: the corrective `thermostatOperatingStateGet` fires at the wrong times. | Change `device.currentValue=="cooling"` → `device.currentValue("thermostatOperatingState")=="cooling"` in both locations. | `zwaveEvent(ThermostatFanStateReport)` and `zwaveEvent(BasicSet)` |
+| 3 | **MAJOR** | Scheduler | `configure()` calls `runEvery3Hours("syncClock")` without calling `unschedule()` first. `updated()` does call `unschedule()` before calling `runEvery3Hours`, but if the user manually triggers `configure()` from the device page (common during setup), zombie `syncClock` schedulers pile up — one per configure invocation. After 3 configure invocations, `syncClock` fires 3× every 3 hours. | Add `unschedule("syncClock")` at the top of `configure()` before `runIn(10, "syncClock")` and `runEvery3Hours("syncClock")`. | `configure()` |
+| 4 | **MAJOR** | Correctness | `zwave.configurationV1.configurationGet(parameterNumber: 52)` in `zwaveEvent(ThermostatFanStateReport)` — parameter 52 is not in `configParams` (map only covers params 1–42). The resulting `ConfigurationReport` arrives in `zwaveEvent(ConfigurationReport)`, checks `configParams[52]` which is `null`, and silently does nothing. This looks like dead/abandoned code for a thermostat mode parameter that was never completed. | Either remove the `configurationGet(52)` call, or add param 52 to `configParams` with its correct definition. T6 Pro param 52 is not in the standard Honeywell T6 Pro Z-Wave parameter set (params 1–42 per Honeywell documentation); this is likely a copy-paste leftover. | `zwaveEvent(ThermostatFanStateReport)` |
+| 5 | **MINOR** | Lifecycle | No `initialize()` method despite Z-Wave drivers benefiting from hub-reboot recovery. After a hub restart, Z-Wave associations may need to be re-established. Adding an `initialize()` that calls `configure()` (or at minimum re-sends the association set) ensures the thermostat re-registers with the hub after reboot. | Add `void initialize() { configure() }` and optionally declare `capability "Initialize"` in metadata. | ~3 new lines |
+| 6 | **MINOR** | Best practices | `supportedThermostatModes` and `supportedThermostatFanModes` events use the old `toString().replaceAll(/"/,"")` pattern: `value: supportedThermostatModes.toString().replaceAll(/"/,"")`. Current Hubitat best practice emits these as a JSON array via `groovy.json.JsonOutput.toJson(list)`. The old pattern produces `[auto, off, heat, emergency heat, cool]` which some automations struggle to parse. | Change to `sendEvent(name:"supportedThermostatModes", value: groovy.json.JsonOutput.toJson(supportedThermostatModes), isStateChange:true)` | `initializeVars()` |
+| 7 | **MINOR** | Event hygiene | `eventProcess()` does a string comparison `device.currentValue(evt.name).toString() != evt.value.toString()` before emitting. For temperature setpoints, `"68.0"` vs `"68"` would trigger a false-positive emit (same temp, different string representation). The `BigDecimal`-aware comparison from the `hubitat-event-hygiene` skill would eliminate this. | Use numeric comparison for numeric attributes: `safeBigDecimal(current) != safeBigDecimal(incoming)` before emitting. Reference: `emitIfChanged` in `hubitat-event-hygiene` skill. | `eventProcess()` |
+| 8 | **MINOR** | Logging | `log.info "Notification: " + ZWAVE_NOTIFICATION_TYPES[cmd.notificationType]` fires unconditionally (no `logEnable` guard) for every Z-Wave notification. Z-Wave thermostats send periodic notifications; this spams the live log regardless of user's log setting. | Wrap in `if (logEnable) log.debug ...` or gate at `log.info` but only for relevant notification types (power management events 2+3 are fine as log.info; the rest should be debug). | `zwaveEvent(NotificationReport)` |
+| 9 | **NIT** | Maintenance | Version `v1.2` only in file-header comment. No `@Field static final String VERSION = "1.2"` constant; no `packageManifest.json` for HPM. | Add `@Field static final String VERSION = "1.2"` to file constants section; create `packageManifest.json`. | Header |
+
+---
+
+## 4. Change Size Estimate
+
+**MEDIUM (~80–100 lines diff).**
+
+- Finding #1 (txtEnable fix): add 1 preference line + optionally replace ~20 guard calls (or just add the pref — simplest fix)
+- Finding #2 (`currentValue` bug): 2 line fixes (two locations)
+- Finding #3 (unschedule in configure): 1 line
+- Finding #4 (remove param 52 call): 1 line
+- Finding #5 (initialize): 3 lines
+- Finding #6 (supportedThermostatModes JSON): 2 lines
+- Finding #7 (eventProcess numeric compare): ~8 lines
+- Finding #8 (log.info guard): ~3 lines
+- Finding #9 (version): 1 line + new manifest
+
+Total: ~40–50 code lines + manifest. MEDIUM by raw change count, but FORK is driven by maintainer
+status, not change size.
+
+---
+
+## 5. PR vs. Fork Recommendation
+
+**Fork into this repo as `drivers/honeywell-t6-pro/honeywell-t6-pro.groovy`.**
+
+djdizzyd has committed nothing to this driver since 2021-01-22. The repo itself shows some activity
+in other drivers from that era but nothing recent on the Honeywell T6 Pro file. With Mads running at
+least one T6 Pro (Downstairs, and potentially adding Upstairs), a thermostat driver that silently
+mis-logs, has a nil-dereference in fan-state logic, and accumulates zombie schedulers on configure is
+not "install and forget." The fix surface is small and the Z-Wave protocol is stable — this is a good
+adoption candidate.
+
+The djdizzyd driver is also already the base that Hubitat Inc. incorporated into their built-in
+Honeywell T6 Pro driver. Mads can take the community version, apply the fixes, and ship a clean fork.
+No upstream dependency. The Z-Wave command classes and fingerprint are correct and up-to-date for the
+T6 Pro's Z-Wave Plus profile.
+
+---
+
+## 6. Fork Scope
+
+**What to keep:**
+- All Z-Wave event handlers (`zwaveEvent(*)`) — the Z-Wave command class mappings are correct
+- `@Field static Map CMD_CLASS_VERS`, `THERMOSTAT_*` lookup maps — accurate and well-structured
+- `configParams` map (all 42 params) — comprehensive, correct for T6 Pro
+- `secureCommand()` / `sendToDevice()` / `commands()` Z-Wave send infrastructure — `zwaveSecureEncap`
+  is the correct modern pattern
+- `syncClock()` — clock sync to thermostat is a useful feature not in the generic driver
+- `SensorCal` and `IdleBrightness` custom commands — these expose T6 Pro-specific config that the
+  generic driver omits; keep them
+
+**What to fix/add:**
+1. Add `input "txtEnable", "bool", title: "Enable text logging", defaultValue: true` to preferences.
+2. Fix `device.currentValue=="cooling"` → `device.currentValue("thermostatOperatingState")=="cooling"` (two locations).
+3. Add `unschedule("syncClock")` at top of `configure()`.
+4. Remove the `configurationGet(parameterNumber: 52)` dead-code call.
+5. Add `void initialize() { configure() }`.
+6. Update `supportedThermostatModes`/`supportedThermostatFanModes` to emit JSON array.
+7. Upgrade `eventProcess()` numeric comparison for temperature attributes.
+8. Guard `log.info "Notification:"` with `if (logEnable)`.
+9. Add `@Field static final String VERSION` + `packageManifest.json`.
+
+**Upstairs thermostat note:** If Upstairs currently runs the Hubitat built-in generic driver and Mads
+wants feature parity (SensorCal, IdleBrightness, syncClock), switch both to the forked driver. If
+upstairs is already working and the built-in generic is sufficient, no rush — but the Downstairs unit
+should move to the fork to eliminate the BLOCKER/MAJOR bugs.
+
+**Suggested home:** `drivers/honeywell-t6-pro/honeywell-t6-pro.groovy`
+**Suggested version:** Start at `2.0.0` to distinguish from djdizzyd's 1.2 lineage.
+
+---
+
+## 7. Maintainer Responsiveness
+
+**UNRESPONSIVE (4+ years).** No basis for PR. Fork is the correct path.

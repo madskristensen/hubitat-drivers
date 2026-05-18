@@ -188,3 +188,19 @@ PurpleAir cloud driver is the next likely build target. No hardware needed for t
 
 ---
 
+## Team Update — Honeywell T6 Pro Fork (2026-05-18)
+
+**From:** Trinity audit + Tank fork verdict (2026-05-18T23:45:00Z)
+
+**When Honeywell T6 Pro fork ships to `drivers/honeywell-t6-pro/`, validate:**
+
+1. **Fan-state operating-mode detection** — Currently broken. `currentValue()` method reference (missing attribute name argument) in `zwaveEvent(ThermostatFanStateReport)` at line ~210. After fix, fan state changes should correctly trigger `thermostatOperatingStateGet` poll. Verify: change fan mode on physical thermostat; check `thermostatOperatingState` attribute updates within 5 seconds.
+
+2. **Info-level log events** — txtEnable preference was never declared; all `if (txtEnable) log.info` calls are permanently silenced. After fix (add preference + verify calls), system events should log: battery %, AC mains events, Z-Wave associations. Enable `txtEnable` in preferences; check logs during poll cycle + mode change.
+
+3. **syncClock scheduler accumulation** — configure() doesn't call unschedule() before runEvery3Hours("syncClock"), causing zombie schedulers to pile up on repeated configure invocations (common during setup). After fix, manual configure() from device page should not spawn new scheduler instances. Test: open device page; click `Configure` 3 times in quick succession; check if syncClock fires exactly once every 3 hours (not 3×).
+
+**Affected devices:** Mads's Downstairs thermostat runs this driver today. Honeywell T6 Pro is the thermostat model.
+
+---
+

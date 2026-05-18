@@ -245,3 +245,16 @@ pfmiller0's `PurpleAir AQI Virtual Sensor.groovy` is the cloud-API driver that p
 
 ---
 
+## Team Update — 3 Community Driver Code-Quality Audits (2026-05-18)
+
+**From:** Trinity audit + Scribe merge (2026-05-18T23:45:00Z)
+
+**Verdicts:**
+- **pfmiller0 PurpleAir AQI:** 3 bugs, PRs upstream (maintainer active June 2025; conversion string BLOCKERs + failCount backoff MAJOR)
+- **GvnCampbell Fully Kiosk:** FORK to `drivers/fully-kiosk/` (silent 4.5y; password leaks in debug logs, no emitIfChanged in poll = 5760+ events/day)
+- **djdizzyd Honeywell T6 Pro:** FORK to `drivers/honeywell-t6-pro/` (silent 4y; BLOCKER txtEnable never declared + currentValue() missing attribute argument breaks fan-state detection — affects Mads's installed thermostats today)
+
+**Tank's next actions:** (1) PRs upstream to pfmiller for conversion + backoff bugs (~60–90 line diff, low review friction), (2) fork to `drivers/honeywell-t6-pro/` — ~15 line fix, BLOCKER affecting installed devices, (3) fork to `drivers/fully-kiosk/` — rewrite logger + hygiene + password type, 2 instances in production. Audit files in decisions.md with exact line citations.
+
+---
+
