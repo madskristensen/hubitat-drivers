@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.25
+ * Version: 0.1.26
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.26 — 2026-05-18 — skip redundant setFlameColor/Brightness/Speed/setCharcoalColor/setHeatLevel/setHeatingSetpoint/setChildLock DP writes when attribute already matches (audit T-4 through T-10)
  *   0.1.25 — 2026-05-18 — skip redundant on()/off() DP writes when switch is already in the requested state (audit T-2, T-3)
  *   0.1.24 — 2026-05-18 — close v0.1.23 gap: defaultHeatingSetpoint now also skips redundant DP write when device setpoint already matches
  *   0.1.23 — 2026-05-18 — skip default DP writes during power-on when current attribute value already matches the configured default
@@ -86,8 +87,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.25"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.25"
+@Field static final String DRIVER_VERSION = "0.1.26"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.26"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -617,6 +618,12 @@ def setFlameColor(color) {
         return
     }
 
+    String currentFlameColor = safeStr(device.currentValue("flameColor"))
+    if (currentFlameColor != null && currentFlameColor == label) {
+        debugLog "setFlameColor: already '${label}' — skipping DP write"
+        return
+    }
+
     String dpValue = FLAME_COLOR_TO_DP[label]
     debugLog "setFlameColor: sending DP ${flameColorDp} = '${dpValue}' (label '${label}') to device"
     infoLog "${device.displayName} flame color → ${label}"
@@ -636,6 +643,12 @@ def setFlameBrightness(level) {
         return
     }
 
+    String currentFlameBrightness = safeStr(device.currentValue("flameBrightness"))
+    if (currentFlameBrightness != null && currentFlameBrightness == label) {
+        debugLog "setFlameBrightness: already '${label}' — skipping DP write"
+        return
+    }
+
     String dpValue = FLAME_BRIGHTNESS_TO_DP[label]
     infoLog "${device.displayName} flame brightness → ${label}"
     emitAttribute("flameBrightness", label, "${device.displayName} flame brightness set to ${label}", "digital")
@@ -651,6 +664,12 @@ def setCharcoalColor(color) {
 
     Integer charcoalColorDp = mappedCommandDp("charcoalColor", "Charcoal color")
     if (charcoalColorDp == null) {
+        return
+    }
+
+    String currentCharcoalColor = safeStr(device.currentValue("charcoalColor"))
+    if (currentCharcoalColor != null && currentCharcoalColor == label) {
+        debugLog "setCharcoalColor: already '${label}' — skipping DP write"
         return
     }
 
@@ -678,6 +697,12 @@ def setFlameSpeed(String speed) {
         return
     }
 
+    String currentFlameSpeed = safeStr(device.currentValue("flameSpeed"))
+    if (currentFlameSpeed != null && currentFlameSpeed == label) {
+        debugLog "setFlameSpeed: already '${label}' — skipping DP write"
+        return
+    }
+
     String dpValue = FLAME_SPEED_TO_DP[label]
     infoLog "${device.displayName} flame speed → ${label}"
     emitAttribute("flameSpeed", label, "${device.displayName} flame speed set to ${label}", "digital")
@@ -693,6 +718,12 @@ def setHeatLevel(level) {
 
     Integer heatLevelDp = mappedCommandDp("heatLevel", "Heat level")
     if (heatLevelDp == null) {
+        return
+    }
+
+    String currentHeatLevel = safeStr(device.currentValue("heatLevel"))
+    if (currentHeatLevel != null && currentHeatLevel == normalized) {
+        debugLog "setHeatLevel: already '${normalized}' — skipping DP write"
         return
     }
 
@@ -715,6 +746,13 @@ def setHeatingSetpoint(temp) {
     }
 
     Integer clamped = clampSetpoint(requested, unit)
+
+    Integer currentSetpoint = safeInt(device.currentValue("heatingSetpoint"), null)
+    if (currentSetpoint != null && currentSetpoint == clamped) {
+        debugLog "setHeatingSetpoint: already ${clamped}°${unit} — skipping DP write"
+        return
+    }
+
     infoLog "${device.displayName} heating setpoint → ${clamped}°${unit}"
     emitAttribute("heatingSetpoint", clamped, "${device.displayName} heating setpoint set to ${clamped}°${unit}", "digital", unit)
     sendDpWrite(targetDp.toString(), clamped, "heating setpoint", WRITE_REFRESH_DELAY_SECONDS)
@@ -738,6 +776,13 @@ def setChildLock(lockState) {
         log.warn "[Touchstone] setChildLock: invalid state '${lockState}' — use 'on' or 'off'"
         return
     }
+
+    String currentChildLock = safeStr(device.currentValue("childLock"))
+    if (currentChildLock != null && currentChildLock == normalized) {
+        debugLog "setChildLock: already '${normalized}' — skipping DP write"
+        return
+    }
+
     log.info "[Touchstone] Child lock: ${normalized}"
     emitAttribute("childLock", normalized, "${device.displayName} child lock set to ${normalized}", "digital")
     sendDpWrite("108", normalized == "on", "child lock", WRITE_REFRESH_DELAY_SECONDS)
