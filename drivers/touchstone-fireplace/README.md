@@ -65,10 +65,12 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 | Command | Parameters | Description |
 |---|---|---|
-| **`setFlameColor(color)`** | `"1"` – `"6"` | Set flame effect: 1=Orange, 2=Blue, 3=Yellow, 4=Orange+Blue, 5=Orange+Yellow, 6=Blue+Yellow |
-| **`setFlameBrightness(level)`** | `"1"` – `"5"` | Set flame lighting: 1=20%, 2=40%, 3=60%, 4=80%, 5=100% |
+| **`setFlameColor(color)`** | integer 1–6 | Set flame effect: 1=Orange, 2=Blue, 3=Yellow, 4=Orange+Blue, 5=Orange+Yellow, 6=Blue+Yellow |
+| **`setFlameBrightness(level)`** | integer 1–5 | Set flame lighting: 1=20%, 2=40%, 3=60%, 4=80%, 5=100% |
 | **`setFlameSpeed(speed)`** | `"Slow"` / `"Medium"` / `"Fast"` | Set flame animation speed (Sideline Elite DP 103) |
-| **`setLogColor(color)`** | `"1"` – `"12"` | Set log/ember color (1=orange, 2=red, 3=blue, 4=yellow, 5=green, 6=purple, 7=teal, 8=pink, 9=white, 10=peachpuff, 11=black, 12=grey) |
+| **`setLogColor(color)`** | integer 1–12 | Set log/ember color (1=orange, 2=red, 3=blue, 4=yellow, 5=green, 6=purple, 7=teal, 8=pink, 9=white, 10=peachpuff, 11=black, 12=grey) |
+
+> **Hubitat Commands-tab dropdown +1 quirk:** Enum command parameters whose constraints are numeric strings cause the Hubitat web UI dropdown to advance one position after pressing Set. This is a platform behavior unrelated to actual device state. As of v0.1.12, the numeric-range commands (`setFlameBrightness`, `setFlameColor`, `setLogColor`) are declared as `NUMBER` instead of `ENUM` to sidestep the visual issue. The label enums (`setFlameSpeed`, `setHeatLevel`) keep `ENUM` since their labels aren't numeric.
 
 > **DP 105 (log brightness):** The Sideline Elite firmware appears to treat DP 105 as read-only — writes are silently dropped. The `setLogBrightness` command was removed in v0.1.11; the actual write target for log/ember brightness control on this model is unknown. Pending further investigation.
 

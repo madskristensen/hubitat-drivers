@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.7
+ * Version: 0.1.12
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.12 — 2026-05-17 — work around Hubitat Commands-tab dropdown +1 bug
  *   0.1.11 — 2026-05-17 — remove dead setLogBrightness; fix write-side off-by-one
  *   0.1.10 — 2026-05-17 — fix off-by-one in inbound enum DP display
  *   0.1.9 — 2026-05-17 — default log brightness preference
@@ -30,6 +31,11 @@
  *   0.1.1 — 2026-05-17 — Generalized device profiles, in-driver DP discovery, and auditable raw DP writes
  *   0.1.0 — 2026-05-17 — Initial Tuya Local scaffold for power, heat level, flame/log lighting, temperature polling, raw DP surfacing, and socket retry/backoff
  */
+// v0.1.12 — Converted setFlameBrightness, setFlameColor, and setLogColor from ENUM (with numeric-string
+//           constraints) to NUMBER (with range constraints). Hubitat's Commands-tab dropdown advances enum
+//           entries by one position after Set when the values are numeric strings — platform UI quirk, not a
+//           driver bug. NUMBER-typed parameters render as input fields, sidestepping the dropdown widget.
+//           Handlers now accept a numeric argument, convert to string label, and proceed as before.
 // v0.1.11 — remove dead setLogBrightness (DP 105 confirmed read-only on Sideline Elite firmware); add defensive
 //           input-validation guards to setFlameColor, setFlameBrightness, setLogColor. Note: write-side emit in
 //           v0.1.10 already used the input label directly — no OPTIONS[dpValue] off-by-one was present in those
@@ -48,8 +54,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.11"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.11"
+@Field static final String DRIVER_VERSION = "0.1.12"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.12"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -108,14 +114,11 @@ metadata {
 
         // TODO (Switch): verify these community-derived raw Tuya enum ranges on real Touchstone hardware.
         // Keep the command inputs as raw strings for now so the driver does not pretend to know labels it has not verified.
-        command "setFlameColor", [[name: "color*", type: "ENUM", constraints: FLAME_COLOR_OPTIONS,
-            description: "Raw Tuya enum string for the mapped flame-color DP (Sideline default 101; use setRawDP() for experiments)."]]
-        command "setFlameBrightness", [[name: "level*", type: "ENUM", constraints: FLAME_BRIGHTNESS_OPTIONS,
-            description: "Raw Tuya enum string for the mapped flame-brightness DP (Sideline default 102)."]]
+        command "setFlameColor", [[name: "color*", type: "NUMBER", description: "Flame color (1–6): 1=Orange, 2=Blue, 3=Yellow, 4=Orange+Blue, 5=Orange+Yellow, 6=Blue+Yellow", range: "1..6"]]
+        command "setFlameBrightness", [[name: "level*", type: "NUMBER", description: "Flame brightness level (1–5): 1=20%, 2=40%, 3=60%, 4=80%, 5=100%", range: "1..5"]]
         command "setFlameSpeed", [[name: "speed*", type: "ENUM", constraints: FLAME_SPEED_OPTIONS,
             description: "Flame animation speed (Sideline Elite DP 103). Slow/Medium/Fast — verify labels on real hardware."]]
-        command "setLogColor", [[name: "color*", type: "ENUM", constraints: LOG_COLOR_OPTIONS,
-            description: "Raw Tuya enum string for the mapped log-color DP (Sideline default 104)."]]
+        command "setLogColor", [[name: "color*", type: "NUMBER", description: "Log/ember color (1–12): 1=orange, 2=red, 3=blue, 4=yellow, 5=green, 6=purple, 7=teal, 8=pink, 9=white, 10=peachpuff, 11=black, 12=grey", range: "1..12"]]
         command "setHeatLevel", [[name: "level*", type: "ENUM", constraints: HEAT_LEVEL_OPTIONS]]
         command "setHeatingSetpoint", [[name: "temperature*", type: "NUMBER", description: "Writes the mapped Fahrenheit or Celsius setpoint DP based on the preferred unit preference."]]
         command "setRawDP", [[name: "dpId*", type: "NUMBER"], [name: "value*", type: "STRING",
@@ -350,14 +353,15 @@ def captureDiff() {
     requestStatus("capture diff", "diff", discoveryStatusDpIds())
 }
 
-def setFlameColor(String color) {
-    String raw = safeStr(color)?.trim()
-    if (!raw) {
-        log.warn "[Touchstone] setFlameColor requires a raw enum value"
+def setFlameColor(color) {
+    Integer num = safeInt(color, null)
+    if (num == null) {
+        log.warn "[Touchstone] setFlameColor requires a numeric value 1-6"
         return
     }
+    String raw = num.toString()
     if (!(raw in FLAME_COLOR_OPTIONS)) {
-        log.warn "[Touchstone] setFlameColor: invalid color '${color}' — use ${FLAME_COLOR_OPTIONS.join(', ')}"
+        log.warn "[Touchstone] setFlameColor: ${color} is out of range — use 1-6"
         return
     }
 
@@ -371,14 +375,15 @@ def setFlameColor(String color) {
     sendDpWrite(flameColorDp.toString(), raw, "flame color", WRITE_REFRESH_DELAY_SECONDS)
 }
 
-def setFlameBrightness(String level) {
-    String raw = safeStr(level)?.trim()
-    if (!raw) {
-        log.warn "[Touchstone] setFlameBrightness requires a raw enum value"
+def setFlameBrightness(level) {
+    Integer num = safeInt(level, null)
+    if (num == null) {
+        log.warn "[Touchstone] setFlameBrightness requires a numeric value 1-5"
         return
     }
+    String raw = num.toString()
     if (!(raw in FLAME_BRIGHTNESS_OPTIONS)) {
-        log.warn "[Touchstone] setFlameBrightness: invalid level '${level}' — use ${FLAME_BRIGHTNESS_OPTIONS.join(', ')}"
+        log.warn "[Touchstone] setFlameBrightness: ${level} is out of range — use 1-5"
         return
     }
 
@@ -392,14 +397,15 @@ def setFlameBrightness(String level) {
     sendDpWrite(flameBrightnessDp.toString(), raw, "flame brightness", WRITE_REFRESH_DELAY_SECONDS)
 }
 
-def setLogColor(String color) {
-    String raw = safeStr(color)?.trim()
-    if (!raw) {
-        log.warn "[Touchstone] setLogColor requires a raw enum value"
+def setLogColor(color) {
+    Integer num = safeInt(color, null)
+    if (num == null) {
+        log.warn "[Touchstone] setLogColor requires a numeric value 1-12"
         return
     }
+    String raw = num.toString()
     if (!(raw in LOG_COLOR_OPTIONS)) {
-        log.warn "[Touchstone] setLogColor: invalid color '${color}' — use ${LOG_COLOR_OPTIONS.join(', ')}"
+        log.warn "[Touchstone] setLogColor: ${color} is out of range — use 1-12"
         return
     }
 
