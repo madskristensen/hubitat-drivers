@@ -4,7 +4,7 @@ Integrates SunStat Connect Plus electric floor heating thermostats with Hubitat 
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: beta — v0.1.6. Cloud REST integration via the Watts® Home API; verified against the Watts iOS app for API shape and auth bootstrap; requires one-time external token capture via the `homebridge-tekmar-wifi` CLI (see Setup). Token is now set via the `setRefreshToken` command (bypasses Hubitat's ~1024-char preference limit). Parent/child architecture; auto-discovers all thermostats in your Watts account. Latest: pseudo-boost (`setBoost`/`cancelBoost`) implemented as driver-managed temporary setpoint overrides. See [releases](https://github.com/madskristensen/hubitat-drivers/releases) for details.**
+> **Status: beta — Cloud REST integration via the Watts® Home API. Parent/child architecture; auto-discovers all thermostats in your Watts account. Pseudo-boost (`setBoost`/`cancelBoost`) implemented as driver-managed temporary setpoint overrides.**
 
 ## Hardware Compatibility
 

@@ -62,9 +62,7 @@ Found a bug or have an idea? Open an issue or send a pull request.
 
 When bumping any per-driver version, also bump the root `packageManifest.json` version (patch/minor as appropriate) so HPM bundle users receive update notifications.
 
-## Changelog
 
-See [RELEASING.md](RELEASING.md) for version history and what's new.
 
 ## License
 

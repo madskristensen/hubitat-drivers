@@ -6,11 +6,9 @@ Integrates Gemstone permanent outdoor LED strings with Hubitat Elevation via the
 
 > **Status: beta — working, author-tested in production on a real Gemstone controller.**
 >
-> **Latest: v0.4.1** — Adds `playEffectByName(String)` for WebCoRE users — same behavior as `setEffect("name")`, but visible to WebCoRE's action picker. See [releases](https://github.com/madskristensen/hubitat-drivers/releases) for what's new.
->
 > **Killer feature:** favorites-first `LightEffects` plus named-effect support. Dashboards get the standard `lightEffects` dropdown, while Rule Machine and custom actions can call `setEffect("Pulse")` or `setEffect("⭐ Pulse")`.
 >
-> **Architecture:** v0.4.1 authenticates with your Gemstone account email/password via AWS Cognito `USER_PASSWORD_AUTH`, caches tokens in driver `state`, binds to the first Gemstone controller discovered in the first home group that contains a device, and maps Hubitat `setColorTemperature()` to an RGB white-spectrum fallback because the public reverse-engineered Gemstone cloud API does not expose a native CCT endpoint.
+> **Architecture:** Authenticates with your Gemstone account email/password via AWS Cognito `USER_PASSWORD_AUTH`, caches tokens in driver `state`, binds to a configurable Gemstone controller (or the first one found), and maps Hubitat `setColorTemperature()` to an RGB white-spectrum fallback because the public reverse-engineered Gemstone cloud API does not expose a native CCT endpoint. Supports multi-zone setups via the `Controller name` preference.
 
 ## Supported Capabilities
 
@@ -132,11 +130,7 @@ If **Controller name** is set but no controller with that name is found after di
 
 Correct the **Controller name** preference spelling and click **Save Preferences** to rebind.
 
-### Backward compatibility
 
-Upgrading from v0.4.9 with **Controller name** left blank is a no-op. The blank-preference path is identical to the old first-device behavior. No action is required for single-zone users.
-
----
 
 
 
@@ -272,11 +266,7 @@ This driver was informed by the Gemstone cloud API reverse engineering in:
 - [`sslivins/hass-gemstone`](https://github.com/sslivins/hass-gemstone)
 - [`sslivins/pygemstone`](https://github.com/sslivins/pygemstone)
 
-## Changelog
 
-- **v0.4.10 (2026-05-17):** Multi-zone / multi-controller support via new `controllerName` preference. Blank = first-controller behavior (backward compatible). `state.availableControllers` lists all discovered controller names. USER_AGENT version string synced to driver version.
-- **v0.4.1 (2026-05-16):** Added `playEffectByName(String)` — separate command for WebCoRE users (WebCoRE doesn't see custom String overloads of capability methods).
-- **v0.4.0** — LightEffects with favorites, ColorTemperature RGB fallback, refresh optimizations.
 
 ## License
 
