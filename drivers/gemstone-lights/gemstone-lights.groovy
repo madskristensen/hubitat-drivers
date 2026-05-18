@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.12
+ * Version: 0.4.13
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.13 — 2026-05-18 — skip redundant on/off/setLevel/setColor/setColorTemperature PUTs when device already matches (audit G-2 through G-6)
  *   0.4.12 — 2026-05-18 — skip redundant setEffect pattern PUT when effect already active (audit G-1)
  *   0.4.11 — 2026-05-17 — lastActivity attribute (ISO 8601 timestamp of last successful API call)
  *   0.4.10 — 2026-05-17 — multi-zone / multi-controller support
@@ -48,7 +49,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.12"
+@Field static final String DRIVER_VERSION = "0.4.13"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -68,7 +69,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.11"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.13"
 
 metadata {
     definition(
@@ -197,6 +198,10 @@ def logsOff() {
 // ---------------------------------------------------------------------------
 
 def on() {
+    if (device.currentValue("switch") == "on") {
+        debugLog "on(): already on — skipping PUT /onState"
+        return
+    }
     infoLog "${device.displayName} switch → on"
     sendEvent(name: "switch", value: "on", descriptionText: "${device.displayName} was turned on", type: "digital")
     state.lastOnState = true
@@ -204,6 +209,10 @@ def on() {
 }
 
 def off() {
+    if (device.currentValue("switch") == "off") {
+        debugLog "off(): already off — skipping PUT /onState"
+        return
+    }
     infoLog "${device.displayName} switch → off"
     sendEvent(name: "switch", value: "off", descriptionText: "${device.displayName} was turned off", type: "digital")
     state.lastOnState = false
@@ -216,6 +225,9 @@ def off() {
 
 def setLevel(level, duration = 0) {
     Integer clamped = clampPercent(level)
+    def rawLevel = device.currentValue("level")
+    Integer currentLevel = (rawLevel != null) ? (rawLevel as Integer) : null
+
     infoLog "${device.displayName} level → ${clamped}"
     sendEvent(name: "level", value: clamped, unit: "%", descriptionText: "${device.displayName} level set to ${clamped}%", type: "digital")
     sendEvent(name: "switch", value: clamped > 0 ? "on" : "off", descriptionText: "${device.displayName} turned ${clamped > 0 ? 'on' : 'off'}", type: "digital")
@@ -223,6 +235,11 @@ def setLevel(level, duration = 0) {
 
     if (clamped == 0) {
         sendCommand(action: "off")
+        return
+    }
+
+    if (currentLevel != null && currentLevel == clamped) {
+        debugLog "setLevel: already ${clamped} — skipping pattern PUT"
         return
     }
 
@@ -238,6 +255,11 @@ def setColor(colorMap) {
     Integer saturation = clampPercent(colorMap?.saturation ?: 100)
     Integer level = clampPercent(colorMap?.level ?: safeInt(device.currentValue("level"), 100))
 
+    def curHue = device.currentValue("hue")
+    def curSat = device.currentValue("saturation")
+    def curLevel = device.currentValue("level")
+    def curMode = device.currentValue("colorMode")
+
     infoLog "${device.displayName} color → hue=${hue} sat=${saturation} level=${level}"
     sendEvent(name: "hue", value: hue, descriptionText: "${device.displayName} hue set to ${hue}", type: "digital")
     sendEvent(name: "saturation", value: saturation, descriptionText: "${device.displayName} saturation set to ${saturation}", type: "digital")
@@ -249,6 +271,15 @@ def setColor(colorMap) {
 
     if (level == 0) {
         sendCommand(action: "off")
+        return
+    }
+
+    // G-5: only skip if already in RGB mode and all three components match
+    if (curMode == "RGB" && curHue != null && curSat != null && curLevel != null
+            && (curHue as Integer) == hue
+            && (curSat as Integer) == saturation
+            && (curLevel as Integer) == level) {
+        debugLog "setColor: H=${hue}/S=${saturation}/L=${level} already active — skipping pattern PUT"
         return
     }
 
@@ -282,6 +313,10 @@ def setColorTemperature(colorTemperature, level = null, transitionTime = null) {
         debugLog "Gemstone ignores transitionTime=${transitionTime} for setColorTemperature()"
     }
 
+    def curMode = device.currentValue("colorMode")
+    def rawTemp = device.currentValue("colorTemperature")
+    Integer currentTemp = (rawTemp != null) ? (rawTemp as Integer) : null
+
     warnColorTemperatureFallback()
     infoLog "${device.displayName} color temperature → ${kelvin}K level=${targetLevel} (RGB fallback)"
     updateColorTemperatureAttributes(kelvin)
@@ -296,6 +331,12 @@ def setColorTemperature(colorTemperature, level = null, transitionTime = null) {
 
     if (targetLevel == 0) {
         sendCommand(action: "off")
+        return
+    }
+
+    // G-6: only skip if already in CT mode and temperature matches
+    if (curMode == "CT" && currentTemp != null && currentTemp == kelvin) {
+        debugLog "setColorTemperature: already ${kelvin}K in CT mode — skipping pattern PUT"
         return
     }
 

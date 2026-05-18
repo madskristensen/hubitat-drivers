@@ -6,6 +6,9 @@
 
 ## Latest Work (2026-05-18)
 
+### Gemstone Lights v0.4.13 — Close G-2 through G-6 (batch yellows)
+- v0.4.13 added skip-if-match guards to on(), off(), setLevel(), setColor(), setColorTemperature() — Trinity's G-2 through G-6 🟡 findings from the redundant-write audit; reduces cloud API quota consumption for automation rules re-asserting the same state; G-5 setColor uses composite (hue + saturation + level + colorMode == "RGB") guard; G-6 setColorTemperature requires colorMode == "CT" before deduping; decision drop in inbox at tank-gemstone-yellows-batch.md
+
 ### Gemstone Lights v0.4.12 — Close G-1 effect idempotency
 - v0.4.12 added skip-if-match guard in activateEffectWithPattern() — Trinity's G-1 🔴 finding from the redundant-write audit; degenerate 1-effect cycle edge case accepted and documented in decisions inbox
 
