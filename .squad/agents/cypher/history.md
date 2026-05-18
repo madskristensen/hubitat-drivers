@@ -63,3 +63,17 @@ Cypher-4 research directly enabled two Tank-15 ships:
 
 3. **Test on First Install Before Shipping**  
    Both bugs were immediately visible on first Save Preferences after install. Smoke-test drivers on hub before tagging v1.0 releases.
+
+### Daikin v0.1.2 Lesson: HubAction Map-Based Constructor Instability (Tank-4, 2026-05-18)
+
+**HubAction Map-based LAN constructor audit conclusion:**
+
+Two independent firmware failures observed in the Daikin WiFi driver:
+1. **v0.1.0:** HubAction(Map, Protocol, Map) 3-arg — does not exist on Mads's firmware
+2. **v0.1.1:** HubAction(Map, Protocol) 2-arg — also does not exist on Mads's firmware
+
+**Decision: Retire Map-based HubAction entirely for LAN HTTP.** Tank-4 completed a full rewrite of Daikin v0.1.2 (commit e45967e) replacing all Map-based HubAction forms with asynchttpGet (Hubitat's documented modern HTTP-over-LAN API).
+
+**Skill updated:** hubitat-hubaction-constructors/SKILL.md bumped to confidence **medium**; documents that **ALL Map-based HubAction forms are unreliable across firmware versions.**
+
+**Pattern for future LAN HTTP drivers:** Use asynchttpGet (send-helper + AsyncResponse callback pattern) documented in new skill hubitat-asynchttpget-pattern/SKILL.md (confidence **medium**).

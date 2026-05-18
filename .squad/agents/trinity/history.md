@@ -137,3 +137,19 @@ See .squad/decisions.md (merged entries) and .squad/orchestration-log/2026-05-17
 
 3. **Test on First Install Before Shipping**  
    Both bugs were immediately visible on first Save Preferences after install. Smoke-test drivers on hub before tagging v1.0 releases.
+
+### Daikin v0.1.2 asynchttpGet Rewrite Correction (Tank-4, 2026-05-18)
+
+**CORRECTION to Trinity's v0.1.0 performance memo:**
+
+Earlier memo stated: *"asynchttpGet is for cloud HTTPS calls."*
+
+**This is incorrect.** `asynchttpGet` works for **any HTTP URL** including local LAN (e.g., `http://192.168.1.50/aircon/get_control_info`). It is the documented, stable Hubitat API for **all async HTTP on device drivers, LAN and cloud alike.**
+
+**Correct scope distinction:**
+- `asynchttpGet` — any HTTP URL (LAN or cloud), async callback pattern
+- `HubAction(LAN)` — raw Hubitat socket dispatch; useful for non-HTTP protocols (raw TCP, UDP, Zigbee commands)
+
+Tank-4 completed a full rewrite of Daikin WiFi v0.1.2 (commit e45967e) replacing all Map-based HubAction LAN calls with asynchttpGet, eliminating the constructor instability that plagued both v0.1.0 (3-arg) and v0.1.1 (2-arg). **Future drivers (Sunstat, Gemstone cloud calls, any new LAN HTTP driver) should use asynchttpGet by default.**
+
+See decision `tank-daikin-wifi-v012-asynchttp` in decisions.md and skills `hubitat-asynchttpget-pattern` for the canonical send-helper + AsyncResponse callback template.
