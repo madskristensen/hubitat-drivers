@@ -152,3 +152,26 @@ Trinity's 3 code-quality audits have all shipped as Tank forks:
 - But it is **no longer the design goal** — Mads owns the driver now; upstream PR is optional if feasible
 
 **Your action:** If you plan to do an upstream PR, make it a separate follow-up decision after v0.2.0 validation. The fork is no longer constrained to diff-minimalism against the upstream PR shape. Clean diff at 4b720aa shows the full v0.2.0 polish (namespace + style alignment + all deferred improvements).
+
+---
+
+## 2026-05-19T01:55:00Z — Platform Correction: Hubitat Z-Wave JS
+
+**From:** Mads during T6 Pro v0.4.0 shipment work
+
+**Correction:** "Hubitat uses Z-Wave JS now too" — this invalidates prior framing in the HA gap analysis where Hubitat's driver model was framed as a platform constraint preventing auto-entity-generation.
+
+**Implication:** Cypher's HA comparison (entries 2026-05-18T18:30) framed HA's per-param entity generation as an architectural advantage Hubitat couldn't match. This framing assumed Hubitat lacks a Z-Wave JS protocol layer comparable to HA.
+
+**Reality:** Hubitat now has Z-Wave JS available (extent unknown to the team at this session). This means:
+- Config parameter metadata APIs may be available to Hubitat driver authors
+- Device-file-driven entity generation patterns may be possible in Hubitat
+- Attribute-binding mechanisms in Hubitat's Z-Wave JS may mirror or differ from HA
+
+**Future research (v0.5.0+):** What does Hubitat's Z-Wave JS layer expose to driver authors?
+1. Do driver authors have access to configParams metadata from the Hubitat device-info database?
+2. Can drivers emit entities dynamically based on device config (like HA does)?
+3. What attribute-binding patterns does Hubitat's Z-Wave JS support vs manual Groovy emits?
+4. Is TH6320ZW device-file data available in the Hubitat runtime?
+
+**Captured as memory** for Cypher's next protocol-architecture research sprint.

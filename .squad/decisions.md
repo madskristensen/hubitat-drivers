@@ -4693,3 +4693,23 @@ Mads dropped the "Advanced" prefix carried over from djdizzyd's upstream driver.
 - groovy line 7, 29 + README line 3, 57 reference the upstream djdizzyd "Advanced Honeywell T6 Pro Thermostat" project by name and must stay verbatim per clean-room fork attribution rules.
 
 **Hubitat gotcha noted to Mads:** Existing devices already bound to the old type label will keep showing "Advanced Honeywell T6 Pro Thermostat" in device list until manually re-selected via Edit dropdown.
+
+---
+
+## 2026-05-18 — Honeywell T6 Pro v0.4.0 shipped
+
+**Commit:** a5e1008 — \honeywell-t6-pro v0.4.0: descriptionText + fanState enum + Notification type 9\
+
+**Three Cypher-picks applied (additive only):**
+
+1. **Pick #1 — descriptionText on 3 events** (~6 lines at lines 580-581, 608-610, 618-620 in the new file): thermostatOperatingState, thermostatFanMode, thermostatMode now emit descriptionText matching the v0.2.0 temp/humidity pattern.
+
+2. **Pick #2 — thermostatFanState type → enum** (line 60): \ttribute "thermostatFanState", "enum", [...8 values...]\ matching the THERMOSTAT_FAN_STATE map exactly. RM4 picker + Hubitat device-page rendering improvement.
+
+3. **Pick #3 — Notification type 9 handler** (~15 lines at lines 273-296): added as \lse if (cmd.notificationType==9)\ after the type-8 block. Handles events 0-4 (idle, hw/sw failure, hw/sw failure with product code) with log.warn. Tank chose \lse if\ over \case 9:\ because the existing handler uses if/else if idiom, not a switch.
+
+**Production-safe:** Additive only; v0.3.0 regression-free baseline preserved. Running on Mads's live Downstairs thermostat.
+
+**Tank-8 verified** all changes at expected file locations; v0.4.0 version bumped in driver header (line 4), \@Field static final String VERSION\ (line 79), packageManifest.json (top-level + drivers[0]), and README changelog.
+
+**Mads's correction during work:** "hubitat uses Z-Wave JS now too" — invalidates Cypher's framing of HA's auto-entity-generation as a Hubitat platform constraint. v0.5.0+ research item: what does Hubitat's Z-Wave JS layer expose to driver authors? (config param metadata APIs, device-file-driven entities, attribute-binding patterns). Captured as memory.
