@@ -1,6 +1,24 @@
 # Decisions
 
-Generated 2026-05-19T04:35:00Z
+Generated 2026-05-19T04:57:12Z
+
+---
+
+## 2026-05-19 — Gemstone Lights Stale-Token Silent-Fail Fixed (v0.4.17)
+
+**Decision:** Fixed Mads-reported stale-token staleness after inactivity. Root cause: dedup guards in command handlers (`on()`, `setLevel()`, `setColor()`, `setColorTemperature()`, `setEffect()`, `playEffectByName()`) returned before reaching `executeOrQueueRequest()`, which is the sole site that detects expired Cognito AccessToken and triggers re-auth. When token expired and proactive refresh had failed/not fired, any dedup-matching command silently dropped.
+
+**Fix:** Introduced `ensureSession(requiresDevice)` helper. All cached-state dedup paths now gate on `ensureSession()` — if token missing/expired, the check fails and command falls through to normal dispatch, triggering re-auth via `executeOrQueueRequest()`. Cost: one extra API call per recovery event.
+
+**Status:** ✅ SHIPPED (commit 9c7447c; drivers/gemstone-lights v0.4.17)
+
+**Agents:** Cypher (diagnosis), Tank (implementation)
+
+**Work Products:**
+- `.squad/decisions/inbox/cypher-gemstone-stale-token.md` — root cause analysis + evidence
+- `.squad/decisions/inbox/tank-gemstone-ensure-session.md` — implementation summary
+- `.squad/skills/cognito-token-lifecycle/SKILL.md` (low confidence) — Cognito token refresh lifecycle
+- `.squad/skills/auth-before-dedup/SKILL.md` (low confidence) — auth-gating pattern
 
 ---
 

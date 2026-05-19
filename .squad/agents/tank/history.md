@@ -161,6 +161,9 @@ Added ~195 LOC of MQTT support as an additive, preference-gated layer:
 - Hubitat custom numeric attributes accept the UTF-8 unit string `µg/m³` cleanly; PurpleAir raw PM2.5 can emit as `pm2_5` with that exact unit.
 - PurpleAir v0.3.0 can add `TemperatureMeasurement` + `RelativeHumidityMeasurement` without conflicting with the existing custom `aqi`/`category` attributes.
 
+- Gemstone v0.4.17 stale-token fix: add `ensureSession()` before cached-state dedup so commands only early-return when the Cognito session is healthy; edits landed in `drivers/gemstone-lights/gemstone-lights.groovy` lines 206–355 (switch/level/color handlers), 802–826 (`ensureSession()` + queue gate), and 1044–1063 (shared effect activation dedup path).
+- Dedup/auth lesson: in Hubitat cloud drivers, a cache-hit return must never sit above the auth/queue path, or an expired token turns user commands into silent no-ops until a non-deduped path like `refresh()` repairs the session.
+
 ## Session Arc 2026-05-19: Two Drivers Shipped + Changelog Format Rule
 
 **Tank #20:** Fully Kiosk v0.5.0 shipped with MQTT-to-REST wording clarification. Changelog flattened to single-line format (release.yml regex requirement). Commit: 61644e4.

@@ -7,6 +7,9 @@
 
 ## Recent Projects & Decisions
 
+**2026-05-19 — Cross-Agent Note: auth-before-dedup Pattern (Gemstone Stale-Token Fix)**  
+Trinity: This pattern may generalize to other cloud drivers (SunStat, PurpleAir, Daikin, Rainbird, Bosch). See `.squad/skills/auth-before-dedup/SKILL.md` and `.squad/decisions.md` (2026-05-19 entry) for the Gemstone implementation. The antipattern is dedup guards that return before reaching session-validity checks; consider auditing other cloud drivers for the same vulnerability.
+
 **2026-05-19 — Reskill Pass** — Extracted 5 new skills to `.squad/skills/`: async HTTP error handling, temperature scale honoring, refresh-on-save, HPM root registration, geospatial distance math. Commit 1bf5844.
 
 **For detailed learnings from prior sessions (Daikin, Gemstone, SunStat, MyQ, Rainbird, Bosch, OAuth, driver rubric), see history-archive.md.**
