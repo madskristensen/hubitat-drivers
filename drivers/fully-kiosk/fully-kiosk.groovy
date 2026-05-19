@@ -9,7 +9,7 @@
  *                  missing descriptionText.
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
- *  Version: 0.5.0 — 2026-05-18 — Removed MQTT support: reverted to cloud-poll only after
+ *  Version: 0.5.0 — 2026-05-18 — Removed MQTT support: reverted to local REST polling after
  *                                broker compatibility issues. Cleaner, simpler,
  *                                more reliable.
  *  Version: 0.4.2 — 2026-05-18 — Add clearOverlayMessage() command to dismiss an active
