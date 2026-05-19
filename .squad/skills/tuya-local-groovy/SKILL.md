@@ -3,7 +3,7 @@ name: "tuya-local-groovy"
 description: "Implement Tuya Local v3.3 Groovy drivers on Hubitat using rawSocket, AES-128-ECB, queued retries, and defensive frame parsing."
 domain: "hubitat-drivers"
 confidence: "high"
-source: "earned — Touchstone v0.1.2 verified the Hubitat import-allowlist CRC32 fix pattern on 2026-05-17; Touchstone v0.1.29 validated byte-helper primitive optimization on 2026-05-18; Touchstone v0.1.30 confirmed System.arraycopy is on the Hubitat sandbox blocklist (2026-05-18); protocol cross-checked against tinytuya XenonDevice/message_helper/header and qwerk's Hubitat Tuya RGBW driver."
+source: "earned — Touchstone v0.1.2 verified the Hubitat import-allowlist CRC32 fix pattern on 2026-05-17; Touchstone v0.1.29 validated byte-helper primitive optimization on 2026-05-18; Touchstone v0.1.30 confirmed System.arraycopy is on the Hubitat sandbox blocklist (2026-05-18); PurpleAir v0.4.0 validated the single-line changelog requirement for .github/workflows/release.yml on 2026-05-18; protocol cross-checked against tinytuya XenonDevice/message_helper/header and qwerk's Hubitat Tuya RGBW driver."
 ---
 
 ## When to Use
@@ -398,6 +398,7 @@ This repo's `.github/workflows/release.yml` parses each driver's top-of-file `Ch
 
 When adding or editing driver changelog entries:
 - use `version — YYYY-MM-DD — description`
+- keep **each version entry on a single physical line**; continuation lines are not matched by the workflow regex and can break release creation
 - do **not** use full ISO 8601 timestamps like `2026-05-17T12:22:15-07:00`
 - keep the parsable entries in the doc-comment `Changelog:` block even if separate prose `// vX.Y.Z` comments also exist
 

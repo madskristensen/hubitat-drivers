@@ -1,3 +1,20 @@
+## 2026-05-18 — PurpleAir AQI v0.4.0 quality release
+
+**Task:** Ship Trinity's 4 production bug fixes + top polish set + release-hygiene preempt in one PurpleAir v0.4.0 release.
+
+**Shipped:**
+- Fixed Groovy string-multiplication in retry math by coercing `update_interval` once before backoff calculations; guarded disabled polling so `update_interval == "0"` never schedules `runIn(0, ...)`.
+- Corrected `distance2degrees()` latitude/longitude math with a pole clamp and added a zero-distance short-circuit in `sensorAverageWeighted()` so exact sensor-coordinate matches cannot emit `NaN`.
+- Added canonical async HTTP error handling, refresh-on-save, `AirQuality`/`airQualityIndex`, `runEvery*` scheduling, hub temperature-scale conversion, cleaner `sites`/AQI units, and a 60-second `lastActivity` throttle.
+- Flattened every PurpleAir driver-header changelog entry to one physical line so `.github/workflows/release.yml` can parse v0.4.0 release notes.
+
+**Learnings:**
+- Hubitat enum preferences stay as strings; any `settings.foo * 5` math must coerce first or Groovy repeats the string (`"60" * 5` → `"6060606060"`).
+- Latitude degrees are roughly constant while longitude degrees shrink by `cos(latitude)`; swapping them silently distorts geofence boxes.
+- `updated()` should refresh cloud-poll drivers immediately after re-scheduling so users see fresh data on save instead of waiting for the next interval.
+
+---
+
 ## 2026-05-18 — Spawn tank-18 — Fully Kiosk v0.4.6
 
 **Task:** v0.4.6 — Drop to 4-arg `interfaces.mqtt.connect()`, remove LWT locals

@@ -1,7 +1,7 @@
 /**
  *  PurpleAir AQI Virtual Sensor
  *  Author:  Mads Kristensen
- *  Version: 0.3.0 — 2026-05-18 — parseJson guards, API key portal URL, 4 new attributes
+ *  Version: 0.4.0 — 2026-05-18 — BUG FIXES: failCount string-multiplication, disabled-poll retry storm, lat/lng degree math, weighted-avg NaN at distance=0; POLISH: refresh-on-save, canonical async error handling, AirQuality capability, runEvery schedules, hub temp scale, cleaner sites/AQI units
  *  License: MIT
  *
  *  Reads AQI data from the PurpleAir cloud API (api.purpleair.com/v1/sensors).
@@ -15,18 +15,10 @@
  *  permanent driver in this repo, not a staging area.
  *
  *  Changelog:
- *    0.3.0 — 2026-05-18 — parseJson guard for blank search_coords + empty API
- *      bodies; API key help now points to develop.purpleair.com; add pm2_5,
- *      temperature, humidity, and confidence attributes (confidence reports the
- *      lowest contributing sensor score in averaging mode)
- *    0.2.0 — 2026-05-18 — namespace → mads; emitIfChanged on all poll events
- *      (eliminates ~35,040 duplicate events/year at 1-hr default cadence);
- *      descriptionText on sites event uses device.displayName; 1-min interval
- *      quota warning added; UUID in packageManifest; fix IQAir→PurpleAir log
- *      prefix; logsOff auto-disable after 30 min; lastActivity (Pattern B);
- *      sentinel .isNumber() guards on pm2.5 field before .toFloat() parse
- *    0.1.0 — 2026-05-18 — Initial fork; Trinity audit fixes: AQ&U string
- *      mismatch, LRAPA/Woodsmoke case + wrong PM2.5 field, failCount precedence
+ *    0.4.0 — 2026-05-18 — BUG FIXES: failCount string-multiplication, disabled-poll retry storm, lat/lng degree math, weighted-avg NaN at distance=0; POLISH: refresh-on-save, canonical async error handling, AirQuality capability, runEvery schedules, hub temp scale, cleaner sites/AQI units
+ *    0.3.0 — 2026-05-18 — Added pm2_5, temperature, humidity, and confidence attributes; parseJson guard for blank search_coords + empty API bodies; API key help now points to develop.purpleair.com
+ *    0.2.0 — 2026-05-18 — Namespace → mads; emitIfChanged on all poll events (eliminates ~35,040 duplicate events/year at 1-hr default cadence); descriptionText on sites event uses device.displayName; 1-min interval quota warning added; UUID in packageManifest; fix IQAir→PurpleAir log prefix; logsOff auto-disable after 30 min; lastActivity (Pattern B); sentinel .isNumber() guards on pm2.5 field before .toFloat() parse
+ *    0.1.0 — 2026-05-18 — Initial fork; Trinity audit fixes: AQ&U string mismatch, LRAPA/Woodsmoke case + wrong PM2.5 field, failCount precedence
  *
  *  [original pfmiller0 copyright block preserved verbatim below]
  */
@@ -40,7 +32,7 @@
 
 import groovy.transform.Field
 
-@Field static final String DRIVER_VERSION = "0.3.0"
+@Field static final String DRIVER_VERSION = "0.4.0"
 
 metadata {
 	definition (
@@ -53,6 +45,7 @@ metadata {
 		capability "Sensor"
 		capability "Polling"
 		capability "Initialize"
+		capability "AirQuality"
 		capability "TemperatureMeasurement"
 		capability "RelativeHumidityMeasurement"
 
@@ -119,26 +112,12 @@ def configure() {
 		state.remove('HUMIDITY_HISTORY')
 	}
 
-	if ( update_interval == "1" ) {
-		schedule('0 */1 * ? * *', 'refresh')
-	} else if ( update_interval == "5" ) {
-		schedule('0 */5 * ? * *', 'refresh')
-	} else if ( update_interval == "10" ) {
-		schedule('0 */10 * ? * *', 'refresh')
-	} else if ( update_interval == "15" ) {
-		runEvery15Minutes('refresh')
-	} else if ( update_interval == "30" ) {
-		runEvery30Minutes('refresh')
-	} else if ( update_interval == "60" ) {
-		runEvery1Hour('refresh')
-	} else if ( update_interval == "180" ) {
-		runEvery3Hours('refresh')
-	} else if ( update_interval == "0" ) {
-		unschedule()
-	} else {
-		log.error "Invalid update_interval"
-		runEvery1Hour('refresh')
+	Integer updateIntervalMinutes = normalizedUpdateIntervalMinutes(null)
+	if (updateIntervalMinutes == null) {
+		log.error "Invalid update_interval '${update_interval}' — defaulting to 60 minutes"
+		updateIntervalMinutes = 60
 	}
+	applyRefreshSchedule(updateIntervalMinutes)
 }
 
 def initialize() {
@@ -146,10 +125,12 @@ def initialize() {
 }
 
 def updated() {
+	unschedule()
 	if (logEnable) {
 		runIn(1800, "logsOff")
 	}
-	configure()
+	initialize()
+	refresh()
 }
 
 def uninstalled() {
@@ -203,71 +184,56 @@ void sensorCheck() {
 		uri: URL,
 		headers: ['X-API-Key': X_API_Key],
 		query: httpQuery,
-		requestContentType: "application/json",
-		contentType: "application/json",
-		timeout: 30,
-		ignoreSSLIssues: true
+		timeout: 30
 	]
 
 	try {
 		asynchttpGet('httpResponse', params, [coords: coords, pm25_count: pm25_count])
 	} catch (SocketTimeoutException e) {
-		log.error("Connection to PurpleAir timed out.")
+		log.error("PurpleAir request timed out (${requestContext(coords)}; status=n/a): ${e.message}")
 	} catch (Exception e) {
-		log.error("There was an error: $e")
+		log.error("PurpleAir request failed (${requestContext(coords)}; status=n/a): ${e.message}")
 	}
 }
 
-void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
+void httpResponse(hubitat.scheduling.AsyncResponse response, Map data) {
+	Integer updateIntervalMinutes = normalizedUpdateIntervalMinutes(60)
 	Map RESPONSE_FIELDS = [:]
 	Integer aqi2_5Value = -1
-	Integer aqi10Value = -1
 	List sensorData = []
 	String sites
 	List<Map> sensors = []
 
-	/*****************************
-	if (resp.getStatus() != 200 ) {
-		log.error "HTTP error from PurpleAir: " + resp.getStatus()
+	if (response == null) {
+		log.warn "[httpResponse] null response (${requestContext(data?.coords as Float[])})"
 		return
 	}
-	/*** Test backoff on error ***/
-	String respMimetype = ''
-	if (resp.getHeaders() && resp.getHeaders()["content-type"]) {
-		respMimetype = resp.getHeaders()["content-type"].split(";")[0]
-	}
 
-	if (resp.getStatus() != 200 || respMimetype != "application/json" ) {
-		if (respMimetype != "application/json" ) {
-			log.error "Response type: '${respMimetype}', JSON expected"
-		}
-		// FIX #3 (Trinity audit): operator-precedence bug — original was `state.failCount?:0 + 1`
-		// which evaluates as `state.failCount ?: (0 + 1)` = `state.failCount ?: 1`, so failCount
-		// never incremented above 1 and exponential backoff never triggered.
+	if (response.hasError() || response.getStatus() != 200) {
+		// Groovy/Hubitat preference enum values are Strings; coerce once before retry math so "60" * 5 does not become "6060606060".
 		state.failCount = (state.failCount ?: 0) + 1
 		unschedule('refresh')
-		if (state.failCount <= 4 ) {
-			log.error "HTTP error from PurpleAir: " + resp.getStatus()
-			runIn(Integer.valueOf(update_interval) * state.failCount * 60, 'refresh')
-		} else if (state.failCount == 5 ) {
-			log.error "HTTP error from PurpleAir: " + resp.getStatus() + " (muting errors)"
-			runIn(Integer.valueOf(update_interval * state.failCount) * 60, 'refresh')
-		} else {
-			runIn(Integer.valueOf(update_interval) * 6 * 60, 'refresh')
+		String errorMessage = response.getErrorMessage() ?: "Unexpected status"
+		String context = requestContext(data?.coords as Float[])
+		Integer retryDelaySeconds = calculateRetryDelaySeconds(updateIntervalMinutes, state.failCount as Integer)
+		if (state.failCount <= 4) {
+			log.warn "[httpResponse] HTTP error (${context}): ${response.getStatus()} ${errorMessage}"
+		} else if (state.failCount == 5) {
+			log.warn "[httpResponse] HTTP error (${context}): ${response.getStatus()} ${errorMessage} (muting errors)"
 		}
+		scheduleRetryGuarded(updateIntervalMinutes, retryDelaySeconds, context)
 		return
-	} else {
-		if (state.failCount > 0 ) {
-			if (state.failCount >= 5 ) {
-				log.info "HTTP error from PurpleAir resolved ($state.failCount)"
-			}
-			state.failCount = 0
-			configure()
-		}
 	}
-	/*****************************/
 
-	Map respJson = safeResponseJson(resp)
+	if (state.failCount > 0) {
+		if (state.failCount >= 5) {
+			log.info "HTTP error from PurpleAir resolved (${state.failCount})"
+		}
+		state.failCount = 0
+		configure()
+	}
+
+	Map respJson = safeResponseJson(response)
 	if (!respJson) {
 		return
 	}
@@ -282,11 +248,12 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 	List rawSensorData = respJson.data as List
 
 	if (device_search) {
+		Integer confidenceThreshold = resolveConfidenceThreshold()
 		// Filter out lower quality devices
 		//sensorData = rawSensorData.findAll {it[RESPONSE_FIELDS["confidence"]] >= (confidenceThreshold as Integer) }
 		sensorData = rawSensorData.findAll {
 			String rawConfidence = it[RESPONSE_FIELDS["confidence"]]?.toString()
-			rawConfidence?.isNumber() && rawConfidence.toInteger() >= 90
+			rawConfidence?.isNumber() && rawConfidence.toInteger() >= confidenceThreshold
 		}
 		if (logEnable) {
 			List confidence = rawSensorData.collect { row ->
@@ -296,7 +263,7 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 				}
 				['name': row[RESPONSE_FIELDS['name']], 'confidence': rawConfidence.toInteger()]
 			}
-			List dropped = confidence.findAll { it['confidence'] == null || it['confidence'] < 90 }
+			List dropped = confidence.findAll { it['confidence'] == null || it['confidence'] < confidenceThreshold }
 			if (dropped) {
 				logDebug "Sensor confidence: ${confidence}"
 				logDebug "Low confidence sensors dropped: ${dropped}"
@@ -401,7 +368,11 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 	}
 
 	if (sensors.size() == 0) {
-		log.error(device_search ? "No sensors found in search area" : "Selected sensor returned no valid data")
+		if (device_search) {
+			log.error "No sensors found in search area: ${formatCoords(data.coords)} within ${search_range} ${unit}. Check coords / increase range / verify confidence threshold (currently ${resolveConfidenceThreshold()}%)."
+		} else {
+			log.error "Selected sensor returned no valid data (${requestContext(data?.coords as Float[])})"
+		}
 		return
 	}
 
@@ -421,19 +392,21 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 		humidityValue = sensorAverage(sensors, 'humidity')
 	}
 	if (aqiSourceValue == null) {
-		log.error "No valid PM2.5 data returned from PurpleAir"
+		log.error "No valid PM2.5 data returned from PurpleAir (${requestContext(data?.coords as Float[])})"
 		return
 	}
 
 	aqi2_5Value = getPart2_5_AQI(aqiSourceValue)
 	String AQIcategory = getCategory(aqi2_5Value)
 	BigDecimal pm25Display = roundToScale(pm25RawValue, 1)
-	BigDecimal temperatureDisplay = roundToScale(temperatureValue, 1)
+	Float hubTemperatureValue = convertTemperatureToHubScale(temperatureValue)
+	BigDecimal temperatureDisplay = roundToScale(hubTemperatureValue, 1)
+	String temperatureUnit = (location?.temperatureScale == "C") ? "°C" : "°F"
 	Integer humidityDisplay = humidityValue != null ? Math.round(humidityValue) : null
 	Integer confidenceValue = sensors.collect { it['confidence'] }.findAll { it instanceof Number }.collect { it.toInteger() }.min()
 
-	sites = sensors.collect { it['site'] }.sort()
-	//sites = sensorData.collect { it['site' }.sort().join(', ') // Remove brackets around sites?
+	List<String> siteNames = sensors.collect { it['site']?.toString() }.findAll { it }.sort()
+	sites = siteNames.join(', ')
 
 	if (sensors.size() == 1) {
 		emitIfChanged("sites", sites, "${device.displayName} sites is ${sites}")
@@ -444,7 +417,7 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 		emitIfChanged("pm2_5", pm25Display, "${device.displayName} pm2_5 is ${pm25Display} µg/m³", "µg/m³")
 	}
 	if (temperatureDisplay != null) {
-		emitIfChanged("temperature", temperatureDisplay, "${device.displayName} temperature is ${temperatureDisplay}°F", "°F")
+		emitIfChanged("temperature", temperatureDisplay, "${device.displayName} temperature is ${temperatureDisplay}${temperatureUnit}", temperatureUnit)
 	}
 	if (humidityDisplay != null) {
 		emitIfChanged("humidity", humidityDisplay, "${device.displayName} humidity is ${humidityDisplay}%", "%")
@@ -458,10 +431,10 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 	emitIfChanged("category", AQIcategory, "${device.displayName} category is ${AQIcategory}")
 	if (conversion) {
 		emitIfChanged("conversion", conversion, "${device.displayName} conversion is ${conversion}")
-		emitIfChanged("aqi", aqi2_5Value, "${device.displayName} AQI is ${aqi2_5Value}", "PM 2.5 AQI (${conversion})")
-	} else {
-		emitIfChanged("aqi", aqi2_5Value, "${device.displayName} AQI is ${aqi2_5Value}", "PM 2.5 AQI")
 	}
+	String aqiDesc = conversion ? "${device.displayName} AQI is ${aqi2_5Value} (${conversion})" : "${device.displayName} AQI is ${aqi2_5Value}"
+	emitIfChanged("aqi", aqi2_5Value, aqiDesc, "AQI")
+	emitIfChanged("airQualityIndex", aqi2_5Value, "${device.displayName} air quality index is ${aqi2_5Value}", "AQI")
 	touchActivity()
 }
 
@@ -536,10 +509,17 @@ Float sensorAverageWeighted(List<Map> sensors, String field, Float[] coords) {
 		return null
 	}
 
+	List<Map> zeroDistanceSensors = validSensors.findAll {
+		Float sensorDistance = numericValue(it['distance'])
+		sensorDistance != null && sensorDistance <= 0.001f
+	}
+	if (zeroDistanceSensors) {
+		return sensorAverage(zeroDistanceSensors, field)
+	}
+
 	Float count = 0.0
 	Float sum = 0.0
 	ArrayList distances = []
-	// ArrayList weights = []
 	Float nearest = 0.0
 
 	// Weighted average. First find nearest sensor. Then divide sensors distances by nearest distance to get weights.
@@ -554,8 +534,6 @@ Float sensorAverageWeighted(List<Map> sensors, String field, Float[] coords) {
 		sum += val * weight
 		count += weight
 	}
-	// logDebug "weights: ${weights}"
-	// logDebug "distances: ${distances}"
 	if (count > 0) {
 		return sum / count
 	}
@@ -725,8 +703,9 @@ Float distance(Float[] coorda, Float[] coordb) {
 
 // Returns miles per degree for a given latitude
 Float[] distance2degrees(Float latitude) {
-	Float latMilesPerDegree = 69.172 * Math.cos(Math.toRadians(latitude))
-	Float longMilesPerDegree = 68.972
+	Float clampedLatitude = Math.max(-89.5f, Math.min(89.5f, latitude ?: 0.0f))
+	Float latMilesPerDegree = 69.172f
+	Float longMilesPerDegree = 69.172f * Math.cos(Math.toRadians(clampedLatitude))
 
 	return [latMilesPerDegree, longMilesPerDegree]
 }
@@ -786,15 +765,15 @@ private Map safeResponseJson(hubitat.scheduling.AsyncResponse resp) {
 	} catch (Exception e) {
 		String body = safeResponseBody(resp)
 		if (!body?.trim()) {
-			log.warn "[httpResponse] PurpleAir returned an empty response body"
+			log.warn "[httpResponse] PurpleAir returned an empty response body (status ${resp?.getStatus()})"
 		} else {
-			log.warn "[httpResponse] PurpleAir returned invalid JSON: ${e.message}"
+			log.warn "[httpResponse] PurpleAir returned invalid JSON (status ${resp?.getStatus()}): ${e.message}"
 		}
 		return null
 	}
 	String body = safeResponseBody(resp)
 	if (!body?.trim()) {
-		log.warn "[httpResponse] PurpleAir returned an empty response body"
+		log.warn "[httpResponse] PurpleAir returned an empty response body (status ${resp?.getStatus()})"
 	}
 	return null
 }
@@ -812,6 +791,86 @@ private BigDecimal roundToScale(Float value, Integer scale = 1) {
 		return null
 	}
 	return BigDecimal.valueOf(value.toDouble()).setScale(scale, java.math.RoundingMode.HALF_UP)
+}
+
+private Integer normalizedUpdateIntervalMinutes(Integer defaultValue = 60) {
+	Integer interval = update_interval?.toString()?.isNumber() ? update_interval.toString().toInteger() : null
+	if ([0, 1, 5, 10, 15, 30, 60, 180].contains(interval)) {
+		return interval
+	}
+	return defaultValue
+}
+
+private void applyRefreshSchedule(Integer updateIntervalMinutes) {
+	switch (updateIntervalMinutes) {
+		case 0:
+			return
+		case 1:
+			runEvery1Minute('refresh')
+			return
+		case 5:
+			runEvery5Minutes('refresh')
+			return
+		case 10:
+			runEvery10Minutes('refresh')
+			return
+		case 15:
+			runEvery15Minutes('refresh')
+			return
+		case 30:
+			runEvery30Minutes('refresh')
+			return
+		case 60:
+			runEvery1Hour('refresh')
+			return
+		case 180:
+			runEvery3Hours('refresh')
+			return
+		default:
+			runEvery1Hour('refresh')
+	}
+}
+
+private Integer calculateRetryDelaySeconds(Integer updateIntervalMinutes, Integer failCount) {
+	Integer multiplier = (failCount <= 4) ? failCount : (failCount == 5 ? failCount : 6)
+	return updateIntervalMinutes * multiplier * 60
+}
+
+private void scheduleRetryGuarded(Integer updateIntervalMinutes, Integer delaySeconds, String context) {
+	if (updateIntervalMinutes == 0) {
+		log.warn "[httpResponse] Polling disabled; skipping retry schedule (${context})"
+		return
+	}
+	runIn(delaySeconds, 'refresh')
+}
+
+private String requestContext(Float[] coords = null) {
+	if (device_search) {
+		return "mode=geo-search, coords=${formatCoords(coords)}"
+	}
+	return "mode=single-sensor, sensor_index=${sensor_index}"
+}
+
+private String formatCoords(Float[] coords = null) {
+	if (coords instanceof Float[] && coords.length >= 2) {
+		return "[${coords[0]}, ${coords[1]}]"
+	}
+	return search_coords?.trim() ?: "[missing search_coords]"
+}
+
+private Integer resolveConfidenceThreshold() {
+	String raw = settings?.confidence_threshold?.toString()
+	return raw?.isNumber() ? raw.toInteger() : 90
+}
+
+private Float convertTemperatureToHubScale(Float temperatureFahrenheit) {
+	if (temperatureFahrenheit == null) {
+		return null
+	}
+	if (location?.temperatureScale == 'C') {
+		return (temperatureFahrenheit - 32.0f) * 5.0f / 9.0f
+	}
+	return temperatureFahrenheit
 }
 
 void logDebug(String s) {
@@ -834,6 +893,11 @@ private void emitIfChanged(String name, value, String descTxt, String unit = nul
 }
 
 private void touchActivity() {
+	Long lastEmittedAt = (state.lastActivityEmittedAt ?: 0L) as Long
+	if ((now() - lastEmittedAt) < 60000L) {
+		return
+	}
+	state.lastActivityEmittedAt = now()
 	sendEvent(name: "lastActivity",
 	          value: new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX"),
 	          descriptionText: "${device.displayName} last activity")
