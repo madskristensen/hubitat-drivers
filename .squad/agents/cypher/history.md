@@ -1,6 +1,31 @@
 # Cypher — Integration / Protocol Engineer
 
-**Status:** Audit cycle 2026-05-18 complete. PurpleAir INSTALL verdict (88/100) — 5th consecutive install verdict in a row. Driver-opportunity shortlist + Trinity rubric established. OAuth callback retrofit governance principle: not applicable without public OAuth registration portal.
+**Status:** 2026-05-18 — HA gap analysis complete. T6 Pro v0.4.0 candidates delivered and merged into decisions.md by Scribe. Driver is near feature-complete vs HA Z-Wave JS; 3 polish picks identified (~27 lines total).
+
+---
+
+## 2026-05-18T18:30:49-07:00 — Honeywell T6 Pro v0.4.0 HA Gap Analysis
+
+**Task:** Comparative analysis — what does HA Z-Wave JS give T6 Pro users that v0.3.0 doesn't?
+
+**Key findings:**
+- Z-Wave JS device file `th6320zw.json` (mfr:0x0039, prod:0x0011, deviceId:0x0008) covers params 1–42 only — exact match to our driver. Params 43–45 are in the Honeywell template but NOT referenced from the ZW2003 device file. ZW2007-only confirmed.
+- Z-Wave JS `compat` flags: `skipConfigurationNameQuery/InfoQuery` — device has S2 timing quirk. Our static `configParams` map already handles this correctly without an explicit workaround.
+- HA's biggest advantage is architectural (per-param entities), not protocol-level. Cannot be replicated in a Hubitat driver.
+- Three genuine polish gaps in v0.3.0: (1) `descriptionText` missing on thermostatOperatingState/FanMode/Mode events, (2) `thermostatFanState` declared "string" not "enum", (3) no Notification type 9 handler.
+
+**v0.4.0 Top-3 Picks:**
+1. `descriptionText` on 3 event handlers (~6 lines) — matches v0.2.0 pattern
+2. `thermostatFanState` type "string" → "enum" (~6 lines) — v0.3.0 oversight
+3. Notification type 9 System handler stub (~15 lines) — surfaces firmware alerts
+
+**Ruled out:** humidity setpoint (no CC), filter timer reset (no CC), outdoor temp (display-only), params 43–45 (ZW2007-only), outdoor humidity (not supported).
+
+**Deliverable:** `.squad/decisions/inbox/cypher-honeywell-t6-pro-v0.4.0-candidates.md`
+
+---
+
+## Prior Status
 
 ---
 

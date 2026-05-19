@@ -4409,3 +4409,287 @@ This is a compact v0.3.0. All changes are additive or single-line fixes. No exis
 **Tank-6 verified** all 3 changes applied at the expected file locations; v0.3.0 version bumped in driver header, @Field static final String VERSION, packageManifest.json, and README changelog.
 
 **Compaction context**: This shipment was the v0.3.0 work pending from the Cypher-6 Z-Wave API survey. Mads's prior directives ("quality first", "best they can be", "my namespace and standards") informed the work going additive-only with no refactor.
+
+---
+
+## 2026-05-18 — Honeywell T6 Pro v0.4.0 Candidates (Cypher analysis)
+
+# Honeywell T6 Pro v0.4.0 Candidates — HA Gap Analysis
+
+**Baseline:** v0.3.0 (commit e38c4d3) — fanState emit, battery-low handling, octal CC fix shipped  
+**Hardware:** TH6320ZW2003 (mfr:0x0039 prod:0x0011 deviceId:0x0008)  
+**Analyst:** Cypher  
+**Date:** 2026-05-18
+
+---
+
+## Executive Summary
+
+The v0.3.0 driver is in excellent shape against HA's Z-Wave JS coverage: both systems implement the same 42 config params (confirmed from [th6320zw.json](https://github.com/zwave-js/node-zwave-js/blob/master/packages/config/config/devices/0x0039/th6320zw.json)), the same CC surface, and the same sensor set. The largest structural advantage HA has is purely architectural — Z-Wave JS auto-generates individual dashboard entities for all 42 config params, which a Hubitat driver cannot replicate. Against that background, there are **three genuine polish gaps** in v0.3.0 worth shipping as v0.4.0: (1) `descriptionText` missing on three thermostat event handlers, (2) `thermostatFanState` declared as `"string"` instead of `"enum"`, and (3) no Notification type 9 (System) handler stub. All three are additive, low-risk, and consistent with the v0.2.0 quality-pass precedent. **Verdict: ship v0.4.0 — compact polish release, ~25 lines.**
+
+---
+
+## ⚡ Top-3 v0.4.0 Picks (ranked by ROI)
+
+| Rank | Pick | Effort | Value | User-visible impact |
+|------|------|--------|-------|---------------------|
+| 1 | Add `descriptionText` to `thermostatOperatingState`, `thermostatFanMode`, `thermostatMode` events | ~6 lines | High | Correct info log lines for all thermostat state changes; matches v0.2.0 temp/humidity pattern |
+| 2 | Fix `thermostatFanState` attribute type: `"string"` → `"enum"` with values list | ~6 lines | Medium | RM4 can trigger on exact enum values; Hubitat device page shows picker not freeform |
+| 3 | Add Notification type 9 (System) handler stub with `log.warn` | ~15 lines | Medium | Surfaces firmware/hardware failure alerts currently silently dropped |
+
+---
+
+## A. HA Z-Wave JS Gap Analysis
+
+### A1. Device File Identity
+
+Z-Wave JS device file: [`packages/config/config/devices/0x0039/th6320zw.json`](https://github.com/zwave-js/node-zwave-js/blob/master/packages/config/config/devices/0x0039/th6320zw.json)
+
+```json
+"devices": [{ "productType": "0x0011", "productId": "0x0008" }]
+```
+
+This is an exact match for our TH6320ZW2003 fingerprint (`mfr:0039 prod:0011 deviceId:0008`). Z-Wave JS covers params 1–42 only — identical to our driver. **Params 43–45 are NOT in this device file** — they are in `honeywell_template.json` but only referenced from the ZW2007 device file, confirming they are ZW2007-only. The template path is `packages/config/config/devices/templates/honeywell_template.json` (not `templates/`, confirmed).
+
+### A2. Z-Wave JS Compat Flags
+
+```json
+"compat": {
+    "skipConfigurationNameQuery": true,
+    "skipConfigurationInfoQuery": true
+}
+```
+
+These tell Z-Wave JS to NOT send `CONFIGURATION_NAME_GET` / `CONFIGURATION_INFO_GET` frames to the device, because the T6 Pro "responds in a weird way" causing S2 timing collisions (comment in the JSON). Our driver never queries parameter names or info from the device — we use a static `configParams` map — so we are **already handling this quirk correctly** without needing an explicit workaround.
+
+### A3. HA Entities for T6 Pro (what HA creates by default)
+
+| HA Entity | Type | Our Driver Equivalent | Gap? |
+|-----------|------|----------------------|------|
+| `climate.t6_pro` | climate | Thermostat capability (mode + setpoints + fan mode) | ✅ None |
+| `sensor.t6_pro_air_temperature` | sensor | `temperature` attribute | ✅ None |
+| `sensor.t6_pro_humidity` | sensor | `humidity` attribute | ✅ None |
+| `sensor.t6_pro_battery_level` | sensor | `battery` attribute | ✅ None |
+| `binary_sensor.t6_pro_low_battery_level` | binary_sensor | v0.3.0 Pick #2 (battery% at 10%/1%) | ⚠️ We have no dedicated binary attribute; we reuse `battery%`. Functional but different UX. |
+| `number/select.*` per config param (×42) | entities | `configParams` preferences page | ⚠️ HA architecture advantage — 42 browseable entities. Hubitat driver prefs are equivalent functionally but not individually dashboardable. **Cannot be replicated in driver.** |
+| `thermostatFanState` | (part of climate) | `thermostatFanState` string attribute | ⚠️ We emit it; HA doesn't expose it as a separate entity. We're arguably better here. |
+
+**Headline HA advantage:** Every config param becomes an individually dashboardable and automation-targetable entity in HA. Hubitat users access these only via the Preferences page. This is a Hubitat platform constraint, not a driver gap.
+
+### A4. Temperature Calibration Entity (param 42)
+
+The Honeywell template marks param 42 with `"$purpose": "calibration.temperature"`. In Z-Wave JS UI, this auto-creates a dedicated calibration number entity with combined °F/°C label strings (e.g., `"-1 °F / -0.5 °C"`). Our driver exposes this as:
+- `configParam42` preference (same options, Fahrenheit-only labels)
+- `SensorCal` command (direct set)
+- `currentSensorCal` attribute (readable value)
+
+Our driver is **equal or better** UX for Hubitat — users can trigger `SensorCal` from RM rules or dashboards. The only label gap: our options don't show the Celsius equivalent (e.g., `-1°F` vs HA's `-1 °F / -0.5 °C`). Low priority.
+
+### A5. Fan Mode Coverage
+
+Z-Wave JS ThermostatFanMode v3 exposes auto/on/circulate. Our driver:
+- `THERMOSTAT_FAN_MODE` map: handles 0x00–0x07 correctly
+- `supportedThermostatFanModes`: `["on","auto","circulate"]`
+- `SET_THERMOSTAT_FAN_MODE`: `["auto":0x00,"on":0x01,"circulate":0x06]`
+
+**No gap.** HA maps the same three modes. "Follow schedule" is HA label for circulate (0x06) in some UI — same Z-Wave value, different display label only.
+
+### A6. Scene Controller CC (2B/2C)
+
+Z-Wave JS does not include Scene Activation or Scene Actuator Config for the T6 Pro — they are absent from the ZW2003 device file. Our driver has these in `CMD_CLASS_VERS` as template artifacts. No behavioral impact; both systems agree the device doesn't use scenes.
+
+---
+
+## B. Honeywell Cloud Feature Comparison
+
+| Cloud Feature | Cloud-only? | Local Z-Wave equivalent? | In our driver? | Notes |
+|---------------|------------|--------------------------|----------------|-------|
+| Geofencing | ✅ Cloud-only | None | N/A | No Z-Wave CC for geofencing |
+| Adaptive Recovery / Smart Response | ❌ Local param | Param 27 (Adaptive Intelligent Recovery) | ✅ `configParam27` | Z-Wave param 27 controls this on-device |
+| 5-2 / 5-1-1 / daily schedule | ❌ Local | Schedule Type (param 1); schedule content keypad-only | ✅ `configParam1` exposed | Remote schedule programming via Z-Wave NOT supported (no SCHEDULE CC) |
+| Vacation / Hold mode | ❌ Local setpoint-based | Setpoint set creates hold; returns to schedule at next event | ✅ `setHeatingSetpoint`/`setCoolingSetpoint` | No separate "hold" Z-Wave CC; T6 Pro hold is a setpoint override |
+| Air filter reminder | ❌ Local param | Params 30–32 configure intervals; device tracks internally | ✅ `configParam30`–`32` exposed | Device CANNOT report filter alert via Z-Wave (no Notification event for filter); display-only |
+| Humidification pad reminder | ❌ Local param | Param 33 | ✅ `configParam33` | Display-only reminder; not Z-Wave reportable |
+| Indoor humidity | ❌ Local Z-Wave | SensorMultilevel type 5 | ✅ `humidity` attribute | Polled by `refresh()` |
+| Outdoor temperature display | ❌ Local wired sensor | Param 3 enables wired sensor; **display-only, NOT sent to Z-Wave controller** | ✅ Param exposed; no Z-Wave data | Community-confirmed: ZW2003 does not report outdoor temp via Z-Wave |
+| Outdoor humidity | N/A | Not supported on T6 Pro | N/A | No CC, no wired input for outdoor humidity |
+| Humidity setpoint (humidify/dehumidify target) | N/A | No Humidity Control CC in ZW2003 fingerprint | N/A | **Device cannot set humidity setpoint over Z-Wave.** `RelativeHumidityMeasurement` (read-only) is correct. |
+| Filter timer reset | ❌ Physical menu | No Z-Wave command to reset filter timer | N/A | Timer tracked internally; no CC for reset |
+
+**Verdict:** Every local feature of the cloud app that is Z-Wave-accessible is already covered by our driver. Cloud-only features (geofencing) are irrelevant for a local driver. The filter timer reset and humidity setpoint are hardware limitations, not driver gaps.
+
+---
+
+## C. Earlier v0.3.0+ Backlog Status
+
+From the [2026-05-18 Z-Wave survey](decisions.md ~line 4240):
+
+### PROBABLY-ADD items
+
+**D. Params 43–45 (ZW2007 users: Humidity Offset, Temp/Humidity Reporting Resolution)**
+
+Status: **Defer — confirmed ZW2007-only by Z-Wave JS.**
+
+Z-Wave JS `th6320zw.json` for `productType:0x0011 / productId:0x0008` (our TH6320ZW2003) does NOT include params 43–45. They are defined in `honeywell_template.json` under keys `humidity_offset`, `temperature_resolution`, `humidity_resolution` but are not referenced from the ZW2003 device file. This aligns with OZW XML (params 1–42 only for ZW2003).
+
+Effort unchanged: ~15 lines if ever needed. Defer until confirmed working on ZW2003 firmware or Mads acquires a ZW2007.
+
+**E. Notification type 9 (System) handler stub**
+
+Status: **Ship in v0.4.0 — Pick #3.**
+
+A handler for type 9 with `log.warn` for any `event > 0` is ~15 lines. HA Z-Wave JS handles all notification types via its framework; our driver silently discards type 9. The T6 Pro may emit type 9 events for hardware failure conditions (heater/cooler failure, etc.) per Z-Wave Notification CC spec. Low probability but surfacing them costs nothing.
+
+Effort: ~15 lines (handler method + `if` branch in `zwaveEvent(NotificationReport)`).
+
+### MAYBE items
+
+**F. `thermostatHold` inferred attribute**
+
+Status: **Future / nice-to-have — no change.**
+
+Still risky: driver-inferred hold state drifts if setpoints are changed physically. No Hubitat standard capability for hold. No Z-Wave CC for hold state reporting on ZW2003. Skip for v0.4.0; revisit if Mads specifically requests it.
+
+**G. Outdoor temp catch for sensor type 2**
+
+Status: **Drop.**
+
+Zero evidence the ZW2003 sends SensorMultilevel type 2. The HA Z-Wave JS device file has no provision for it. Community evidence and device behavior both confirm outdoor temp is display-only. The 5-line catch would never fire. Not worth adding dead code.
+
+---
+
+## D. Hubitat Platform Gaps
+
+### D1. `descriptionText` missing on three event handlers (Pick #1)
+
+**Status: Ship in v0.4.0.**
+
+```groovy
+// Line 554 — missing descriptionText:
+eventProcess(name: "thermostatOperatingState", value: newstate)
+// Should be:
+eventProcess(name: "thermostatOperatingState", value: newstate,
+    descriptionText: "${device.displayName} thermostat operating state is ${newstate}")
+
+// Line 581 — missing descriptionText:
+eventProcess(name: "thermostatFanMode", value: newmode, type: state.isDigital?"digital":"physical")
+// Should be:
+eventProcess(name: "thermostatFanMode", value: newmode,
+    descriptionText: "${device.displayName} thermostat fan mode is ${newmode}",
+    type: state.isDigital?"digital":"physical")
+
+// Line 589 — missing descriptionText:
+eventProcess(name: "thermostatMode", value: newmode, type: state.isDigital?"digital":"physical")
+// Should be:
+eventProcess(name: "thermostatMode", value: newmode,
+    descriptionText: "${device.displayName} thermostat mode is ${newmode}",
+    type: state.isDigital?"digital":"physical")
+```
+
+The v0.2.0 polish pass added `descriptionText` to temperature and humidity events. These three handlers were overlooked. v0.3.0 added it to `thermostatFanState` correctly (line 571). Pattern: three remaining event paths that currently produce no info log when `txtEnable` is true.
+
+Effort: ~6 lines. Risk: None.
+
+### D2. `thermostatFanState` attribute type: "string" → "enum" (Pick #2)
+
+**Status: Ship in v0.4.0.**
+
+Current (line 57):
+```groovy
+attribute "thermostatFanState", "string"
+```
+
+Survey recommendation (decisions.md ~line 4292):
+```groovy
+attribute "thermostatFanState", "enum", ["idle","running","running high","running medium",
+    "circulation mode","humidity circulation mode","right - left circulation mode",
+    "quiet circulation mode"]
+```
+
+v0.3.0 shipped with `"string"` instead of the intended `"enum"`. Declaring as `"enum"` enables:
+- RM4 trigger `if thermostatFanState is "running high"` (enum picker in RM UI)
+- Hubitat device page shows value as picker, not freeform input
+- Matches Hubitat convention for all other thermostat attributes
+
+Effort: ~6 lines (attribute declaration edit + enum values). Risk: None (additive type refinement; existing attribute value is unchanged).
+
+### D3. `humiditySetpoint` capability
+
+**Status: Drop — hardware doesn't support.**
+
+T6 Pro fingerprint has no Humidity Control CC (`0x6A`). The `RelativeHumidityMeasurement` capability is correct (read-only sensor). There is no Z-Wave mechanism to set a humidify/dehumidify target on ZW2003. The dehumidification filter reminder (param 34) is a maintenance interval, not a setpoint.
+
+### D4. Multi-fan-mode hierarchy (auto/on/circulate/follow-schedule)
+
+**Status: No gap — already complete.**
+
+`supportedThermostatFanModes = ["on","auto","circulate"]` is the correct set for ZW2003. Z-Wave JS confirms the same three modes. "Follow schedule" is not a separate Z-Wave ThermostatFanMode value — it is a Honeywell UI label for circulate (0x06) on some thermostat models. No additional modes to add.
+
+### D5. Setpoint pairs + auto-mode deadband
+
+**Status: No gap — already complete.**
+
+- Heating setpoint: `setHeatingSetpoint()` → setpointType 1
+- Cooling setpoint: `setCoolingSetpoint()` → setpointType 2
+- Deadband: param 13 (`configParam13` Auto Differential, 0–5°F) already exposed
+
+Both setpoints are polled in `refresh()`. No gap.
+
+### D6. Filter timer reset commands
+
+**Status: Drop — no Z-Wave CC.**
+
+There is no Z-Wave command to reset the T6 Pro's internal filter run-time counter. Params 30–35 only configure reminder intervals. Reset is physical-menu only (hold MODE button for 5 seconds per installer guide). Cannot be implemented in driver.
+
+### D7. Outdoor temp / humidity subscription
+
+**Status: Drop — hardware doesn't support for ZW2003.**
+
+Param 3 enables a wired outdoor sensor that displays on-screen. The ZW2003 does NOT send this value to the Z-Wave controller. Source: driver code (no SensorMultilevel type other than 1 and 5 received), Z-Wave JS device file (no provision for additional sensor types), and community confirmation. TH6320ZW2003 cannot be paired with Z-Wave outdoor sensors for reporting.
+
+---
+
+## Verdict — Drop / v0.4.0 / Future
+
+| Candidate | Verdict | Effort (lines) | Notes |
+|-----------|---------|----------------|-------|
+| **descriptionText on 3 event handlers** | ✅ **Ship v0.4.0 — Pick #1** | ~6 | Direct hygiene gap; matches v0.2.0 pattern |
+| **thermostatFanState attribute type "enum"** | ✅ **Ship v0.4.0 — Pick #2** | ~6 | v0.3.0 shipped "string"; survey intended "enum" |
+| **Notification type 9 System handler stub** | ✅ **Ship v0.4.0 — Pick #3** | ~15 | Surfaces firmware alerts; HA handles silently |
+| Params 43–45 (ZW2007 only) | 🔜 **Future** — ZW2007 users only | ~15 | Confirmed ZW2007-only by Z-Wave JS th6320zw.json |
+| thermostatHold inferred attribute | 🔜 **Future / nice-to-have** | ~20 | Inferred state risks drift; no standard Hubitat capability |
+| Humidity setpoint capability | ❌ **Drop — hardware** | N/A | No Humidity Control CC in ZW2003 |
+| Filter timer reset command | ❌ **Drop — hardware** | N/A | No Z-Wave CC for reset; physical-menu only |
+| Outdoor temp Z-Wave subscription | ❌ **Drop — hardware** | N/A | Display-only; not reported to controller |
+| Scene Activation CC cleanup | 🔜 **Future / cleanup** | ~2 | Template artifacts; harmless but wrong |
+
+**v0.4.0 total delta: ~27 lines. All additive. Zero behavior changes to v0.3.0 baseline.**
+
+---
+
+## Sources
+
+| # | Document | URL | Date | Quality |
+|---|----------|-----|------|---------|
+| 1 | Z-Wave JS device file for T6 Pro (ZW2003) | https://github.com/zwave-js/node-zwave-js/blob/master/packages/config/config/devices/0x0039/th6320zw.json | 2026-05-18 | **HIGH — direct product type/ID match** |
+| 2 | Z-Wave JS Honeywell template | https://raw.githubusercontent.com/zwave-js/node-zwave-js/master/packages/config/config/devices/templates/honeywell_template.json | 2026-05-18 | **HIGH — param labels, metadata, $purpose fields** |
+| 3 | v0.3.0 driver baseline | `drivers/honeywell-t6-pro/honeywell-t6-pro.groovy` | 2026-05-18 | **PRIMARY** |
+| 4 | Earlier Z-Wave survey (decisions.md ~line 4064) | Local | 2026-05-18 | **HIGH — prior research** |
+| 5 | Z-Wave JS device directory listing | https://github.com/zwave-js/node-zwave-js/tree/master/packages/config/config/devices/0x0039 | 2026-05-18 | **HIGH — confirmed th6320zw.json is the only T6 Pro file** |
+---
+
+## 2026-05-18 — Honeywell T6 Pro driver rename
+
+**Commit:** c56c4ea — `honeywell-t6-pro: rename driver to 'Honeywell T6 Pro Thermostat'`
+
+Mads dropped the "Advanced" prefix carried over from djdizzyd's upstream driver. The driver is now under his namespace and reflects his repo conventions.
+
+**Aligned in 3 files:**
+- drivers/honeywell-t6-pro/honeywell-t6-pro.groovy:35 (definition name) — Mads's manual edit
+- drivers/honeywell-t6-pro/packageManifest.json:12 (HPM manifest entry) — Tank-7
+- drivers/honeywell-t6-pro/README.md:23 (install instructions Type-selector reference) — Tank-7
+
+**Unchanged (intentionally):**
+- groovy line 7, 29 + README line 3, 57 reference the upstream djdizzyd "Advanced Honeywell T6 Pro Thermostat" project by name and must stay verbatim per clean-room fork attribution rules.
+
+**Hubitat gotcha noted to Mads:** Existing devices already bound to the old type label will keep showing "Advanced Honeywell T6 Pro Thermostat" in device list until manually re-selected via Edit dropdown.

@@ -1,6 +1,6 @@
 # Tank — Driver Developer
 
-**Status:** v0.2.0 polish complete on 3 community driver forks (2026-05-18). All Trinity deferred-backlog items applied. Awaiting Mads's hardware pick for next build target.
+**Status:** v0.2.0 polish complete on 3 community driver forks (2026-05-18). T6 Pro driver rename alignment (c56c4ea, 2026-05-18) — packageManifest.json:12 + README.md:23. All Trinity deferred-backlog items applied. Awaiting Mads's hardware pick for next build target.
 
 ---
 **2026-05-18 Team Update (Scribe):** Bosch Home Connect verdict = install craigde/hubitat-homeconnect-v3 community driver. OAuth Authorization Code Grant works in Hubitat via parent App cloud callback URI — pattern unblocks future cloud-OAuth drivers.
