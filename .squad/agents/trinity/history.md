@@ -7,6 +7,8 @@
 
 ## Recent Projects & Decisions
 
+**2026-05-19 — Reskill Pass** — Extracted 5 new skills to `.squad/skills/`: async HTTP error handling, temperature scale honoring, refresh-on-save, HPM root registration, geospatial distance math. Commit 1bf5844.
+
 **For detailed learnings from prior sessions (Daikin, Gemstone, SunStat, MyQ, Rainbird, Bosch, OAuth, driver rubric), see history-archive.md.**
 
 ### 2026-05-18 — Community Driver Code-Quality Audits (3 drivers)
