@@ -57,3 +57,29 @@
 
 **Pattern extracted:** Auth gate must come BEFORE dedup in Hubitat command handlers. Dedup is only safe to apply once the session is confirmed healthy.
 
+### 2026-05-19 — Touchstone Fireplace Live Outage Triage
+
+**Task:** Mads woke up to log spam: repeated `cmd 13` timeouts with "No response within 5s. Backing off before retrying." Driver stuck in perpetual retry loop; fireplace uncontrollable.
+
+**Finding — What cmd 13 is:**
+`TUYA_CMD_CONTROL_NEW = 13` (line 113, `touchstone-fireplace.groovy`) = `0x0D` in Tuya protocol = the "device22" status/query command. Used whenever the `deviceId` is 22 characters long. The driver auto-detects this: cmd 10 (`TUYA_CMD_DP_QUERY`) is sent first; if the device responds "data unvalid", the driver switches permanently to cmd 13 (lines 1643-1647). The presence of `Queued Tuya cmd 13 for device22 retry` in the logs means: the device DID respond to the initial cmd 10 (proving it's reachable at the IP/TCP level), then cmd 13 was queued, and THAT is what never gets a response.
+
+**Finding — Why cmd 13 goes unanswered but heartbeats work:**
+Tuya heartbeat (cmd 9, line 111) sends an empty payload — no AES encryption. The device echoes it back at the TCP level regardless of localKey correctness. Status/control queries (cmd 13) send an AES-128-ECB encrypted payload. If the `localKey` has rotated (firmware update, Smart Life re-pair), the device decrypts garbage and silently drops the frame. Result: heartbeat ACKs arrive → `parse()` → `consumeReceiveBuffer()` → `state.retryIndex = 0` reset (line 869) → the retry backoff never escalates beyond 5s/15s. This produces the exact alternating 5s/15s pattern seen in the logs.
+
+**Finding — retryIndex reset on any frame (driver observation for Tank):**
+`state.retryIndex = 0` (line 869) fires on ANY successfully parsed frame, including heartbeats. The intent is to reset backoff when the device is responsive, but a heartbeat ACK does not confirm the device is processing commands. This masks a stale/wrong-key situation: the retry loop runs forever at 5s/15s intervals, producing log spam, burning Hubitat scheduler slots, and never surfacing a "device unreachable" state. Tank should consider (a) only resetting retryIndex on a DP-bearing response frame, and (b) adding a maximum retry cap that surfaces `healthStatus = "offline"` and stops retrying until `initialize()` is called manually.
+
+**Finding — no retry cap (driver observation for Tank):**
+`RETRY_DELAYS_SECONDS = [5, 15, 30]` (line 123) is capped at index 2 (30s) forever. There is no counter that stops the retry loop after N consecutive failures. A production device that loses its key will retry indefinitely, generating log noise and consuming hub resources without ever resolving itself or alerting the user to take corrective action.
+
+**Root cause order of probability (for this specific outage):**
+1. **Wrong localKey** — device responds "data unvalid" to cmd 10 (normal for device22), then silently drops AES-encrypted cmd 13. Heartbeats still ACK. Likely cause: firmware OTA overnight.
+2. **Device in bad state** — device has WiFi but is not processing Tuya queries; power cycle fixes.
+3. **IP address changed** — less likely (device DID respond to cmd 10, proving reachability), but possible if cmd 10 was replied to by a different device at that IP.
+4. **Hub-side socket half-open** — less likely given "data unvalid" was received in this session.
+
+**Deliverables:** `.squad/decisions/inbox/cypher-touchstone-retry-cap.md`, field troubleshooting section added to `.squad/skills/tuya-local-groovy/SKILL.md`.
+
+**Playbook extracted:** See SKILL.md "Field Troubleshooting" section.
+

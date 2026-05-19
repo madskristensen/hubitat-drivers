@@ -4,7 +4,7 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: v0.1.21 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
+> **Status: v0.1.32 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
 >
 > **Killer feature:** Works out-of-the-box for Touchstone Sideline Elite; adapts to other Touchstone models (Steel, Forte, Onyx, etc.) and generic Tuya WiFi fireplaces via configurable Device Profiles and in-driver discovery — no Python, no manual tinytuya wizard needed.
 
@@ -23,6 +23,7 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 - **Refresh** — Poll device status on demand
 - **Initialize** — Open the persistent socket and rebuild schedules (called on hub startup)
 - **Polling** — Scheduled safety-net status poll (default 5 minutes; push updates from physical remote arrive instantly)
+- **Command retry cap** — Command retries back off after repeated timeouts and stop before they spam the Hubitat logs forever; each timeout now recycles the TCP socket before the next retry
 - **Real-time push updates** — Physical remote button presses sync to Hubitat attributes within ~2 s via the persistent Tuya socket
 - **TemperatureMeasurement** — Read current room temperature
 - **Optional power-on defaults** — Flame color, charcoal color, flame brightness, temperature setpoint (heater intentionally excluded — see Safety)

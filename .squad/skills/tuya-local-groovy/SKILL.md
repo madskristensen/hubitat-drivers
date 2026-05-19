@@ -653,3 +653,74 @@ This is the same class of restriction as `java.util.zip.CRC32`. **Perf todo #7 i
 ### 2026-05-18 Validation: Touchstone v0.1.29 → v0.1.30
 
 v0.1.29 refactored `concatBytes()`, `sliceBytes()`, `startsWithBytes()`, and `protocol33HeaderBytes()` to replace boxed `Integer i` loop counters with primitive `int`, and changed contiguous copies to `System.arraycopy`. The primitive-int counter change was correct and retained; however, `System.arraycopy` triggered a Hubitat sandbox rejection. v0.1.30 reverted the three `System.arraycopy` calls (lines 1428, 1452, 1472) back to primitive for-loops while keeping the primitive `int` counters.
+
+---
+
+## Field Troubleshooting
+
+Use this section when a Tuya local driver is working and then stops responding, especially after an overnight gap.
+
+### Symptom → Cause map
+
+| Log pattern | Most likely cause |
+|---|---|
+| "No response within 5s" repeating with `cmd 13` | AES key mismatch (localKey rotated) or device offline |
+| `cmd 13` timeouts but heartbeats implicit (no socket errors) | Key mismatch — heartbeat has no AES payload, so TCP is live but encrypted queries are silently dropped |
+| "No response" repeating with `cmd 7` (control) | Same as above, or device in bad state |
+| `socketStatus: disconnect` / `scheduleReconnect` logs | IP changed (DHCP) or device lost WiFi |
+| `log.error "Cannot connect to fireplace at X.X.X.X"` | IP changed — device not at that address |
+| Alternating 5s / 15s retry pattern that never reaches 30s | `retryIndex` reset by heartbeat ACKs (see driver observation below) |
+| `Queued Tuya cmd 13 for device22 retry` on first connection | Normal — device has 22-char deviceId; driver auto-detects and switches from cmd 10 to cmd 13 |
+
+### Recovery steps (least invasive first)
+
+**1. Check `socketState` attribute on the Hubitat device page.**
+- `open` → socket is live; the problem is AES-level (key) or device state
+- `reconnecting` / `error` → IP or WiFi is the issue; skip to step 4
+- `closed` → driver state issue; run `Initialize`
+
+**2. Check `healthStatus` and `lastActivity` attributes.**
+- If `healthStatus = offline` and `lastActivity` is recent → the socket dropped; driver is recovering
+- If `lastActivity` is hours old → device was unreachable before the user noticed
+
+**3. Power cycle the fireplace.**
+Cut the power for 30 seconds. Wait for it to fully rejoin WiFi (~60s). Check if the driver recovers automatically (it should retry the socket connection on next heartbeat or `sendHeartbeat()` failure).
+
+**4. Ping the device IP from another machine on the same network.**
+```
+ping 192.168.x.x
+```
+- No reply → device offline or IP changed; go to step 5
+- Reply → device is reachable; problem is at the Tuya protocol level (key, state); go to step 6
+
+**5. IP changed — check router DHCP table.**
+Compare the driver's `deviceIP` preference (Hubitat device page → Preferences) against the router's DHCP lease table. If they differ, either:
+- Update `deviceIP` in preferences and press `Initialize`, OR
+- Run the `Discover` command (performs an active TCP scan to find the device)
+- Better long-term: set a DHCP reservation in the router so the device always gets the same IP
+
+**6. Re-fetch the localKey from Smart Life / Tuya Smart app.**
+If the device is reachable but cmd 13 (or cmd 7) gets no response, the `localKey` has likely rotated. Rotation causes: firmware OTA, re-pairing the device in Smart Life, Smart Life account migration.
+
+To extract the current key, use one of:
+- [tuyaapi/tuya-cli](https://github.com/TuyaAPI/cli) — `tuya-cli wizard`
+- [MarkusLebowski/tinytuya](https://github.com/jasonacox/tinytuya) — `python -m tinytuya scan`
+- [Local Tuya HACS integration](https://github.com/rospogrigio/localtuya) — its key-extraction UI works even if you don't use HA
+
+Update `localKey` in Hubitat preferences and press `Initialize`. The driver will reopen the socket and attempt a fresh session.
+
+**7. Last resort — disable/re-enable the Hubitat driver.**
+If all else fails, open the Hubitat device page → click `Delete` device state → re-enter preferences → `Initialize`. This clears `state.statusCommand`, `state.pendingRequests`, `state.retryIndex`, and `state.awaitingResponse`, removing any potential state corruption.
+
+### Driver design observations (known limitations as of 2026-05-19)
+
+These are filed in `.squad/decisions/inbox/cypher-touchstone-retry-cap.md` for Tank to address.
+
+**retryIndex resets on any frame including heartbeats (line 869):**
+`state.retryIndex = 0` fires in the `parse()` successful-frame path, which includes heartbeat ACKs (cmd 9). Since heartbeats carry no AES payload, they succeed even when the `localKey` is wrong. This causes the retry backoff to oscillate between 5s and 15s indefinitely (never reaching 30s) when the device is online but the key is stale. Correct fix: only reset `retryIndex` on a frame that carries DP data (`response?.dps instanceof Map`).
+
+**No retry cap:**
+The retry loop runs forever (`RETRY_DELAYS_SECONDS` caps at 30s but never stops). After ~10 consecutive failures, the driver should surface `healthStatus = offline` clearly and stop retrying until `Initialize` is called.
+
+**Socket not reset after prolonged command failures:**
+`responseTimeout()` does not close/reopen the socket (by design for the persistent model). But if the key is wrong and the device is dropping all AES payloads, the socket should be closed and reopened as part of the retry-cap exhaustion to clear any half-open TCP state.

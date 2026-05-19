@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.30
+ * Version: 0.1.32
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,8 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.32 — 2026-05-19 — recycle the TCP socket on each command timeout so retries reopen a fresh connection instead of reusing a stale one
+ *   0.1.31 — 2026-05-19 — cap command retries after 10 consecutive timeouts; only reset retry backoff on DP-bearing responses so heartbeat ACKs no longer mask a dead command path
  *   0.1.30 — 2026-05-18 — fix sandbox-blocked System.arraycopy in concatBytes/sliceBytes/protocol33HeaderBytes (revert perf todo #7 — Hubitat blocklist)
  *   0.1.29 — 2026-05-18 — drop dead `lastDps` state writes from `processFrame()` after confirming the driver has no readers to migrate (perf todo #6)
  *   0.1.29 — 2026-05-18 — switch hot byte-copy helpers to primitive `int` counters + `System.arraycopy()` where copies are contiguous (perf todo #7)
@@ -93,8 +95,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.30"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.29"
+@Field static final String DRIVER_VERSION = "0.1.32"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.32"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -121,6 +123,7 @@ import javax.crypto.spec.SecretKeySpec
 @Field static final Integer POWER_ON_DEFAULTS_DELAY_MILLIS = 1500
 @Field static final String POWER_ON_DEFAULT_REASON_PREFIX = "power-on default "
 @Field static final List<Integer> RETRY_DELAYS_SECONDS = [5, 15, 30]
+@Field static final Integer MAX_COMMAND_RETRY_ATTEMPTS = 10
 @Field static final String PROFILE_SIDELINE = "Sideline Elite (tested)"
 @Field static final String PROFILE_GENERIC = "Generic Tuya Fireplace"
 @Field static final String PROFILE_CUSTOM = "Custom"
@@ -330,7 +333,7 @@ def updated() {
     state.inFlight = null
     state.awaitingResponse = false
     state.rxBuffer = ""
-    state.retryIndex = 0
+    resetCommandRetryState()
     state.statusCommand = null
     state.seqNo = 0L
     state.pingPending = false
@@ -361,7 +364,7 @@ def initialize() {
     state.inFlight = null
     state.awaitingResponse = false
     state.rxBuffer = ""
-    state.retryIndex = 0
+    resetCommandRetryState()
     state.statusCommand = null
     state.seqNo = 0L
     state.remove("lastDps")
@@ -852,6 +855,7 @@ def parse(String message) {
     try {
         String buffer = safeStr(state.rxBuffer) ?: ""
         buffer += chunk
+        state.frameHadDpData = false
         if (buffer.size() > 32768) {
             int keepFrom = Math.max(buffer.lastIndexOf("000055AA"), buffer.size() - 8192)
             buffer = keepFrom > 0 ? buffer.substring(keepFrom) : buffer
@@ -861,12 +865,16 @@ def parse(String message) {
         if ((processed ?: 0) > 0) {
             if (state.discoveryMode == true) {
                 // discoveryHandleResponse() has already handled routing; skip normal post-processing.
+                state.remove("frameHadDpData")
                 return
             }
             unschedule("responseTimeout")
             state.awaitingResponse = false
             state.inFlight = null
-            state.retryIndex = 0
+            if (state.frameHadDpData == true) {
+                resetCommandRetryState()
+            }
+            state.remove("frameHadDpData")
             updateOnlineStatus("online", "Device responded")
             pumpQueue()
             // Persistent socket: do NOT close after response — stay open for push frames.
@@ -956,8 +964,11 @@ private void pumpQueue() {
     }
 
     if (state.socketOpen != true) {
-        debugLog "pumpQueue: socket not open; request will send after reconnect"
-        return
+        debugLog "pumpQueue: socket not open; opening a fresh socket for pending work"
+        openSocket()
+        if (state.socketOpen != true) {
+            return
+        }
     }
 
     Map request = queue.remove(0)
@@ -995,6 +1006,9 @@ def responseTimeout() {
 
     requeueInFlight()
     updateOnlineStatus("offline", "No response within ${RESPONSE_TIMEOUT_SECONDS}s")
+    if (state.socketOpen == true) {
+        closeSocket(false)
+    }
     scheduleRetry("No response from fireplace within ${RESPONSE_TIMEOUT_SECONDS}s. Backing off before retrying.")
 }
 
@@ -1006,12 +1020,42 @@ def retryPendingRequests() {
 }
 
 private void scheduleRetry(String reason) {
+    Integer currentCount = safeInt(state.retryCount, 0)
+    if (currentCount >= MAX_COMMAND_RETRY_ATTEMPTS) {
+        terminateRetryCycle(reason, currentCount)
+        return
+    }
+
     Integer currentIndex = safeInt(state.retryIndex, 0)
     Integer delay = RETRY_DELAYS_SECONDS[Math.min(currentIndex, RETRY_DELAYS_SECONDS.size() - 1)]
     state.retryIndex = Math.min(currentIndex + 1, RETRY_DELAYS_SECONDS.size() - 1)
+    state.retryCount = currentCount + 1
     unschedule("retryPendingRequests")
     runIn(delay, "retryPendingRequests")
     log.warn "[Touchstone] ${reason} Retrying in ${delay}s."
+}
+
+private void resetCommandRetryState() {
+    state.retryIndex = 0
+    state.retryCount = 0
+}
+
+private void terminateRetryCycle(String reason, Integer retryCount) {
+    Map inFlightRequest = state.inFlight instanceof Map ? (Map) state.inFlight : [:]
+    String requestReason = safeStr(inFlightRequest.reason) ?: "unknown"
+    log.error "[Touchstone] Retry cap reached after ${retryCount} consecutive failures for ${requestReason}; " +
+              "clearing queued requests, recycling the socket, and waiting for fresh commands."
+    unschedule("responseTimeout")
+    unschedule("retryPendingRequests")
+    state.awaitingResponse = false
+    state.inFlight = null
+    state.pendingRequests = []
+    resetCommandRetryState()
+    updateOnlineStatus("offline", "Device unreachable after ${retryCount} retries")
+    if (state.socketOpen == true) {
+        closeSocket(false)
+    }
+    scheduleReconnect()
 }
 
 private void requeueInFlight() {
@@ -1661,6 +1705,7 @@ private Boolean processFrame(String frameHex) {
     }
     if (response?.dps instanceof Map) {
         Map<String, Object> dps = normaliseDps(response.dps as Map)
+        state.frameHadDpData = true
         applyDps(dps)
         handleStatusCapture(safeStr(inFlightRequest.captureMode), dps)
     }
