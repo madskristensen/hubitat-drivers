@@ -149,3 +149,13 @@ Your post-fork audit drove the v0.2.0 polish across all 3 drivers. All 15 of you
 - ⚠️ C4: UUID in packageManifest.json — deferred (fork is temporary pending PR decision)
 
 **Coordinate with Switch for v0.2.0 hardware validation.** Clean diff available in commits ac5b939 / 0e9f8ed / 4b720aa whenever you want to audit the polish pass results.
+
+---
+
+## 2026-05-18 — PurpleAir v0.3.0 Deep Quality Audit
+
+- Groovy settings values from enum preferences stay as strings; retry math like `update_interval * failCount` becomes string repetition (`"60" * 5` → `"6060606060"`) unless the value is coerced before multiplication. Audit every backoff path for this class of bug.
+- Geospatial helper math is easy to get subtly wrong in Hubitat drivers. PurpleAir's search-box helper swapped latitude vs. longitude miles-per-degree, and weighted averaging needs an explicit zero-distance guard so an exact coordinate match does not produce `NaN` / no-data results.
+- Cloud-poll drivers should treat `lastActivity` as a coarse freshness signal and keep disabled polling truly disabled even on error paths. Manual refresh and retry code are where schedule leaks tend to sneak back in.
+- If a driver caches sensor history in `state`, key it by a stable sensor identifier and prune stale entries. Human-readable site names are not stable enough for long-lived health heuristics.
+- Repo release hygiene still matters at the driver header level: keep each top-of-file `Changelog:` entry as one parsable `version — YYYY-MM-DD — description` line so release-note extraction does not depend on wrapped continuation lines.

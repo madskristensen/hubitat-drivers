@@ -9,35 +9,12 @@
  *                  missing descriptionText.
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
- *  Version: 0.5.0 — 2026-05-18 — Removed MQTT support: reverted to local REST polling after
- *                                broker compatibility issues. Cleaner, simpler,
- *                                more reliable.
- *  Version: 0.4.2 — 2026-05-18 — Add clearOverlayMessage() command to dismiss an active
- *                                overlay popup on the tablet (calls FKB's setOverlayMessage
- *                                with empty text). Complements setOverlayMessage(text) and
- *                                deviceNotification(text) — both show, this one clears.
- *  Version: 0.4.1 — 2026-05-18 — BUG: guard NPE in beep() when toneFile preference is unset
- *                                (log.warn instead of NPE); demote HTTP 408/5xx callback
- *                                logging from error to warn (transient tablet unreachable);
- *                                BREAKING: remove setScreenBrightness command — use
- *                                setLevel(0-100) instead (SwitchLevel capability primary).
- *  Version: 0.3.0 — 2026-05-18 — Closes HA gap: brightness 0-100->0-255 conversion BUG FIX
- *                                (setLevel(100) now means 100% not ~39%);
- *                                6 new emitIfChanged sensor attributes from existing
- *                                deviceInfo response (charging, screensaverActive,
- *                                batteryTemperature, foregroundApp, screenOrientation,
- *                                kioskMode — zero extra HTTP calls);
- *                                Notification capability + deviceNotification(text) →
- *                                overlay popup on tablet from RM;
- *                                utility commands: toBackground/clearCache/forceSleep/
- *                                exitApp/lockKiosk/unlockKiosk/enableLockedMode/disableLockedMode;
- *                                video playback: playVideo(url)/stopVideo;
- *                                motion detection on/off toggle;
- *                                checkInterval event spam dedupe (Trinity finding #8).
- *  Version: 0.2.0 — 2026-05-18 — v0.2.0 polish: logsOff auto-disable, logEnable default false,
- *                                descriptionText on checkInterval events, checkInterval 60→120,
- *                                setLevel event moved to callback, UUID in manifest, Security note in README
- *  Version: 0.1.0 — 2026-05-18 — Initial fork; apply Trinity audit fixes
+ *  Version: 0.5.0 — 2026-05-18 — Removed MQTT support: reverted to local REST polling after broker compatibility issues; cleaner, simpler, more reliable.
+ *  Version: 0.4.2 — 2026-05-18 — Add clearOverlayMessage() command to dismiss an active overlay popup on the tablet (calls FKB's setOverlayMessage with empty text); complements setOverlayMessage(text) and deviceNotification(text) — both show, this one clears.
+ *  Version: 0.4.1 — 2026-05-18 — BUG: guard NPE in beep() when toneFile preference is unset (log.warn instead of NPE); demote HTTP 408/5xx callback logging from error to warn (transient tablet unreachable); BREAKING: remove setScreenBrightness command — use setLevel(0-100) instead (SwitchLevel capability primary).
+ *  Version: 0.3.0 — 2026-05-18 — Closes HA gap: brightness 0-100->0-255 conversion BUG FIX (setLevel(100) now means 100% not ~39%); 6 new emitIfChanged sensor attributes from existing deviceInfo response (charging, screensaverActive, batteryTemperature, foregroundApp, screenOrientation, kioskMode — zero extra HTTP calls); Notification capability + deviceNotification(text) → overlay popup on tablet from RM; utility commands: toBackground/clearCache/forceSleep/exitApp/lockKiosk/unlockKiosk/enableLockedMode/disableLockedMode; video playback: playVideo(url)/stopVideo; motion detection on/off toggle; checkInterval event spam dedupe (Trinity finding #8).
+ *  Version: 0.2.0 — 2026-05-18 — v0.2.0 polish: logsOff auto-disable, logEnable default false, descriptionText on checkInterval events, checkInterval 60→120, setLevel event moved to callback, UUID in manifest, Security note in README.
+ *  Version: 0.1.0 — 2026-05-18 — Initial fork; apply Trinity audit fixes.
  */
 
 import groovy.transform.Field

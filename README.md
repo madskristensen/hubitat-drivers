@@ -2,7 +2,7 @@
 
 Community Hubitat Elevation drivers by Mads Kristensen.
 
-**4 production-ready drivers** • 🌐 2 Local LAN • ☁️ 2 Cloud API • 📦 HPM Ready
+**7 production-ready drivers** • 🌐 4 Local LAN • ☁️ 3 Cloud API • 📦 HPM Ready
 
 ## Available Drivers
 
@@ -11,6 +11,7 @@ Community Hubitat Elevation drivers by Mads Kristensen.
 | Driver                     | Type  | Key Features                                                                 | Docs                                         |
 | -------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------- |
 | **Daikin WiFi Thermostat** | Local | No cloud required • Indoor/outdoor temp • Humidity • Energy meter • HTTP API | [Docs](drivers/daikin-wifi/README.md)        |
+| **Honeywell T6 Pro** | Local | Z-Wave thermostat • Multi-point climate control • Battery-powered • Fan mode | [Docs](drivers/honeywell-t6-pro/README.md)        |
 | **SunStat Connect Plus**   | Cloud | Floor heating • Auto-discovery • Parent/child • Watts® Home API              | [Docs](drivers/sunstat-thermostat/README.md) |
 
 ### 🏠 Home Ambiance
@@ -19,6 +20,18 @@ Community Hubitat Elevation drivers by Mads Kristensen.
 | ------------------------------- | ----- | ------------------------------------------------------------------------------ | ---------------------------------------------- |
 | **Gemstone Lights**             | Cloud | Permanent outdoor lighting • Named effects • Favorites support • Color control | [Docs](drivers/gemstone-lights/README.md)      |
 | **Touchstone / Tuya Fireplace** | Local | Flame & log colors • Brightness • Heater • DP discovery • No cloud required    | [Docs](drivers/touchstone-fireplace/README.md) |
+
+### 📱 Mobile & Tablet
+
+| Driver                     | Type  | Key Features                                                                 | Docs                                         |
+| -------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------- |
+| **Fully Kiosk Browser**    | Local | Tablet remote • Browser control • Motion detection • Local REST API • Screen commands | [Docs](drivers/fully-kiosk/README.md)        |
+
+### 🌍 Air Quality
+
+| Driver                     | Type  | Key Features                                                                 | Docs                                         |
+| -------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------- |
+| **PurpleAir AQI Virtual Sensor** | Cloud | Real-time AQI • Multi-sensor averaging • EPA/Woodsmoke correction • Geolocation support | [Docs](drivers/purpleair-aqi/README.md)        |
 
 ## Quick Start
 
@@ -42,7 +55,10 @@ Community Hubitat Elevation drivers by Mads Kristensen.
 
    ```text
    Daikin WiFi:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/daikin-wifi/packageManifest.json
+   Fully Kiosk:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/fully-kiosk/packageManifest.json
    Gemstone Lights:  https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/packageManifest.json
+   Honeywell T6:     https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/honeywell-t6-pro/packageManifest.json
+   PurpleAir AQI:    https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/packageManifest.json
    SunStat Connect:  https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/packageManifest.json
    Touchstone:       https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/packageManifest.json
    ```
@@ -71,8 +87,11 @@ For advanced users or offline installations:
 | Driver       | Network | Details                                                               |
 | ------------ | ------- | --------------------------------------------------------------------- |
 | Daikin Wi-fi | Local   | Direct IP access to BRP069B adapter • No cloud account needed         |
+| Honeywell T6 Pro | Local   | Z-Wave only • No external network access required         |
+| Fully Kiosk | Local   | Direct IP access to tablet device • Local network required         |
 | Gemstone     | Cloud   | Outbound HTTPS to Gemstone cloud                                      |
 | SunStat      | Cloud   | Outbound HTTPS to Watts® Home cloud                                   |
+| PurpleAir AQI | Cloud   | Outbound HTTPS to PurpleAir cloud API (api.purpleair.com)                                   |
 | Touchstone   | Local   | Direct IP access to device • Requires Tuya local key (one-time setup) |
 
 ## Contributing

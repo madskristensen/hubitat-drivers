@@ -9,25 +9,11 @@
  *  Forked because: maintainer silent 4+ years; BLOCKER + MAJOR bugs affecting live devices.
  *
  *  Changelog:
- *    0.5.0 — 2026-05-18 — syncClock UX: replace every-3-hours auto-schedule with daily 4am cron
- *                          (24x fewer Z-Wave frames; DST handled within 24h); remove manual
- *                          syncClock command (dead UI — auto-sync covers all cases; hitting
- *                          Configure still triggers immediate sync via existing runIn).
- *    0.4.0 — 2026-05-18 — Add descriptionText to thermostatOperatingState, thermostatFanMode, thermostatMode events (Pick #1);
- *                          change thermostatFanState attribute type from "string" to "enum" with 8 values (Pick #2);
- *                          add Notification type 9 (System) handler stub with log.warn for hardware/software faults (Pick #3).
- *    0.3.0 — 2026-05-18 — Emit thermostatFanState attribute from ThermostatFanStateReport (Pick #1);
- *                          handle battery-low notification events 10/11 with log.warn + battery sendEvent (Pick #2);
- *                          fix CMD_CLASS_VERS octal bug 043 → 0x43 for Thermostat Setpoint CC (Pick #3).
- *    0.2.0 — 2026-05-18 — Polish pass: descriptionText on temperature/humidity events (C1),
- *                          BigDecimal equality in eventProcess to prevent 68 vs 68.0 false events (C2),
- *                          remove dead configurationGet(52) wasted Z-Wave frames (C3),
- *                          descriptionText on supportedThermostatModes/FanModes events (C4),
- *                          remove redundant runIn(10,"syncClock") from refresh() (C5);
- *                          namespace → mads; add Initialize capability; style alignment.
- *    0.1.0 — 2026-05-18 — Initial fork; apply Trinity audit fixes: add txtEnable preference (BLOCKER),
- *                          fix device.currentValue("thermostatOperatingState") in two locations (MAJOR),
- *                          add unschedule("syncClock") in configure() (MAJOR).
+ *    0.5.0 — 2026-05-18 — syncClock UX: replace every-3-hours auto-schedule with daily 4am cron (24x fewer Z-Wave frames; DST handled within 24h); remove manual syncClock command (dead UI — auto-sync covers all cases; hitting Configure still triggers immediate sync via existing runIn).
+ *    0.4.0 — 2026-05-18 — Add descriptionText to thermostatOperatingState, thermostatFanMode, thermostatMode events (Pick #1); change thermostatFanState attribute type from "string" to "enum" with 8 values (Pick #2); add Notification type 9 (System) handler stub with log.warn for hardware/software faults (Pick #3).
+ *    0.3.0 — 2026-05-18 — Emit thermostatFanState attribute from ThermostatFanStateReport (Pick #1); handle battery-low notification events 10/11 with log.warn + battery sendEvent (Pick #2); fix CMD_CLASS_VERS octal bug 043 → 0x43 for Thermostat Setpoint CC (Pick #3).
+ *    0.2.0 — 2026-05-18 — Polish pass: descriptionText on temperature/humidity events (C1), BigDecimal equality in eventProcess to prevent 68 vs 68.0 false events (C2), remove dead configurationGet(52) wasted Z-Wave frames (C3), descriptionText on supportedThermostatModes/FanModes events (C4), remove redundant runIn(10,"syncClock") from refresh() (C5); namespace → mads; add Initialize capability; style alignment.
+ *    0.1.0 — 2026-05-18 — Initial fork; apply Trinity audit fixes: add txtEnable preference (BLOCKER), fix device.currentValue("thermostatOperatingState") in two locations (MAJOR), add unschedule("syncClock") in configure() (MAJOR).
  *
  *  [original djdizzyd MIT copyright block preserved verbatim below]
  */

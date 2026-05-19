@@ -1,5 +1,31 @@
 # Cypher — Integration / Protocol Engineer
 
+## Session Arc 2026-05-19: Fully Kiosk v0.6+ Parity Audit
+
+**Task:** Mads asked: "what's left on the fully driver to make it truly awesome?" Conduct focused, opinionated audit against HA parity baseline and official REST API.
+
+**Methodology:**
+- Inventoried v0.5.0 driver: 21 commands, 12 attributes
+- Fetched official Fully Kiosk REST API docs (www.fully-kiosk.com/#rest)
+- Analyzed HA integration source (homeassistant/components/fully_kiosk): 7 entity types, 19+ exposed features
+- Ranked gaps by leverage (impact-to-effort ratio)
+
+**Key Findings:**
+1. **v0.5.0 is production-ready** — security fixed, event hygiene fixed, rich sensor attributes from existing poll.
+2. **12 identified gaps** — Storage/RAM sensors, timer controls, screenshots, media player, arbitrary config key-value setter.
+3. **MVP for v0.6:** RAM/storage sensors + reboot button + screen/screensaver timers (~190 LOC, all 🟢 low risk).
+4. **Out of scope (final):** MQTT (rollback correct), cloud APIs, video streaming, arbitrary settings UI, reflection/metaClass.
+
+**Deliverable:** Full audit report (4 sections) posted to Mads for prioritization. NOT pushed to decisions.md (is for team decisions, not audit recommendations).
+
+**FKB REST API learnings:**
+- All data types already supported: integers (brightness, timers, volume), booleans (settings), strings (URLs, text), JSON objects (device info)
+- 350+ config parameters via `setStringSetting`/`setBooleanSetting` — too many to safe-gate in UI; generic key-value setter is out-of-scope
+- No video streaming; `getScreenshot` returns static JPEG only
+- Password auth is LAN-local query param — cleartext but already documented as protocol design limitation
+
+---
+
 ## Session Arc 2026-05-18: Multi-Platform Audit (MQTT Discovery, FK v0.3.0, T6 v0.4.0)
 
 **Summary:** 3 simultaneous audit passes completed:

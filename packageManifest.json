@@ -3,7 +3,7 @@
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
   "dateReleased": "2026-05-18",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/README.md",
   "drivers": [
@@ -34,6 +34,30 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/sunstat-thermostat-child.groovy",
       "required": false
+    },
+    {
+      "id": "b4c17e3a-9f82-4d56-a031-7e8c3b0f2d91",
+      "name": "Honeywell T6 Pro Thermostat",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/honeywell-t6-pro/honeywell-t6-pro.groovy",
+      "required": false,
+      "version": "0.5.0"
+    },
+    {
+      "id": "ead8e688-5b88-48b7-97f9-16b0d921bd2f",
+      "name": "Fully Kiosk Browser",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/fully-kiosk/fully-kiosk.groovy",
+      "required": false,
+      "version": "0.5.0"
+    },
+    {
+      "id": "71f1eb74-4302-4a96-9c4d-20391936bf94",
+      "name": "PurpleAir AQI Virtual Sensor",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/purpleair-aqi.groovy",
+      "required": false,
+      "version": "0.4.0"
     }
   ]
 }
