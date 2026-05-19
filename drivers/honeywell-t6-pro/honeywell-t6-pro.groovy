@@ -1,14 +1,23 @@
 /**
  *  Honeywell T6 Pro Thermostat (Hubitat) — Fork
+ *  Author:  Mads Kristensen
+ *  Version: 0.2.0 — 2026-05-18
+ *  License: MIT
  *
- *  Fork by: Mads Kristensen — 2026-05-18
- *  Source: github.com/djdizzyd/hubitat (Advanced Honeywell T6 Pro Thermostat)
- *  Forked because: maintainer silent 4+ years, BLOCKER bug (txtEnable never declared)
- *                  + MAJOR bug (currentValue() missing attr → broken fan-state detection)
- *                  + MAJOR bug (zombie syncClock schedulers in configure())
- *  Goal: ship the fixes as upstream PR to djdizzyd once tested.
+ *  Fork of djdizzyd/hubitat "Advanced Honeywell T6 Pro Thermostat" (Bryan Copeland).
+ *  Source: https://github.com/djdizzyd/hubitat/blob/master/Drivers/Honeywell/Advanced-Honeywell-T6-Pro.groovy
+ *  Forked because: maintainer silent 4+ years; BLOCKER + MAJOR bugs affecting live devices.
  *
- *  Version: 0.1.0 — 2026-05-18 — Initial fork; apply Trinity audit fixes
+ *  Changelog:
+ *    0.2.0 — 2026-05-18 — Polish pass: descriptionText on temperature/humidity events (C1),
+ *                          BigDecimal equality in eventProcess to prevent 68 vs 68.0 false events (C2),
+ *                          remove dead configurationGet(52) wasted Z-Wave frames (C3),
+ *                          descriptionText on supportedThermostatModes/FanModes events (C4),
+ *                          remove redundant runIn(10,"syncClock") from refresh() (C5);
+ *                          namespace → mads; add Initialize capability; style alignment.
+ *    0.1.0 — 2026-05-18 — Initial fork; apply Trinity audit fixes: add txtEnable preference (BLOCKER),
+ *                          fix device.currentValue("thermostatOperatingState") in two locations (MAJOR),
+ *                          add unschedule("syncClock") in configure() (MAJOR).
  *
  *  [original djdizzyd MIT copyright block preserved verbatim below]
  */
@@ -21,11 +30,12 @@
 import groovy.transform.Field
 
 metadata {
-    definition (name: "Advanced Honeywell T6 Pro Thermostat", namespace: "djdizzyd", author: "Bryan Copeland", importUrl: "https://raw.githubusercontent.com/djdizzyd/hubitat/master/Drivers/Honeywell/Advanced-Honeywell-T6-Pro.groovy") {
+    definition (name: "Advanced Honeywell T6 Pro Thermostat", namespace: "mads", author: "Mads Kristensen", importUrl: "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/honeywell-t6-pro/honeywell-t6-pro.groovy") {
 
         capability "Actuator"
         capability "Battery"
         capability "Configuration"
+        capability "Initialize"
         capability "Refresh"
         capability "Sensor"
         capability "TemperatureMeasurement"
@@ -59,7 +69,7 @@ metadata {
 }
 
 // FIX NIT: VERSION constant for diagnostics / HPM version matching
-@Field static final String VERSION = "0.1.0"
+@Field static final String VERSION = "0.2.0"
 @Field static Map CMD_CLASS_VERS=[0x71:3, 0x7A:2, 0x81:1, 0x73:1, 0x2B:1, 0x2C:1, 0x85:2, 0x72:1, 0x86:2, 0x8F:1, 0x31:5, 0x70:1, 0x80:1, 0x45:1, 0x44:3, 043:2, 0x42:1, 0x40:2, 0x5A:1, 0x59:1, 0x5E:2]
 @Field static Map THERMOSTAT_OPERATING_STATE=[0x00:"idle",0x01:"heating",0x02:"cooling",0x03:"fan only",0x04:"pending heat",0x05:"pending cool",0x06:"vent economizer"]
 @Field static Map THERMOSTAT_MODE=[0x00:"off",0x01:"heat",0x02:"cool",0x03:"auto",0x04:"emergency heat"]
@@ -131,8 +141,8 @@ void configure() {
 
 void initializeVars() {
     // first run only
-    sendEvent(name:"supportedThermostatModes", value: supportedThermostatModes.toString().replaceAll(/"/,""), isStateChange:true)
-    sendEvent(name:"supportedThermostatFanModes", value: supportedThermostatFanModes.toString().replaceAll(/"/,""), isStateChange:true)
+    sendEvent(name: "supportedThermostatModes", value: supportedThermostatModes.toString().replaceAll(/"/,""), isStateChange: true, descriptionText: "${device.displayName} supported thermostat modes set")
+    sendEvent(name: "supportedThermostatFanModes", value: supportedThermostatFanModes.toString().replaceAll(/"/,""), isStateChange: true, descriptionText: "${device.displayName} supported thermostat fan modes set")
     state.initialized=true
     runIn(15, refresh)
 }
@@ -148,6 +158,12 @@ void updated() {
     unschedule()
     if (logEnable) runIn(1800,logsOff)
     runConfigs()
+    runEvery3Hours("syncClock")
+}
+
+void initialize() {
+    if (logEnable) log.debug "initialize()..."
+    if (!state.initialized) initializeVars()
     runEvery3Hours("syncClock")
 }
 
@@ -297,8 +313,17 @@ void zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd) 
 }
 
 void eventProcess(Map evt) {
-    if (device.currentValue(evt.name).toString() != evt.value.toString()) {
-        evt.isStateChange=true
+    // C2: Use BigDecimal compare to avoid false-positive events for 68 vs 68.0
+    def current = device.currentValue(evt.name)
+    boolean changed
+    if (current instanceof Number || evt.value instanceof Number) {
+        try { changed = (current as BigDecimal) != (evt.value as BigDecimal) }
+        catch (Exception e) { changed = current?.toString() != evt.value?.toString() }
+    } else {
+        changed = current?.toString() != evt.value?.toString()
+    }
+    if (changed) {
+        evt.isStateChange = true
         sendEvent(evt)
     }
 }
@@ -324,10 +349,9 @@ void refresh() {
     cmds.add(zwave.thermostatSetpointV2.thermostatSetpointGet(setpointType: 1))
     cmds.add(zwave.thermostatSetpointV2.thermostatSetpointGet(setpointType: 2))
     sendToDevice(cmds)
-    runIn(10, "syncClock")
 }
 
-void syncClock() {
+void syncClock(){
     Calendar currentDate = Calendar.getInstance()
     sendToDevice(zwave.clockV1.clockSet(hour: currentDate.get(Calendar.HOUR_OF_DAY), minute: currentDate.get(Calendar.MINUTE), weekday: currentDate.get(Calendar.DAY_OF_WEEK)))
 }
@@ -461,10 +485,17 @@ void zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) {
 void zwaveEvent(hubitat.zwave.commands.sensormultilevelv5.SensorMultilevelReport cmd) {
     if (cmd.sensorType.toInteger() == 1) {
         if (logEnable) log.debug "got temp: ${cmd.scaledSensorValue}"
-        eventProcess(name: "temperature", value: cmd.scaledSensorValue, unit: cmd.scale == 1 ? "F" : "C")
+        String unit = cmd.scale == 1 ? "F" : "C"
+        String descText = "${device.displayName} temperature is ${cmd.scaledSensorValue}°${unit}"
+        if (txtEnable) log.info descText
+        eventProcess(name: "temperature", value: cmd.scaledSensorValue, unit: unit, descriptionText: descText)
     } else if (cmd.sensorType.toInteger() == 5) {
-        if (logEnable) log.debug "got temp: ${cmd.scaledSensorValue}"
-        eventProcess(name: "humidity", value: Math.round(cmd.scaledSensorValue), unit: cmd.scale == 0 ? "%": "g/m³")
+        if (logEnable) log.debug "got humidity: ${cmd.scaledSensorValue}"
+        String unit = cmd.scale == 0 ? "%" : "g/m³"
+        def rounded = Math.round(cmd.scaledSensorValue)
+        String descText = "${device.displayName} humidity is ${rounded}${unit}"
+        if (txtEnable) log.info descText
+        eventProcess(name: "humidity", value: rounded, unit: unit, descriptionText: descText)
     }
 }
 
@@ -528,7 +559,6 @@ void zwaveEvent(hubitat.zwave.commands.thermostatfanstatev1.ThermostatFanStateRe
     if (logEnable) log.debug "Got thermostat fan state report: ${cmd}"
     String newstate=THERMOSTAT_FAN_STATE[cmd.fanOperatingState.toInteger()]
     if (logEnable) log.debug "Translated fan state: " + newstate
-    sendToDevice(zwave.configurationV1.configurationGet(parameterNumber: 52))
     // FIX #2a [MAJOR]: was device.currentValue=="cooling" (missing attribute arg → always false)
     if (newstate=="idle" && (device.currentValue("thermostatOperatingState")=="heating" || device.currentValue("thermostatOperatingState")=="cooling")) sendToDevice(zwave.thermostatOperatingStateV1.thermostatOperatingStateGet())
 }
