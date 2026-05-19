@@ -4,6 +4,14 @@ Generated 2026-05-18T17:59:14Z
 
 ---
 
+## 2026-05-18 — Fully Kiosk v0.5.0 rollback
+
+- Decision: Fully Kiosk v0.5.0 removes MQTT support after v0.4.x attempts failed at the broker handshake layer
+- Rationale: Cloud-poll architecture worked reliably; MQTT added complexity without benefit
+- Future: If MQTT is revisited, prototype against a verified broker (e.g., test.mosquitto.org) before integrating into the driver
+
+---
+
 ## 2026-05-18 — Fully Kiosk v0.4.5 shipped (mqtt.connect signature fix)
 
 **Commit:** 47ba616 — `fully-kiosk v0.4.5: BUG fix invalid interfaces.mqtt.connect() signature`
