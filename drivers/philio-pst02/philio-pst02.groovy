@@ -1,7 +1,7 @@
 /**
  *  Philio PST02 Multi-Sensor (PST02-A/B/C) — Hubitat Fork
  *  Author:  Mads Kristensen
- *  Version: 1.3.0 — 2026-05-19
+ *  Version: 1.4.0 — 2026-05-19
  *  License: Apache-2.0
  *
  *  Fork of kunPet/Denny Page "Philio PST02" Hubitat driver.
@@ -11,11 +11,33 @@
  *  Hubitat best-practice hardening.
  *
  *  Changelog:
+ *    1.4.0 — 2026-05-19 — Add missing commandClassVersions map (was null, causing Z-Wave parse without version hints); add P21 prefix to temperatureDifferential label; auto-set pendingResync in updated() so preference changes sync on next wakeup without requiring a manual Configure press.
  *    1.3.0 — 2026-05-19 — Fix temperature bug: P5 bit 3 temperature scale logic was inverted (setBit used "== c" should be "== f"), causing device to run in Fahrenheit mode when Celsius was selected. Fix unit detection in SensorMultilevelReport: PST02 always sends cmd.scale=0 regardless of P5 setting, so unit is now derived from p5TempScale preference instead of cmd.scale.
  *    1.2.0 — 2026-05-19 — Performance: fix implicit globals (resync/refresh/value/cmds in deviceSync, value in SensorMultilevelReport cases 5/3); add typed return types on setBit/isPst02BVariant/resolveConfigParam*; cache isPst02BVariant() per resolve call; remove redundant configurationGet(12) in resync block (duplicate of diff-check path); inline map literals in BatteryReport/clearTamper; type Map in event handlers; drop redundant .toString() in log.trace; fix "wakup" typo in WakeUpIntervalReport log.
  *    1.1.0 — 2026-05-19 — Fix implicit global in SecurityMessageEncapsulation; remove duplicate ConfigurationReport case 12 and dangling break; fix log.warn misuse in configure/refresh/updated; guard WakeUpNotification log.debug with logEnable; re-enable auto-disable debug logging after 30 min; remove German upstream comments.
  *    1.0.0 — 2026-05-19 — Initial Mads fork. Replace raw para5/para6/para7 bitmask inputs with guided human-readable dropdowns derived from Z-Wave JS device configs. Add variant auto-detection (PST02-A/C vs PST02-B), raw-override mode, and Hubitat-standard header/logging.
  */
+
+import groovy.transform.Field
+
+@Field static final Map commandClassVersions = [
+    0x30: 2,  // SENSOR_BINARY_V2
+    0x31: 5,  // SENSOR_MULTILEVEL_V5
+    0x59: 1,  // ASSOCIATION_GRP_INFO
+    0x5A: 1,  // DEVICE_RESET_LOCALLY
+    0x5E: 2,  // ZWAVEPLUS_INFO_V2
+    0x70: 1,  // CONFIGURATION
+    0x71: 4,  // NOTIFICATION_V4
+    0x72: 2,  // MANUFACTURER_SPECIFIC_V2
+    0x73: 1,  // POWERLEVEL
+    0x7A: 2,  // FIRMWARE_UPDATE_MD_V2
+    0x80: 1,  // BATTERY
+    0x84: 2,  // WAKE_UP_V2
+    0x85: 2,  // ASSOCIATION_V2
+    0x86: 2,  // VERSION_V2
+    0x8F: 1,  // MULTI_CMD
+    0x98: 1,  // SECURITY
+]
 
 metadata
 {
@@ -124,7 +146,7 @@ preferences
     input name: "tickInterval", title: "P20: Auto Report Tick minutes", description: "0 disables ALL auto reporting. Set Wakeup interval minutes to match (min 30)", type: "number", defaultValue: "30", range: "0..255"
  
 	// Temperature differential report: Parameter 21, Range 0-127, default 1 changed to 3, units of degrees Fahrenheit
-    input name: "temperatureDifferential", title: "Temperature differential report", description: "0 disables differential reporting", type: "number", defaultValue: "3", range: "0..127"
+    input name: "temperatureDifferential", title: "P21: Temperature differential report", description: "0 disables differential reporting", type: "number", defaultValue: "3", range: "0..127"
 
 //		    // Humidity differential report: Parameter 23, Range 0-60, default 5, units of percent RH%
 //		    input name: "humidityDifferential", title: "Humidity differential report", description: "0 disables differential reporting", type: "number", defaultValue: "5", range: "0..60"
@@ -531,6 +553,8 @@ void updated()
 
     log.info "debug logging is ${logEnable}"
     log.info "description logging is ${txtEnable}"
+    state.pendingResync = true
+    log.info "Configuration will resync when device wakes up"
 }
 
 def configure()
