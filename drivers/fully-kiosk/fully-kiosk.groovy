@@ -9,6 +9,15 @@
  *                  missing descriptionText.
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
+ *  Version: 0.4.3 — 2026-05-18 — BUG: fix 4 event-name mismatches in handleFkEvent() —
+ *                                driver was listening for motionDetected/unpluggedAC/
+ *                                pluggedAC/batteryLevel but FKB publishes onMotion/
+ *                                unplugged/plugged/onBatteryLevelChanged (verified
+ *                                against official FKB MQTT docs by Cypher). Removed
+ *                                dead foregroundApp case — FKB doesn't publish that
+ *                                as event; it comes via deviceInfo topic instead
+ *                                (handled in handleFkDeviceInfo). MQTT push events
+ *                                for motion/charging/battery now actually fire.
  *  Version: 0.4.2 — 2026-05-18 — Add clearOverlayMessage() command to dismiss an active
  *                                overlay popup on the tablet (calls FKB's setOverlayMessage
  *                                with empty text). Complements setOverlayMessage(text) and
@@ -49,7 +58,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.4.2"
+@Field static final String VERSION = "0.4.3"
 
 metadata {
     definition (name: "Fully Kiosk Browser", namespace: "mads", author: "Mads Kristensen",
@@ -882,16 +891,16 @@ private void handleFkEvent(String eventType, String payload) {
         case "screenOff":
             emitIfChanged("switch", "off", "${device.displayName} switch is off")
             break
-        case "motionDetected":
+        case "onMotion":
             motion("active")
             break
         case "pluggedAC":
             emitIfChanged("charging", "true",  "${device.displayName} charging is true")
             break
-        case "unpluggedAC":
+        case "unplugged":
             emitIfChanged("charging", "false", "${device.displayName} charging is false")
             break
-        case "batteryLevel":
+        case "onBatteryLevelChanged":
             try {
                 def data = parseJson(payload)
                 def batt = data?.batteryLevel?.toString()
@@ -904,17 +913,6 @@ private void handleFkEvent(String eventType, String payload) {
                     emitIfChanged("battery", payload.toInteger(),
                                   "${device.displayName} battery is ${payload}", "%")
                 }
-            }
-            break
-        case "foregroundApp":
-            try {
-                def data = parseJson(payload)
-                def app  = data?.appPackage ?: data?.foregroundApp ?: payload
-                emitIfChanged("foregroundApp", app,
-                              "${device.displayName} foregroundApp is ${app}")
-            } catch (Exception e) {
-                emitIfChanged("foregroundApp", payload,
-                              "${device.displayName} foregroundApp is ${payload}")
             }
             break
         default:
