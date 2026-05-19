@@ -34,5 +34,7 @@ Then assign the device driver type:
 
 | Version | Date       | Notes |
 |---------|------------|-------|
+| 1.3.0   | 2026-05-19 | Fix temperature conversion bug: P5 bit 3 temperature scale logic was inverted (device ran in Fahrenheit mode even when Celsius was selected), causing readings like 149°F instead of 63°F. Unit detection no longer relies on cmd.scale since PST02 always sends 0 regardless. |
+| 1.2.0   | 2026-05-19 | Performance: eliminate implicit globals, typed returns, cache isPst02BVariant(), remove redundant configurationGet(12), reduce map allocations. |
 | 1.1.0   | 2026-05-19 | Fix implicit global variable in SecurityMessageEncapsulation; remove duplicate case 12 and dangling break in ConfigurationReport; fix log.warn misuse in configure/refresh/updated; guard WakeUpNotification debug log with logEnable; re-enable auto-disable of debug logging after 30 min; remove German upstream comments. |
 | 1.0.0   | 2026-05-19 | Initial Mads fork with guided parameter 5/6/7 UX, variant-aware bitmask calculation, and optional advanced raw override. |

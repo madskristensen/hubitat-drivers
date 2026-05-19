@@ -1,7 +1,7 @@
 /**
  *  Philio PST02 Multi-Sensor (PST02-A/B/C) — Hubitat Fork
  *  Author:  Mads Kristensen
- *  Version: 1.1.0 — 2026-05-19
+ *  Version: 1.3.0 — 2026-05-19
  *  License: Apache-2.0
  *
  *  Fork of kunPet/Denny Page "Philio PST02" Hubitat driver.
@@ -11,6 +11,8 @@
  *  Hubitat best-practice hardening.
  *
  *  Changelog:
+ *    1.3.0 — 2026-05-19 — Fix temperature bug: P5 bit 3 temperature scale logic was inverted (setBit used "== c" should be "== f"), causing device to run in Fahrenheit mode when Celsius was selected. Fix unit detection in SensorMultilevelReport: PST02 always sends cmd.scale=0 regardless of P5 setting, so unit is now derived from p5TempScale preference instead of cmd.scale.
+ *    1.2.0 — 2026-05-19 — Performance: fix implicit globals (resync/refresh/value/cmds in deviceSync, value in SensorMultilevelReport cases 5/3); add typed return types on setBit/isPst02BVariant/resolveConfigParam*; cache isPst02BVariant() per resolve call; remove redundant configurationGet(12) in resync block (duplicate of diff-check path); inline map literals in BatteryReport/clearTamper; type Map in event handlers; drop redundant .toString() in log.trace; fix "wakup" typo in WakeUpIntervalReport log.
  *    1.1.0 — 2026-05-19 — Fix implicit global in SecurityMessageEncapsulation; remove duplicate ConfigurationReport case 12 and dangling break; fix log.warn misuse in configure/refresh/updated; guard WakeUpNotification log.debug with logEnable; re-enable auto-disable debug logging after 30 min; remove German upstream comments.
  *    1.0.0 — 2026-05-19 — Initial Mads fork. Replace raw para5/para6/para7 bitmask inputs with guided human-readable dropdowns derived from Z-Wave JS device configs. Add variant auto-detection (PST02-A/C vs PST02-B), raw-override mode, and Hubitat-standard header/logging.
  */
@@ -141,12 +143,12 @@ preferences
 	input name: "txtEnable", title: "Enable descriptionText logging", type: "bool", defaultValue: true
 }
 
-def setBit(Integer value, Integer bitMask, Boolean enabled)
+Integer setBit(Integer value, Integer bitMask, Boolean enabled)
 {
     enabled ? (value | bitMask) : (value & (~bitMask))
 }
 
-def isPst02BVariant()
+boolean isPst02BVariant()
 {
     if (variantOverride == "pst02_b") return true
     if (variantOverride == "pst02_ac") return false
@@ -154,27 +156,29 @@ def isPst02BVariant()
     return deviceId == "000D"
 }
 
-def resolveConfigParam5()
+Integer resolveConfigParam5()
 {
-    if (parameterMode == "raw") return (para5Raw != null ? para5Raw.toInteger() : (isPst02BVariant() ? 61 : 56))
+    boolean isB = isPst02BVariant()
+    if (parameterMode == "raw") return (para5Raw != null ? para5Raw.toInteger() : (isB ? 61 : 56))
 
     Integer value = 0
     value = setBit(value, 0x02, p5TestMode as Boolean)
-    if (!isPst02BVariant()) value = setBit(value, 0x04, p5DisableDoorWindow as Boolean)
-    value = setBit(value, 0x08, (p5TempScale ?: "c") == "c")
+    if (!isB) value = setBit(value, 0x04, p5DisableDoorWindow as Boolean)
+    value = setBit(value, 0x08, (p5TempScale ?: "c") == "f")
     value = setBit(value, 0x10, p5DisableIlluminationOnTrigger as Boolean)
     value = setBit(value, 0x20, p5DisableTemperatureOnTrigger as Boolean)
     value = setBit(value, 0x80, p5DisableBackKeyTest as Boolean)
     return value
 }
 
-def resolveConfigParam6()
+Integer resolveConfigParam6()
 {
+    boolean isB = isPst02BVariant()
     if (parameterMode == "raw") return (para6Raw != null ? para6Raw.toInteger() : 6)
 
     Integer value = 0
     value = setBit(value, 0x02, p6DisablePirIllumination as Boolean)
-    if (!isPst02BVariant()) {
+    if (!isB) {
         value = setBit(value, 0x01, p6DisableMagneticIllumination as Boolean)
         value = setBit(value, 0x04, p6DisableMagneticPir as Boolean)
         value = setBit(value, 0x08, p6DifferentRoom as Boolean)
@@ -184,14 +188,15 @@ def resolveConfigParam6()
     return value
 }
 
-def resolveConfigParam7()
+Integer resolveConfigParam7()
 {
-    if (parameterMode == "raw") return (para7Raw != null ? para7Raw.toInteger() : (isPst02BVariant() ? 22 : 86))
+    boolean isB = isPst02BVariant()
+    if (parameterMode == "raw") return (para7Raw != null ? para7Raw.toInteger() : (isB ? 22 : 86))
 
     Integer value = 0
     value = setBit(value, 0x02, p7SendMotionOff as Boolean)
     value = setBit(value, 0x04, p7PirSuperSensitivity as Boolean)
-    if (!isPst02BVariant()) value = setBit(value, 0x08, p7DisableBasicOffAfterDoorClose as Boolean)
+    if (!isB) value = setBit(value, 0x08, p7DisableBasicOffAfterDoorClose as Boolean)
     value = setBit(value, 0x10, (p7NotificationType ?: "binary") == "binary")
     value = setBit(value, 0x20, p7DisableMultiCcAutoReports as Boolean)
     value = setBit(value, 0x40, p7DisableBatteryOnTrigger as Boolean)
@@ -200,21 +205,21 @@ def resolveConfigParam7()
 
 def deviceSync()
 {
-    resync = state.pendingResync
-    refresh = state.pendingRefresh
+    boolean resync = state.pendingResync as boolean
+    boolean refresh = state.pendingRefresh as boolean
 
     state.pendingResync = false
     state.pendingRefresh = false
 
     if (logEnable) log.debug "deviceSync: pendingResync ${resync}, pendingRefresh ${refresh}"
 
-    def cmds = []
+    List cmds = []
     if (resync)
     {
         cmds.add(zwaveSecureEncap(zwave.versionV2.versionGet()))
     }
 
-    value = resolveConfigParam5()
+    Integer value = resolveConfigParam5()
     if (resync || state.para5 != value)
     {
         log.warn "Updating device para5: ${value}"
@@ -331,7 +336,6 @@ def deviceSync()
 	    cmds.add(zwaveSecureEncap(zwave.configurationV1.configurationGet(parameterNumber: 3)))
 	    cmds.add(zwaveSecureEncap(zwave.configurationV1.configurationGet(parameterNumber: 4)))
 		cmds.add(zwaveSecureEncap(zwave.configurationV1.configurationGet(parameterNumber: 9)))
-		cmds.add(zwaveSecureEncap(zwave.configurationV1.configurationGet(parameterNumber: 12)))
 		cmds.add(zwaveSecureEncap(zwave.configurationV1.configurationGet(parameterNumber: 22)))
 	}
 
@@ -541,14 +545,11 @@ def refresh()
     log.info "Data will refresh when device wakes up"
 }
 
-def clearTamper()
+void clearTamper()
 {
-    def map = [:]
-    map.name = "tamper"
-    map.value = "clear"
-    map.descriptionText = "${device.displayName}: tamper cleared"
-    sendEvent(map)
-    if (txtEnable) log.info "${device.displayName}: ${map.descriptionText}"
+    String descText = "${device.displayName}: tamper cleared"
+    sendEvent(name: "tamper", value: "clear", descriptionText: descText)
+    if (txtEnable) log.info descText
 }
 
 def parse(String description)
@@ -565,21 +566,25 @@ def parse(String description)
 
 def zwaveEvent(hubitat.zwave.commands.sensormultilevelv5.SensorMultilevelReport cmd)
 {
-    def map = [:]
+    Map map = [:]
+    BigDecimal sensorValue
+    int precision
+    String unit
 
-    if (logEnable) log.trace "SensorMultilevelReport: ${cmd.toString()}"
+    if (logEnable) log.trace "SensorMultilevelReport: ${cmd}"
 
     switch (cmd.sensorType)
     {
         case 1: // temperature
-            def value = cmd.scaledSensorValue
-            def precision = cmd.precision
-            def unit = cmd.scale == 1 ? "F" : "C"
+            sensorValue = cmd.scaledSensorValue
+            precision = cmd.precision
+            // The PST02 always sends cmd.scale=0 regardless of P5 bit 3 setting.
+            // Derive the unit from the P5 preference directly.
+            unit = (p5TempScale == "f") ? "F" : "C"
 
             map.name = "temperature"
-            map.value = convertTemperatureIfNeeded(value, unit, precision)
+            map.value = convertTemperatureIfNeeded(sensorValue, unit, precision)
             map.unit = getTemperatureScale()
-            //	if (logEnable) log.info "${device.displayName} temperature sensor value is ${value}°${unit} (${map.value}°${map.unit})"
 
             if (temperatureOffset)
             {
@@ -590,12 +595,11 @@ def zwaveEvent(hubitat.zwave.commands.sensormultilevelv5.SensorMultilevelReport 
             break
 
         case 5: // humidity
-            value = cmd.scaledSensorValue
+            sensorValue = cmd.scaledSensorValue
 
             map.name = "humidity"
-            map.value = value
+            map.value = sensorValue
             map.unit = "%"
-            //	if (logEnable) log.info "${device.displayName} humidity sensor value is ${map.value}${map.unit}"
 
             if (humidityOffset)
             {
@@ -606,18 +610,16 @@ def zwaveEvent(hubitat.zwave.commands.sensormultilevelv5.SensorMultilevelReport 
             break
 
 		case 3:	// luminance
-            value = cmd.scaledSensorValue
+            sensorValue = cmd.scaledSensorValue
 
             map.name = "illuminance"
-            map.value = value
+            map.value = sensorValue
             map.unit = "lux"
-            //	if (logEnable) log.info "${device.displayName} luminance sensor value is ${map.value}${map.unit}"
-
             map.descriptionText = "luminance is ${map.value}${map.unit}"
             break			
 
         default:
-            log.warn "Unknown SensorMultilevelReport-Type: ${cmd.toString()}"
+            log.warn "Unknown SensorMultilevelReport-Type: ${cmd}"
             return null
     }
 
@@ -627,30 +629,24 @@ def zwaveEvent(hubitat.zwave.commands.sensormultilevelv5.SensorMultilevelReport 
 
 def zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd)
 {
-    def map = [:]
+    if (logEnable) log.trace "BatteryReport: ${cmd}"
 
-    if (logEnable) log.trace "BatteryReport: ${cmd.toString()}"
-
-    def batteryLevel = cmd.batteryLevel
+    int batteryLevel = cmd.batteryLevel
     if (batteryLevel == 0xFF)
     {
         log.warn "${device.displayName} low battery"
         batteryLevel = 1
     }
 
-    map.name = "battery"
-    map.value = batteryLevel
-    map.unit = "%"
-    map.descriptionText = "battery is ${map.value}${map.unit}"
-    sendEvent(map)
-    if (txtEnable) log.info "${device.displayName}: ${map.descriptionText}"
+    sendEvent(name: "battery", value: batteryLevel, unit: "%", descriptionText: "battery is ${batteryLevel}%")
+    if (txtEnable) log.info "${device.displayName}: battery is ${batteryLevel}%"
 }
 
 def zwaveEvent(hubitat.zwave.commands.notificationv4.NotificationReport cmd)
 {
-    def map = [:]
+    Map map = [:]
 
-    if (logEnable) log.trace "NotificationReport: ${cmd.toString()}"
+    if (logEnable) log.trace "NotificationReport: ${cmd}"
 
     switch (cmd.notificationType)
     {
@@ -658,43 +654,38 @@ def zwaveEvent(hubitat.zwave.commands.notificationv4.NotificationReport cmd)
 			map.name = "water"
             map.value = cmd.event ? "wet" : "dry"
             map.descriptionText = "sensor is ${map.value}"
-			//	if (logEnable) log.info "${device.displayName} water sensor value ${map.value}"
             break
 		case 6: //access control, contact sensor
             map.name = "contact"
-			def event = cmd.event.toInteger()
+			int event = cmd.event.toInteger()
             if (event == 22) map.value = "open"
      		if (event == 23) map.value = "closed"
 			map.descriptionText = "contact is ${map.value}"
-			//	if (logEnable) log.info "${device.displayName} door is ${map.value}"
             break
         case 7: // security
-            def val = cmd.event.toInteger()
+            int val = cmd.event.toInteger()
 			if (val == 3) {
 				map.name = "tamper"
 				map.value = "detected"
 				map.descriptionText = "tamper is ${map.value}"
-				//	if (logEnable) log.info "${device.displayName} tamper is ${map.value}"
 				break			
 			} else if (val == 8) {
 				map.name = "motion"
 				map.value = "active"
 				map.isStateChange = true
 				map.descriptionText = "motion is ${map.value}"
-				//	if (logEnable) log.info "${device.displayName} motion is ${map.value}"
 				break
 			} else if (val == 254) {
 				map.name = "motion"
 				map.value = "inactive"
 				map.descriptionText = "motion is ${map.value}"
-				//	if (logEnable) log.info "${device.displayName} motion is ${map.value}"
 				break
 			} else {
-				log.warn "Unknown NotificationReport-Event: ${cmd.toString()}"
+				log.warn "Unknown NotificationReport-Event: ${cmd}"
 				return null
 			}
         default:
-            log.warn "Unknown NotificationReport-Type: ${cmd.toString()}"
+            log.warn "Unknown NotificationReport-Type: ${cmd}"
             return null
     }
 
@@ -706,9 +697,9 @@ def zwaveEvent(hubitat.zwave.commands.sensorbinaryv2.SensorBinaryReport cmd)
 {
     // NB: Older firmware versions may send SensorBinaryReport instead of NotificationReport
 
-    def map = [:]
+    Map map = [:]
 
-    if (logEnable) log.trace "SensorBinaryReport: ${cmd.toString()}"
+    if (logEnable) log.trace "SensorBinaryReport: ${cmd}"
 
     switch (cmd.sensorType)
     {
@@ -756,7 +747,7 @@ def zwaveEvent(hubitat.zwave.commands.sensorbinaryv2.SensorBinaryReport cmd)
 
 def zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd)
 {
-    if (logEnable) log.trace "ConfigurationReport: ${cmd.toString()}"
+    if (logEnable) log.trace "ConfigurationReport: ${cmd}"
 
     switch (cmd.parameterNumber)
     {
@@ -814,8 +805,9 @@ def zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd)
 
 def zwaveEvent(hubitat.zwave.commands.wakeupv2.WakeUpIntervalReport cmd)
 {
-    state.wakeUpInterval = cmd.seconds / 60
-    if (logEnable) log.trace "wakup interval ${state.wakeUpInterval} minutes"
+    int minutes = cmd.seconds / 60
+    state.wakeUpInterval = minutes
+    if (logEnable) log.trace "wakeup interval ${minutes} minutes"
 }
 
 def zwaveEvent(hubitat.zwave.commands.wakeupv2.WakeUpNotification cmd)
