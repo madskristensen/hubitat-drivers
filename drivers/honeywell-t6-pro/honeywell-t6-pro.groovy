@@ -1,7 +1,7 @@
 /**
  *  Honeywell T6 Pro Thermostat (Hubitat) — Fork
  *  Author:  Mads Kristensen
- *  Version: 0.4.0 — 2026-05-18
+ *  Version: 0.5.0 — 2026-05-18
  *  License: MIT
  *
  *  Fork of djdizzyd/hubitat "Advanced Honeywell T6 Pro Thermostat" (Bryan Copeland).
@@ -9,6 +9,10 @@
  *  Forked because: maintainer silent 4+ years; BLOCKER + MAJOR bugs affecting live devices.
  *
  *  Changelog:
+ *    0.5.0 — 2026-05-18 — syncClock UX: replace every-3-hours auto-schedule with daily 4am cron
+ *                          (24x fewer Z-Wave frames; DST handled within 24h); remove manual
+ *                          syncClock command (dead UI — auto-sync covers all cases; hitting
+ *                          Configure still triggers immediate sync via existing runIn).
  *    0.4.0 — 2026-05-18 — Add descriptionText to thermostatOperatingState, thermostatFanMode, thermostatMode events (Pick #1);
  *                          change thermostatFanState attribute type from "string" to "enum" with 8 values (Pick #2);
  *                          add Notification type 9 (System) handler stub with log.warn for hardware/software faults (Pick #3).
@@ -61,7 +65,6 @@ metadata {
 
         command "SensorCal", [[name:"calibration",type:"ENUM", description:"Number of degrees to add/subtract from thermostat sensor", constraints:["-3", "-2", "-1", "0", "1", "2", "3"]]]
         command "IdleBrightness", [[name:"brightness",type:"ENUM", description:"Set idle brightness", constraints:["0", "1", "2", "3", "4", "5"]]]
-        command "syncClock"
 
         fingerprint  mfr:"0039", prod:"0011", deviceId:"0008", inClusters:"0x5E,0x85,0x86,0x59,0x31,0x80,0x81,0x70,0x5A,0x72,0x71,0x73,0x9F,0x44,0x45,0x40,0x42,0x43,0x6C,0x55", deviceJoinName: "Honeywell T6 PRO"
 
@@ -76,7 +79,7 @@ metadata {
 }
 
 // FIX NIT: VERSION constant for diagnostics / HPM version matching
-@Field static final String VERSION = "0.4.0"
+@Field static final String VERSION = "0.5.0"
 @Field static Map CMD_CLASS_VERS=[0x71:3, 0x7A:2, 0x81:1, 0x73:1, 0x2B:1, 0x2C:1, 0x85:2, 0x72:1, 0x86:2, 0x8F:1, 0x31:5, 0x70:1, 0x80:1, 0x45:1, 0x44:3, 0x43:2, 0x42:1, 0x40:2, 0x5A:1, 0x59:1, 0x5E:2]
 @Field static Map THERMOSTAT_OPERATING_STATE=[0x00:"idle",0x01:"heating",0x02:"cooling",0x03:"fan only",0x04:"pending heat",0x05:"pending cool",0x06:"vent economizer"]
 @Field static Map THERMOSTAT_MODE=[0x00:"off",0x01:"heat",0x02:"cool",0x03:"auto",0x04:"emergency heat"]
@@ -143,7 +146,7 @@ void configure() {
     unschedule("syncClock")
     runIn(10, "syncClock")
     runIn(5, "pollDeviceData")
-    runEvery3Hours("syncClock")
+    schedule("0 0 4 * * ?", "syncClock")
 }
 
 void initializeVars() {
@@ -165,13 +168,13 @@ void updated() {
     unschedule()
     if (logEnable) runIn(1800,logsOff)
     runConfigs()
-    runEvery3Hours("syncClock")
+    schedule("0 0 4 * * ?", "syncClock")
 }
 
 void initialize() {
     if (logEnable) log.debug "initialize()..."
     if (!state.initialized) initializeVars()
-    runEvery3Hours("syncClock")
+    schedule("0 0 4 * * ?", "syncClock")
 }
 
 void SensorCal(value) {
