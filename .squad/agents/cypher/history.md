@@ -84,3 +84,16 @@ Trinity's 3 code-quality audits have all shipped as Tank forks:
 - **PurpleAir AQI** (commit ff3410f) — **PR-bound staging fork** (delete once upstream accepts PR)
 
 **Your next action:** Review the PR draft at `drivers/purpleair-aqi/UPSTREAM-PR-DRAFT.md` before Mads submits upstream. The 3 fixes are minimal (AQ&U, LRAPA/Woodsmoke case fixes, failCount precedence) and low-friction for maintainer review.
+
+---
+
+## 2026-05-18T17:50:00Z — PurpleAir v0.2.0 Polish — PR-Bound Constraint Dropped
+
+**Directive update (2026-05-18T17:31):** Mads's "quality-first" priority supersedes the earlier PR-bound staging constraint. PurpleAir fork v0.2.0 has been polished with the full deferred-improvement backlog and Mads namespace ownership (commit 4b720aa). 
+
+**Implications for UPSTREAM-PR-DRAFT.md:**
+- The fork now contains changes beyond the original 3-bug PR scope (emitIfChanged on events, descriptionText additions, sentinel guards, etc.)
+- UPSTREAM-PR-DRAFT.md is **retained** with a status note in case Mads wants to cherry-pick the original 3 fixes (AQ&U string, LRAPA/Woodsmoke case, failCount precedence) as a minimal upstream PR later
+- But it is **no longer the design goal** — Mads owns the driver now; upstream PR is optional if feasible
+
+**Your action:** If you plan to do an upstream PR, make it a separate follow-up decision after v0.2.0 validation. The fork is no longer constrained to diff-minimalism against the upstream PR shape. Clean diff at 4b720aa shows the full v0.2.0 polish (namespace + style alignment + all deferred improvements).

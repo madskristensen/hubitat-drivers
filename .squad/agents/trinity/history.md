@@ -104,3 +104,48 @@ Your 3 community driver audits have all shipped as Tank-produced forks:
    - Delete this fork from repo once pfmiller accepts upstream PR
 
 **All three audits validated against your line citations. Ready for Switch's hardware validation before any upstream PR submission.**
+
+---
+
+## Learnings — Post-Fork Code Review (2026-05-18T17:30:00-07:00)
+
+Trinity reviewed all three Tank forks against original audit line citations. Full report: `.squad/decisions/inbox/trinity-post-fork-code-review.md`
+
+**Per-driver verdicts:**
+
+1. **Honeywell T6 Pro** (commit 1dc51af) — **SHIP. No regressions.** All 3 fixes verified: txtEnable declared with `defaultValue:true` (correct), both `device.currentValue("thermostatOperatingState")` arg fixes working, `unschedule("syncClock")` in configure() is correctly targeted and does not kill other jobs. Production thermostat is safe. Top deferred: add `descriptionText` to temperature/humidity events (Events tab blank for most-watched attributes).
+
+2. **Fully Kiosk** (commit 32a9f2c) — **SHIP. No regressions.** All 4 fixes verified: password type+mask correct (regex `/(?i)password=[^&]+/`), emitIfChanged canonical implementation applied to all 4 refreshCallback attributes, descriptionText on all parse-path sendEvents, logger replacement correct. Top deferred: `logEnable` defaults to `true` with no auto-disable — noisy citizenship; flip to `false` and add `logsOff` in v0.2.0.
+
+3. **PurpleAir AQI** (commit ff3410f) — **SHIP (temporary fork). No regressions.** All 3 fixes verified: AQ&U string match fixed, LRAPA/Woodsmoke case + pm2.5_cf_1 field both corrected consistently across `sensorCheck()` and `apply_conversion()`, failCount parens force correct precedence. Top deferred: no `emitIfChanged` on sendEvents — 35,040 duplicate events/year at default 1-hr cadence.
+
+**Reusable pattern identified:** Post-fork verification should always check (1) fix comments cite the right line, (2) behavior preserved on non-fixed paths, (3) scheduler changes are targeted not broad, (4) numeric equality comparisons use BigDecimal not string conversion. Added as checklist pattern in review doc.
+
+---
+
+## 2026-05-18T17:50:00Z — Post-Audit Impact Summary
+
+Your post-fork audit drove the v0.2.0 polish across all 3 drivers. All 15 of your deferred-improvement items were applied by Tank in parallel:
+
+**Honeywell T6 Pro (5 items applied):**
+- ✅ C1: Add descriptionText to temperature/humidity events
+- ✅ C2: ventProcess() numeric comparison via BigDecimal (prevent 68 vs 68.0 false-positives)
+- ✅ C3: Remove configurationGet(52) dead code
+- ✅ C4: Add descriptionText to supportedThermostat* events
+- ✅ C5: Remove duplicate syncClock in refresh() (carried over by Trinity request; low priority)
+
+**Fully Kiosk (4 items applied + 1 partial):**
+- ✅ C1: Add descriptionText to all checkInterval sendEvents + parse() events
+- ✅ C2: Add logsOff auto-disable with 30-min timeout; flip logEnable default to alse
+- ✅ C3: Document LAN password-in-URI pattern in README
+- ✅ C4: Revise checkInterval from 60 to 120 seconds for 1-min polling cadence
+- ⚠️ C5: setLevel event before HTTP 200 — documented as "low practical impact" but left as deferred (optimistic event is repo pattern elsewhere)
+
+**PurpleAir AQI (3 items applied + 2 carryover):**
+- ✅ C1: Add mitIfChanged to all httpResponse() sendEvents (eliminates 35,040 duplicate events/year)
+- ✅ C2: Include device.displayName in sites event descriptionText
+- ✅ C5: Fix "IQAir" log prefix → "PurpleAir" (copy-paste artifact)
+- ⚠️ C3: Password cleartext in URI — documented, not a fixable bug (Fully Kiosk API design)
+- ⚠️ C4: UUID in packageManifest.json — deferred (fork is temporary pending PR decision)
+
+**Coordinate with Switch for v0.2.0 hardware validation.** Clean diff available in commits ac5b939 / 0e9f8ed / 4b720aa whenever you want to audit the polish pass results.

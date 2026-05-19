@@ -3715,3 +3715,346 @@ should move to the fork to eliminate the BLOCKER/MAJOR bugs.
 ## 7. Maintainer Responsiveness
 
 **UNRESPONSIVE (4+ years).** No basis for PR. Fork is the correct path.
+
+---
+
+# Trinity Post-Fork Code Review
+**Reviewed by:** Trinity (Lead / Architect)
+**Date:** 2026-05-18T17:30:00-07:00
+**Commits under review:** Honeywell `1dc51af` · Fully Kiosk `32a9f2c` · PurpleAir `ff3410f`
+
+---
+
+## 🟢 Headline Verdict: GOOD-TO-SHIP
+
+**No regressions found across all three drivers.** Tank's minimum-change discipline held. Every fix from the upstream audit was applied correctly. Pre-existing upstream issues survive (as intended) and are catalogued in the Deferred Backlog below.
+
+| Driver | Tank's Fixes | Regressions | Verdict |
+|---|---|---|---|
+| Honeywell T6 Pro | ✅ All 3 verified | None | **SHIP** |
+| Fully Kiosk | ✅ All 4 verified | None | **SHIP** |
+| PurpleAir AQI | ✅ All 3 verified | None | **SHIP (temp fork)** |
+
+> **HOT-LIST: EMPTY.** No regressions. No blockers.
+
+---
+
+## Driver 1 — Honeywell T6 Pro (`drivers/honeywell-t6-pro/`)
+### ⚠️ Production context: Mads's Downstairs thermostat is live on this driver.
+
+### A. Tank's Fixes — Verified
+
+**Fix #1 [BLOCKER]: `txtEnable` declared (line 56)**
+```groovy
+input "txtEnable", "bool", title: "Enable description text logging", defaultValue: true
+```
+Correct. `defaultValue: true` is intentional — the original silenced info logging permanently; exposing it by default restores useful first-install observability. The `if (txtEnable)` guards (battery, notification events) will now fire on install — that's a handful of log lines, not a flood. Sensible.
+
+**Fix #2a [MAJOR]: `thermostatFanState` event handler (line 533)**
+```groovy
+if (newstate=="idle" && (device.currentValue("thermostatOperatingState")=="heating" ||
+    device.currentValue("thermostatOperatingState")=="cooling")) ...
+```
+Attribute arg now correctly passed. The guard correctly re-queries operating state only when the fan reports idle but the thermostat is still heating/cooling. ✅
+
+**Fix #2b [MAJOR]: `BasicSet` handler (lines 555–558)**
+Both branches corrected. Worth noting: the 0xFF branch condition (`!="heating" || !="cooling"`) is trivially always-true for any single value — identical behavior to the original broken code (where method-reference `!=` string was always true). Behavior preserved. The 0x00 branch (`=="heating" || =="cooling"`) is actually a subtle improvement over the original, which had this branch dead (method reference was never equal to a string). Tank's fix makes the off-path also query operating state correctly. Not a regression — an incidental improvement.
+
+**Fix #3 [MAJOR]: `unschedule("syncClock")` in `configure()` (line 126)**
+```groovy
+unschedule("syncClock")
+runIn(10, "syncClock")
+runIn(5, "pollDeviceData")
+runEvery3Hours("syncClock")
+```
+Targeted. Does NOT kill `pollDeviceData` or other jobs — only the specific `syncClock` scheduler. `updated()` still carries a broad `unschedule()` (line 148), which is the appropriate place for a full teardown. No zombie risk. ✅
+
+**packageManifest.json**: Present, UUID valid, namespace `djdizzyd` preserved (correct for HPM continuity), version `0.1.0`. ✅
+
+### B. Carried-Over Upstream Issues (Deferred)
+
+| # | Severity | Location | Description |
+|---|---|---|---|
+| C1 | MINOR | `zwaveEvent(SensorMultilevelReport)` line 464,467 | `eventProcess()` calls for `temperature` and `humidity` have no `descriptionText` key — Events tab Description column is blank for these |
+| C2 | MINOR | `eventProcess()` line 300 | String comparison for numeric equality: `device.currentValue(evt.name).toString() != evt.value.toString()` — can create false-positive events for `68` vs `68.0`. Use `BigDecimal` compare. |
+| C3 | NIT | `zwaveEvent(ThermostatFanStateReport)` line 531 | `sendToDevice(zwave.configurationV1.configurationGet(parameterNumber: 52))` — parameter 52 does not exist in `configParams`. The T6 Pro responds, driver ignores it. 2 unnecessary Z-Wave frames per fan-state event. |
+| C4 | NIT | `initializeVars()` lines 134–135 | `sendEvent(name:"supportedThermostatModes", ...)` and `supportedThermostatFanModes` — no `descriptionText`. |
+| C5 | LOW | `refresh()` line 327 | `runIn(10, "syncClock")` inside refresh() duplicates the repeating `runEvery3Hours` schedule. Extra one-shot fires harmlessly but adds marginal Z-Wave traffic after every manual refresh. |
+
+**Thermostat-specific risk review (per brief):**
+- Z-Wave `parse()` dispatcher — **untouched by Tank**. No regression risk. ✅
+- Fan-state and operating-mode event paths — fixed correctly. No broken event paths. ✅
+- `configure()` scheduler changes — targeted, does not interfere with `pollDeviceData`. ✅
+
+---
+
+## Driver 2 — Fully Kiosk Browser Controller (`drivers/fully-kiosk/`)
+
+### A. Tank's Fixes — Verified
+
+**Fix #1 [MAJOR Security]: Password masking**
+
+Two sites fixed:
+
+*Preference input (line 110)*:
+```groovy
+input(name:"serverPassword", type:"password", ...)
+```
+Correct. Hubitat renders `type:"password"` as a masked field in the UI. Previously type was `"string"`, showing password in cleartext. ✅
+
+*Log masking in `refresh()` (lines 439–441) and `sendCommandPost()` (lines 547–549)*:
+```groovy
+safeParams.uri = safeParams.uri?.replaceAll(/(?i)password=[^&]+/, 'password=***')
+logger(logprefix + safeParams)
+```
+Regex correctly targets `password=<value-up-to-next-&>`. For a URL like `...&password=mySecret&cmd=screenOn`, result is `...&password=***&cmd=screenOn`. ✅
+
+`updateDeviceData()` (line 515) also constructs a password-bearing URI but does **not** log it — only `asynchttpGet` is called. No password exposure there. ✅
+
+**Fix #2 [MAJOR Event Hygiene]: `emitIfChanged` helper (lines 567–583)**
+```groovy
+private void emitIfChanged(String name, value, String descTxt, String unit = null) {
+    def current = device.currentValue(name)
+    boolean changed
+    if (current instanceof Number || value instanceof Number) {
+        try { changed = (current as BigDecimal) != (value as BigDecimal) }
+        catch (Exception e) { changed = current?.toString() != value?.toString() }
+    } else {
+        changed = current?.toString() != value?.toString()
+    }
+    if (!changed) return
+    Map evt = [name: name, value: value, descriptionText: descTxt]
+    if (unit) evt.unit = unit
+    sendEvent(evt)
+}
+```
+Implementation matches the repo's canonical pattern from the `hubitat-event-hygiene` skill exactly — numeric BigDecimal compare with string fallback. ✅
+
+Applied to all 4 `refreshCallback` attributes (lines 451–459): `battery`, `switch`, `level`, `currentPageUrl`. The prior 1,440 redundant events/day at 1-minute polling cadence is eliminated. ✅
+
+**Fix #3 [MAJOR]: `descriptionText` in `parse()` and event helpers (lines 206–251)**
+
+All parse-path `sendEvent` calls now have `descriptionText`:
+- `switch`, `battery`, `volume` inline in the switch block ✅
+- `motion()` helper (line 234) ✅
+- `acceleration()` helper (line 246) ✅
+
+**Fix #4 [MAJOR]: Logger replacement (lines 589–595)**
+```groovy
+private void logger(loggingText, String loggingType = "debug") {
+    switch (loggingType.toLowerCase()) {
+        case "error": log.error loggingText; break
+        case "warn":  log.warn  loggingText; break
+        case "info":  log.info  loggingText; break
+        default:      if (logEnable) log.debug loggingText; break
+    }
+}
+```
+The original inverted-level logger (where "debug" was less verbose than "trace") is replaced. All `trace`/`debug` calls now gate on `logEnable`. `info`/`warn`/`error` always emit. ✅
+
+**Note**: `logEnable` defaults to `true` (line 125). All trace/debug calls will fire until a user manually disables it. No auto-disable (`logsOff`) is scheduled. This is noisy but not a regression — the original was equally verbose. See Deferred list.
+
+**packageManifest.json**: Present, namespace changed to `mads` matching driver header. UUID is a recognizable placeholder (`a1b2c3d4-e5f6-7890...`) rather than a random UUID — acceptable for a fork with no HPM ambitions yet, but see Deferred. ✅
+
+### B. Carried-Over Upstream Issues (Deferred)
+
+| # | Severity | Location | Description |
+|---|---|---|---|
+| C1 | MINOR | `parse()` default case line 225, `sendCommandCallback()` line 557, `updateDeviceDataCallback()` line 530 | `sendEvent([name:"checkInterval", value:60])` — no `descriptionText`. Appears in Events tab as blank Description. |
+| C2 | MINOR | `initialize()` / `updated()` | No `runIn(1800, logsOff)` auto-disable for debug logging. `logEnable:true` default means the driver logs verbose trace forever until user manually disables. Standard pattern: default to `false`, auto-disable after 30 min. |
+| C3 | LOW | `updateDeviceData()` line 516 | Password in HTTP URI as query param (`?password=${serverPassword}`). Not logged, but cleartext over LAN. This is the Fully Kiosk protocol design, not a driver bug — nothing to fix without changing the FKB API. Document in README. |
+| C4 | LOW | `checkInterval` events | Driver uses `sendEvent([name:"checkInterval", value:60])` for HealthCheck. `60` seconds is aggressive — a single missed poll at 1-min cadence marks the device offline. Value should be at least 2x the polling interval. Upstream behavior, but worth revisiting. |
+| C5 | NIT | `setLevel()` line 272 | `setLevel` sends a `sendEvent` for `level` directly, then calls `setScreenBrightness`. The event fires optimistically before the command succeeds — if the command fails, the event lies. Low practical impact; carried-over pattern. |
+
+---
+
+## Driver 3 — PurpleAir AQI Virtual Sensor (`drivers/purpleair-aqi/`)
+### Note: Temporary fork — delete after upstream PR merged.
+
+### A. Tank's Fixes — Verified
+
+**Fix #1 [BLOCKER]: AQ&U string in `apply_conversion()` (line 550)**
+```groovy
+} else if ( conversion == "AQ&U" ) {
+```
+Was `"AQ and U"`. Preference value is `"AQ&U"` (line 53). The string comparison now matches. The `AQandU_conversion()` function was unreachable dead code before this fix. ✅
+
+**Fix #2 [BLOCKER]: LRAPA/Woodsmoke case + pm2.5_cf_1 field in `sensorCheck()` (lines 142–143)**
+```groovy
+if (conversion == "LRAPA" || conversion == "Woodsmoke" || conversion == "CF=1") {
+    pm25_count="pm2.5_cf_1"
+```
+Was `"lrapa"` and `"woodsmoke"` (lowercase). Preference values are `"LRAPA"` and `"Woodsmoke"` (line 53). Both branches now match. The `pm2.5_cf_1` field (required by both formulas' derivation papers) is now correctly requested from the API. ✅
+
+Cross-check: `apply_conversion()` (line 547–552) also uses `"Woodsmoke"` and `"LRAPA"` — consistent with both fixes. ✅
+
+Verify AQ&U uses `pm2.5` (atmospheric), not `pm2.5_cf_1`: correct. AQ&U formula was calibrated against the atmospheric reading. The fix correctly leaves AQ&U in the `else` branch at line 145. ✅
+
+**Fix #3 [BLOCKER]: `failCount` operator precedence in `httpResponse()` (line 224)**
+```groovy
+state.failCount = (state.failCount ?: 0) + 1
+```
+Was `state.failCount?:0 + 1` which Groovy parses as `state.failCount ?: (0+1)` = `state.failCount ?: 1`. The result was that `failCount` could never increment above 1 and exponential backoff never engaged. Explicit parens now force the correct evaluation: `(failCount ?: 0) + 1`. ✅
+
+**Code structure note**: The block comment structure around `httpResponse()` lines 206–247 is intact. The fix on line 224 is live code (the outer `/*...*/` block closes at line 211 — the `/*** Test backoff on error ***/` marker closes the earlier simple error check, leaving the new backoff logic as active code). Confirmed. ✅
+
+**packageManifest.json**: Present. `id` field is `"purpleair-aqi-virtual-sensor"` (a slug, not a UUID). For a temporary fork this is acceptable but should be corrected if promoted to HPM. ✅
+
+### B. Carried-Over Upstream Issues (Deferred)
+
+| # | Severity | Location | Description |
+|---|---|---|---|
+| C1 | MINOR | `httpResponse()` lines 362–374 | All `sendEvent` calls (`sites`, `category`, `conversion`, `aqi`) fire unconditionally on every successful poll, even when values are unchanged. At the 1-hour default this is 4 events/hour = 96/day of potentially duplicate events. Add `emitIfChanged` or a `device.currentValue()` guard. |
+| C2 | MINOR | `httpResponse()` lines 362–364 | `sites` sendEvent uses `"AQI reported from site ${sites}"` — missing `device.displayName`. Not breaking, but inconsistent with repo `hubitat-event-hygiene` skill. |
+| C3 | LOW | Preferences line 52 | `update_interval` default is `"60"` (1 hr). Fine for the free tier. However, no UI warning that the `"1"` (1-min) option will generate ~43,800 API requests/month. A note in the description would help users avoid quota issues. |
+| C4 | NIT | `packageManifest.json` | `id` is a slug string, not a UUID. Benign for a temporary fork; required fix if ever submitted to HPM catalog. |
+| C5 | NIT | `parse()` line 76–78 | `def parse(String description) { log.debug("IQAir: Parsing...") }` — log prefix says "IQAir" (copy-paste artifact from upstream). |
+
+---
+
+## Deferred Improvements Backlog — Ranked by Severity
+
+Intended as a v0.2.0 work plan after any upstream PRs are settled.
+
+### High Priority (break first-use expectations)
+
+| Rank | Driver | Item | Why Matters |
+|---|---|---|---|
+| 1 | Fully Kiosk | C2: Add `logsOff` auto-disable; flip `logEnable` default to `false` | Permanent verbose trace logging is bad citizenship; fills the Hubitat log and obscures other drivers' output |
+| 2 | Honeywell | C1: Add `descriptionText` to temperature/humidity events | Events tab is blank for the two most-checked attributes on a thermostat |
+| 3 | PurpleAir | C1: Add `emitIfChanged` to all `httpResponse` sendEvents | Saves 4 × 8,760 = 35,040 duplicate events/year at default cadence |
+
+### Medium Priority (correctness / hygiene)
+
+| Rank | Driver | Item | Why Matters |
+|---|---|---|---|
+| 4 | Honeywell | C2: `eventProcess` numeric equality via `BigDecimal` | `68` vs `68.0` false-positive events from Z-Wave float responses |
+| 5 | Fully Kiosk | C1: Add `descriptionText` to `checkInterval` events | Consistency; repo standard requires it on every `sendEvent` |
+| 6 | Fully Kiosk | C4: Revise `checkInterval` value | `60`s is too aggressive for a 1-min poll cycle; use `120` or `2 × pollingInterval` |
+
+### Low Priority / NIT
+
+| Rank | Driver | Item | Why Matters |
+|---|---|---|---|
+| 7 | Honeywell | C3: Remove `configurationGet(52)` | Dead code generating 2 wasted Z-Wave frames per fan-state event |
+| 8 | PurpleAir | C5: Fix "IQAir" log prefix | Copy-paste artifact from upstream; confusing when debugging |
+| 9 | PurpleAir | C4: Use UUID in `packageManifest.json` id field | Required for HPM submission if fork ever becomes permanent |
+| 10 | Fully Kiosk | C3: Document LAN password-in-URI in README | Transparency; not a fixable bug but users should know it's cleartext LAN |
+
+---
+
+## Appendix — Hubitat Citizen Grade Summary
+
+| Dimension | Honeywell | Fully Kiosk | PurpleAir |
+|---|---|---|---|
+| asynchttpGet/Post | Z-Wave (N/A) | ✅ | ✅ |
+| emitIfChanged | Partial (eventProcess string check only) | ✅ (fixed) | ❌ (deferred) |
+| descriptionText on all sendEvents | ❌ temperature/humidity missing | ✅ (fixed) | ✅ |
+| logEnable pattern | ✅ | ⚠️ default true, no auto-off | ✅ (debugMode) |
+| HealthCheck vs lastActivity | Z-Wave (N/A) | ✅ HealthCheck + ping() | ❌ no lastActivity |
+| Scheduler hygiene | ✅ (fixed) | ✅ unschedule() in initialize | ✅ unschedule() in configure |
+| Sandbox-safe | ✅ | ✅ | ✅ |
+| packageManifest.json | ✅ | ✅ (placeholder UUID) | ⚠️ (slug id) |
+
+---
+
+*Reviewed against: `hubitat-event-hygiene`, `hubitat-healthcheck-vs-lastactivity`, `hubitat-sentinel-value-guards`, `hubitat-fork-cleanup-pattern`, `community-driver-audit-before-build`*
+
+---
+
+### 2026-05-18T17:30:00-07:00: User directive
+
+**By:** Mads Kristensen (via Copilot)
+
+**What:** Lift the minimum-change discipline on the 3 forked drivers
+(drivers/honeywell-t6-pro/, drivers/fully-kiosk/, drivers/purpleair-aqi/).
+Apply the full repo best-practices treatment to make each driver "the best
+it can be" — full Hubitat citizen, high performance, low API chattiness,
+all carried-over upstream issues addressed. Bump each to v0.2.0.
+
+**Why:** User request — after Trinity's post-fork review surfaces the
+carried-over upstream issues that Tank deliberately deferred under the
+v0.1.0 minimum-change discipline, those issues should be picked up and
+fixed rather than left as a deferred backlog.
+
+**Scope:** This directive applies to THESE three forks specifically (the
+fork-as-staging-ground pattern). The minimum-change discipline still
+applies in general to other fork situations where preserving the upstream
+PR shape matters (e.g., if PurpleAir's v0.1.0 PR to pfmiller0 is still
+pending, the PR-bound diff should stay minimal — but our local v0.2.0
+on top of the v0.1.0 PR can include the broader improvements).
+
+**Workflow:**
+1. Trinity-5 finishes the post-fork review (in flight) — produces the
+   carried-over-issues backlog per driver.
+2. Three Tanks then apply Trinity's v0.2.0 improvement list to each driver.
+3. Switch validates on hardware before merge.
+
+---
+
+### 2026-05-18T17:31:03-07:00: User directive
+
+**By:** Mads Kristensen (via Copilot)
+
+**What:** Quality and awesomeness of the forked drivers is FIRST priority.
+Sending PRs back upstream is SECOND or THIRD priority — not at all as important.
+
+**Why:** User explicit preference. This supersedes the constraint from the
+earlier 2026-05-18T17:30 directive about keeping the PurpleAir fork
+diff-minimal for upstream PR-friendliness. Updated priority:
+1. Make each fork the best driver it can be (full Hubitat citizen,
+   high performance, low API chattiness, all carried-over upstream
+   issues addressed).
+2. (Optional) Cherry-pick a minimal subset of the changes into an
+   upstream PR if it remains feasible after the v0.2.0 polish is done.
+
+**Scope:** Applies to ALL three forks equally — Honeywell T6 Pro,
+Fully Kiosk, and PurpleAir AQI. Drop any "stay PR-friendly" constraint
+that was previously applied to PurpleAir.
+
+**Practical effect on Tank v0.2.0 work (when Trinity-5 lands):**
+- All three Tanks get the SAME instruction: apply Trinity's full
+  carried-over-issues backlog without restraint.
+- PurpleAir is not special — polish it like the others.
+- If after v0.2.0 there's a small cherry-pickable subset that could
+  go upstream, the team can extract that as a separate PR later.
+  But that's a follow-up decision, not a v0.2.0 constraint.
+
+---
+
+### 2026-05-18T17:36:00-07:00: User directive
+
+**By:** Mads Kristensen (via Copilot)
+
+**What:** Forked drivers must use Mads's namespace (`madskristensen`) in
+packageManifest.json and identify as his drivers in the file header. The
+original community author should be CREDITED in the attribution block but
+is no longer the namespace owner — these are Mads's drivers now. Code style
+and architectural conventions must align with the four existing drivers in
+this repo (Daikin, Gemstone, SunStat, Touchstone).
+
+**Why:** User explicit preference. These forks aren't temporary stagings;
+they are first-class drivers in this repo with Mads's quality standards
+applied throughout.
+
+**Practical effect on Tank v0.2.0 work:**
+- `packageManifest.json`: namespace + author switch to `madskristensen`,
+  matching existing repo drivers (verify the actual existing value via grep
+  before writing).
+- Driver `.groovy` file header: fork-by + version + changelog become Mads's;
+  the original author's MIT copyright block is PRESERVED VERBATIM below the
+  fork header (clean-room pattern from `.squad/skills/clean-room` and the
+  Daikin precedent), but they no longer "own" the driver.
+- Code style: align to the four existing drivers' conventions — same logger
+  helper shape, same lifecycle hook style, same packageManifest field set
+  including `documentationLink` and `releaseNotes`, same README structure
+  with "Attribution" section near the bottom.
+
+**Combined with prior directives (in priority order):**
+1. Quality / awesomeness first (2026-05-18T17:31)
+2. Use Mads's namespace + repo conventions (this directive, 2026-05-18T17:36)
+3. Apply Trinity's deferred-improvement backlog (2026-05-18T17:30)
+4. (Optional, distant) Cherry-pick a minimal subset for upstream PR if
+   feasible after polish — but never compromise quality for PR-friendliness.
+
+**Scope:** All three forks — Honeywell, Fully Kiosk, PurpleAir.
