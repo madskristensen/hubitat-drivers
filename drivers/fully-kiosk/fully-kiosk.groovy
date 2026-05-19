@@ -9,6 +9,16 @@
  *                  missing descriptionText.
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
+ *  Version: 0.4.0 — 2026-05-18 — MQTT subscriber (opt-in): when mqttBroker preference is
+ *                                set, driver subscribes to FK's MQTT event topics via
+ *                                Hubitat interfaces.mqtt and routes pushes to the existing
+ *                                emitIfChanged plumbing (the 6 v0.3.0 attributes update
+ *                                near-instantly instead of poll-cadence-bound). Default
+ *                                empty preference = exact v0.3.0 polling behavior, zero
+ *                                regression risk. Recommended broker: hub's built-in
+ *                                broker at tcp://localhost:1883 (firmware 2.4.4.155+, no
+ *                                external Mosquitto required). LWT/online state published
+ *                                to {prefix}/hubitat/state for observability.
  *  Version: 0.3.0 — 2026-05-18 — Closes HA gap: brightness 0-100->0-255 conversion BUG FIX
  *                                (setLevel(100) now means 100% not ~39%);
  *                                6 new emitIfChanged sensor attributes from existing
@@ -30,7 +40,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.3.0"
+@Field static final String VERSION = "0.4.0"
 
 metadata {
     definition (name: "Fully Kiosk Browser", namespace: "mads", author: "Mads Kristensen",
@@ -115,6 +125,20 @@ metadata {
         // FIX #4 (logger): replaced multi-level loggingLevel enum with standard Hubitat logEnable bool
         // C2: default false — auto-disabled after 30 min when enabled; avoids permanent verbose trace
         input(name:"logEnable",      type:"bool",    title:"Enable Debug Logging",  defaultValue:false, required:false)
+        // v0.4.0: MQTT opt-in — leave mqttBroker blank for exact v0.3.0 poll-only behavior
+        input name:"mqttBroker",      type:"text",    required:false,
+            title:"MQTT broker URL (optional)",
+            description:"e.g. tcp://192.168.1.5:1883 or tcp://localhost:1883 for hub's built-in broker (firmware 2.4.4.155+). Leave blank to stay polling-only."
+        input name:"mqttClientID",    type:"text",    required:false,
+            title:"MQTT client ID",
+            description:"Unique per device. Defaults to hubitat-fully-kiosk-{networkId}"
+        input name:"mqttUsername",    type:"text",    required:false,
+            title:"MQTT username (optional)"
+        input name:"mqttPassword",    type:"password",required:false,
+            title:"MQTT password (optional)"
+        input name:"mqttTopicPrefix", type:"text",    required:false, defaultValue:"fully",
+            title:"MQTT topic prefix",
+            description:"Match Fully Kiosk's MQTT settings. Default: fully. Use a unique prefix per device (e.g. fully-bathroom) when multiple tablets share the same broker."
     }
 }
 
@@ -129,6 +153,8 @@ def updated() {
     logger("[updated] ", "trace")
     // C2: re-arm 30-min auto-disable whenever preferences are saved with logEnable on
     if (logEnable) runIn(1800, "logsOff")
+    // v0.4.0: cleanly disconnect before reinitializing so broker URL/credentials changes take effect
+    mqttDisconnect()
     initialize()
 }
 def initialize() {
@@ -146,8 +172,20 @@ def initialize() {
         device.deviceNetworkId = settings.serverIP
     }
 
-    if (settings.statePolling) {
-        runEvery1Minute("refresh")
+    if (settings.mqttBroker?.trim()) {
+        // v0.4.0: MQTT path — connect async; mqttClientStatus() adjusts cadence on success/failure
+        mqttConnect()
+        // Schedule reduced-cadence poll as heartbeat safety net.
+        // mqttClientStatus() will confirm 5-min on connect, or fall back to 1-min on error.
+        if (settings.statePolling) {
+            runEvery5Minutes("refresh")
+        }
+    } else {
+        // v0.3.0 behavior: polling-only when mqttBroker is blank
+        state.mqttConnected = false
+        if (settings.statePolling) {
+            runEvery1Minute("refresh")
+        }
     }
 
     updateDeviceData()
@@ -183,10 +221,19 @@ fully.bind("onBatteryLevelChanged","sendAttributeValue('battery','');");
     setBooleanSetting("movementDetection", true)
     loadStartURL()
 }
+def uninstalled() {
+    logger("[uninstalled] ", "trace")
+    mqttDisconnect()
+}
 
 // *** [ Parsing Methods ] ****************************************************
 def parse(description) {
     def logprefix = "[parse] "
+    // v0.4.0: Hubitat delivers MQTT messages to parse() too; description starts with "mqtt"
+    if (description?.startsWith("mqtt")) {
+        parseMqttMessage(description)
+        return
+    }
     logger(logprefix + "description: ${description}", "trace")
     def msg = parseLanMessage(description)
     def body = msg.body
@@ -677,6 +724,215 @@ def sendCommandCallback(response, data) {
                       "${device.displayName} checkInterval is 120")
     } else {
         logger(logprefix + "Invalid response: ${response.status}", "error")
+    }
+}
+
+// *** [ MQTT — v0.4.0 Opt-in ] ***********************************************
+// When settings.mqttBroker is blank, none of the methods below are called and
+// the driver behaves identically to v0.3.0.  All MQTT logic is gated on a
+// non-empty mqttBroker preference — zero regression risk for poll-only installs.
+
+void mqttConnect() {
+    def logprefix = "[mqttConnect] "
+    try {
+        def clientId = settings.mqttClientID?.trim() ?: "hubitat-fully-kiosk-${device.deviceNetworkId}"
+        def prefix   = settings.mqttTopicPrefix?.trim() ?: "fully"
+        def lwtTopic = "${prefix}/hubitat/state"
+        Map options  = [
+            lastWillTopic:   lwtTopic,
+            lastWillMessage: "offline",
+            lastWillQos:     1,
+            lastWillRetain:  true,
+            cleanSession:    false
+        ]
+        // Mask any embedded credentials in the broker URL before logging
+        def safeBroker = settings.mqttBroker?.replaceAll(/(:\/\/[^:@\/]+:)[^@\/]+(@)/, '$1***$2')
+        logger(logprefix + "Connecting to ${safeBroker}, clientId: ${clientId}", "info")
+        interfaces.mqtt.connect(settings.mqttBroker, clientId,
+                                settings.mqttUsername ?: null,
+                                settings.mqttPassword ?: null,
+                                options)
+    } catch (Exception e) {
+        logger(logprefix + "Connection failed: ${e.message}", "error")
+        mqttReconnect()
+    }
+}
+
+void mqttDisconnect() {
+    def logprefix = "[mqttDisconnect] "
+    logger(logprefix, "trace")
+    try {
+        if (interfaces.mqtt.isConnected()) {
+            interfaces.mqtt.disconnect()
+        }
+    } catch (Exception e) {
+        logger(logprefix + "Disconnect error: ${e.message}", "error")
+    }
+    state.mqttConnected = false
+}
+
+// Hubitat MQTT callback — called on connection state changes and errors.
+void mqttClientStatus(String status) {
+    def logprefix = "[mqttClientStatus] "
+    logger(logprefix + "status: ${status}", "info")
+    if (status.startsWith("Error") || status.contains("Connection lost")) {
+        state.mqttConnected = false
+        // Restore full-cadence polling so we don't miss state updates
+        if (settings.statePolling) {
+            unschedule("refresh")
+            runEvery1Minute("refresh")
+        }
+        mqttReconnect()
+    } else if (status.startsWith("Status")) {
+        state.mqttConnected = true
+        state.mqttRetryDelay = null
+        def prefix = settings.mqttTopicPrefix?.trim() ?: "fully"
+        // Subscribe to all FK topics under the configured prefix.
+        // Use a unique prefix per device (e.g. "fully-bathroom") when running
+        // multiple tablets on the same broker to avoid cross-device bleed.
+        interfaces.mqtt.subscribe("${prefix}/#", 0)
+        // Publish online state retained so other subscribers see Hubitat is connected
+        interfaces.mqtt.publish("${prefix}/hubitat/state", "online", 1, true)
+        // Reduce poll to heartbeat safety net — MQTT push carries the real updates
+        if (settings.statePolling) {
+            unschedule("refresh")
+            runEvery5Minutes("refresh")
+        }
+        logger(logprefix + "MQTT connected; poll cadence reduced to 5-min heartbeat", "info")
+    }
+}
+
+// Exponential-backoff reconnect: 20s → 40s → 80s → … capped at 300s
+void mqttReconnect() {
+    def logprefix = "[mqttReconnect] "
+    def delay = Math.min(((state.mqttRetryDelay ?: 10) as Integer) * 2, 300)
+    state.mqttRetryDelay = delay
+    logger(logprefix + "Retry in ${delay}s", "info")
+    runIn(delay, "mqttConnect")
+}
+
+// Called by Hubitat for every incoming message on subscribed topics.
+// MQTT description strings always start with "mqtt"; LAN HTTP push strings do not —
+// parse() routes here only when description.startsWith("mqtt") (see routing above).
+private void parseMqttMessage(String description) {
+    def logprefix = "[parseMqttMessage] "
+    try {
+        def msg     = interfaces.mqtt.parseMessage(description)
+        def topic   = msg.topic as String
+        def payload = msg.payload as String
+        logger(logprefix + "topic: ${topic}", "trace")
+        def prefix  = settings.mqttTopicPrefix?.trim() ?: "fully"
+        if (topic.startsWith("${prefix}/event/")) {
+            // fully/event/{eventType}/{deviceID} — route event-type segment
+            def parts     = topic.tokenize('/')
+            def eventType = parts.size() > 2 ? parts[2] : null
+            handleFkEvent(eventType, payload)
+        } else if (topic.startsWith("${prefix}/deviceInfo")) {
+            // fully/deviceInfo/{deviceID} — full device state snapshot (same JSON as REST cmd=deviceInfo)
+            handleFkDeviceInfo(payload)
+        }
+        // Ignore fully/status/... (our own LWT echo) and unrecognised topics
+    } catch (Exception e) {
+        logger(logprefix + "Error: ${e.message}", "error")
+    }
+}
+
+// Route FK MQTT event messages to the existing emitIfChanged plumbing.
+// Event payloads are JSON objects; apply isNumber() guard before numeric parses.
+private void handleFkEvent(String eventType, String payload) {
+    def logprefix = "[handleFkEvent] "
+    logger(logprefix + "type: ${eventType}", "trace")
+    switch (eventType) {
+        case "screenOn":
+            emitIfChanged("switch", "on",  "${device.displayName} switch is on")
+            break
+        case "screenOff":
+            emitIfChanged("switch", "off", "${device.displayName} switch is off")
+            break
+        case "motionDetected":
+            motion("active")
+            break
+        case "pluggedAC":
+            emitIfChanged("charging", "true",  "${device.displayName} charging is true")
+            break
+        case "unpluggedAC":
+            emitIfChanged("charging", "false", "${device.displayName} charging is false")
+            break
+        case "batteryLevel":
+            try {
+                def data = parseJson(payload)
+                def batt = data?.batteryLevel?.toString()
+                if (batt && batt.isNumber()) {
+                    emitIfChanged("battery", batt.toInteger(),
+                                  "${device.displayName} battery is ${batt}", "%")
+                }
+            } catch (Exception e) {
+                if (payload?.isNumber()) {
+                    emitIfChanged("battery", payload.toInteger(),
+                                  "${device.displayName} battery is ${payload}", "%")
+                }
+            }
+            break
+        case "foregroundApp":
+            try {
+                def data = parseJson(payload)
+                def app  = data?.appPackage ?: data?.foregroundApp ?: payload
+                emitIfChanged("foregroundApp", app,
+                              "${device.displayName} foregroundApp is ${app}")
+            } catch (Exception e) {
+                emitIfChanged("foregroundApp", payload,
+                              "${device.displayName} foregroundApp is ${payload}")
+            }
+            break
+        default:
+            logger(logprefix + "Unhandled FK event type: ${eventType}", "debug")
+    }
+}
+
+// Process a full FK deviceInfo JSON payload (same structure as REST /api?cmd=deviceInfo).
+// Called when FK publishes to fully/deviceInfo/{deviceID} — updates all v0.3.0 attributes.
+private void handleFkDeviceInfo(String payload) {
+    def logprefix = "[handleFkDeviceInfo] "
+    logger(logprefix, "trace")
+    try {
+        def json = parseJson(payload)
+        if (!json) return
+        emitIfChanged("battery",        json.batteryLevel,
+                      "${device.displayName} battery is ${json.batteryLevel}", "%")
+        def switchVal = (json.screenOn == true) ? "on" : "off"
+        emitIfChanged("switch",         switchVal,
+                      "${device.displayName} switch is ${switchVal}")
+        if (json.screenBrightness != null) {
+            def levelVal = Math.round((json.screenBrightness as BigDecimal) / 2.55).toInteger()
+            levelVal = Math.min(100, Math.max(0, levelVal))
+            emitIfChanged("level", levelVal,
+                          "${device.displayName} level is ${levelVal}", "%")
+        }
+        emitIfChanged("currentPageUrl", json.currentPage,
+                      "${device.displayName} currentPageUrl is ${json.currentPage}")
+        def chargingVal = json.plugged ? "true" : "false"
+        emitIfChanged("charging",          chargingVal,
+                      "${device.displayName} charging is ${chargingVal}")
+        def ssVal = json.isInScreensaver ? "true" : "false"
+        emitIfChanged("screensaverActive", ssVal,
+                      "${device.displayName} screensaverActive is ${ssVal}")
+        if (json.batteryTemperature != null && (json.batteryTemperature as String).isNumber()) {
+            def tempVal = json.batteryTemperature as BigDecimal
+            emitIfChanged("batteryTemperature", tempVal,
+                          "${device.displayName} batteryTemperature is ${tempVal}°C", "°C")
+        }
+        if (json.foregroundApp != null) {
+            emitIfChanged("foregroundApp", json.foregroundApp,
+                          "${device.displayName} foregroundApp is ${json.foregroundApp}")
+        }
+        def orientVal = (json.screenOrientation == 1) ? "landscape" : "portrait"
+        emitIfChanged("screenOrientation", orientVal,
+                      "${device.displayName} screenOrientation is ${orientVal}")
+        def kioskVal = json.kioskMode ? "true" : "false"
+        emitIfChanged("kioskMode",         kioskVal,
+                      "${device.displayName} kioskMode is ${kioskVal}")
+    } catch (Exception e) {
+        logger(logprefix + "Parse error: ${e.message}", "error")
     }
 }
 

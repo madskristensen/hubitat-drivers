@@ -11,6 +11,8 @@ A Hubitat driver for controlling **Fully Kiosk Browser** on wall-mounted Android
 
 Controls a Fully Kiosk Browser instance over your local network. The tablet pushes events (motion, screen state, battery, volume) back to Hubitat via HTTP, and Hubitat sends commands to the tablet (screen on/off, brightness, load URL, TTS, siren, etc.).
 
+**v0.4.0** adds opt-in MQTT subscription: when configured, screen state, motion, battery, charging, foreground app, and all other v0.3.0 sensor attributes update near-instantly via push instead of waiting for the next poll cycle. Leave the MQTT broker preference blank for exact v0.3.0 polling behavior.
+
 Tested on Mads Kristensen's two wall-mounted tablets (Bathroom + Kitchen).
 
 ---
@@ -38,6 +40,23 @@ Tested on Mads Kristensen's two wall-mounted tablets (Bathroom + Kitchen).
 2. Click **Save Preferences**.
 3. Click **Configure** once — this injects the JavaScript event hooks into Fully Kiosk Browser so the tablet reports motion, screen, battery, and volume events back to Hubitat.
 4. Enable **State Polling** if your tablet's start page uses HTTPS (prevents the tablet from pushing back to a non-HTTPS Hubitat hub endpoint).
+
+### MQTT setup (v0.4.0, optional)
+
+Requires Fully Kiosk Browser v1.34+ and Hubitat firmware 2.4.4.155+ (built-in MQTT broker).
+
+1. **In the Fully Kiosk Browser app** (on each tablet): open Settings → MQTT → enable MQTT and set the broker URL to `tcp://{your-hub-ip}:1883`. Set the topic prefix (e.g. `fully-bathroom` for unique per-device filtering).
+2. **In Hubitat**, open the driver Preferences:
+   - Set **MQTT broker URL** to `tcp://localhost:1883` (hub's built-in broker) or `tcp://{hub-ip}:1883`.
+   - Set **MQTT topic prefix** to match the FKB setting (e.g. `fully-bathroom`). **Use a unique prefix per tablet** when multiple tablets share the same broker — otherwise both driver instances receive each other's events.
+   - Optionally set a custom Client ID, username, and password if your broker requires authentication.
+3. Click **Save Preferences**. The driver connects immediately; the live log shows `MQTT connected`.
+
+> **Tip:** The hub's built-in broker (firmware 2.4.4.155+) requires no external Mosquitto server. Simply use `tcp://localhost:1883` as the broker URL on both the tablet and the driver.
+
+**What changes with MQTT:** Screen on/off, motion, battery level, charging state, and foreground app events arrive near-instantly instead of waiting for the polling interval. REST commands (brightness, load URL, TTS, etc.) are unchanged — FKB receives commands via REST only.
+
+**What stays polling:** `level` (screen brightness), `currentPageUrl`, `screensaverActive`, `batteryTemperature`, `screenOrientation`, `kioskMode` are updated from FKB's `deviceInfo` MQTT publish. The poll interval is reduced to 5 minutes as a heartbeat safety net while MQTT is connected (restored to 1 minute if MQTT disconnects).
 
 ---
 
@@ -109,6 +128,7 @@ Fork maintained by **Mads Kristensen** — https://github.com/madskristensen
 
 | Version | Date       | Notes |
 |---------|------------|-------|
+| 0.4.0   | 2026-05-18 | **MQTT subscriber (opt-in).** When `mqttBroker` preference is set, driver connects to the broker via `interfaces.mqtt`, subscribes to `{prefix}/#`, and routes FK event pushes (`screenOn`, `screenOff`, `motionDetected`, `pluggedAC`, `unpluggedAC`, `batteryLevel`, `foregroundApp`) plus full `deviceInfo` payloads to the existing `emitIfChanged` plumbing — all v0.3.0 sensor attributes update near-instantly instead of poll-cadence-bound. Poll cadence reduced to 5-min heartbeat while MQTT is healthy; restored to 1-min on disconnect. LWT published to `{prefix}/hubitat/state` (`online`/`offline`, retained). Exponential-backoff reconnect (20s → 40s → … → 300s cap). Leaving `mqttBroker` blank = exact v0.3.0 behavior, zero regression. Recommended broker: hub's built-in at `tcp://localhost:1883` (firmware 2.4.4.155+, no Mosquitto required). |
 | 0.3.0   | 2026-05-18 | **Brightness BUG FIX** ⚠️ behavior change: `setLevel(N)` now correctly delivers N% brightness (0–100 converted to FKB's 0–255 scale). Previously `setLevel(100)` sent raw 100 to FKB which interpreted it as ~39%. Existing Rule Machine rules using `setLevel` will now get the brightness the user actually intended. `setScreenBrightness(value)` still accepts raw 0–255 for expert use. New sensor attributes from existing `deviceInfo` poll — zero extra HTTP calls: `charging` (plugged state), `screensaverActive`, `batteryTemperature`, `foregroundApp`, `screenOrientation`, `kioskMode`. New `Notification` capability: `deviceNotification(text)` / `setOverlayMessage(text)` flash a text overlay popup on the tablet from Rule Machine. Utility commands: `toBackground`, `clearCache`, `forceSleep`, `exitApp`, `lockKiosk`, `unlockKiosk`, `enableLockedMode`, `disableLockedMode`. Video: `playVideo(url)`, `stopVideo`. Motion detection toggle: `enableMotionDetection` / `disableMotionDetection` (battery savings overnight). `checkInterval` event spam dedupe (Trinity finding #8): now gated with `emitIfChanged` — value never changes so only the first emit per session fires. |
 | 0.2.0   | 2026-05-18 | v0.2.0 polish pass: (C1) descriptionText on all checkInterval sendEvents; (C2) logsOff auto-disable after 30 min, logEnable default → false; (C3) Security note in README documenting LAN password-in-URI as FKB protocol design; (C4) checkInterval value 60 → 120 (2× poll cadence, avoids false offline on single missed poll); (C5) setLevel() level event now fires from setLevelCallback after HTTP success, not optimistically before the call. UUID in packageManifest.json replaced placeholder. |
 | 0.1.0   | 2026-05-18 | Initial fork from GvnCampbell v1.41. Apply Trinity audit fixes: password masking in debug logs (security), emitIfChanged in refreshCallback (event hygiene), descriptionText on all parse-path sendEvent calls, replace inverted logger with standard logEnable bool. |
