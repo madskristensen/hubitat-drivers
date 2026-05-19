@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.16
+ * Version: 0.4.17
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.17 — 2026-05-18 — ensureSession() check before command dedup guards so an expired Cognito token always triggers re-auth instead of silent no-op (Mads-reported: control lost after inactivity until refresh)
  *   0.4.16 — 2026-05-18 — add Polling capability marker so Hubitat apps discover poll() support
  *   0.4.15 — 2026-05-18 — replace cloneMap JSON round-trips with recursive Map/List copies on hot request/pattern paths
  *   0.4.15 — 2026-05-18 — dedupe unchanged refresh switch/level/hue/saturation events so poll telemetry stays stat-only
@@ -53,7 +54,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.16"
+@Field static final String DRIVER_VERSION = "0.4.17"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -73,7 +74,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.16"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.17"
 
 metadata {
     definition(
@@ -203,7 +204,8 @@ def logsOff() {
 // ---------------------------------------------------------------------------
 
 def on() {
-    if (device.currentValue("switch") == "on") {
+    boolean sessionReady = ensureSession()
+    if (sessionReady && device.currentValue("switch") == "on") {
         debugLog "on(): already on — skipping PUT /onState"
         return
     }
@@ -214,7 +216,8 @@ def on() {
 }
 
 def off() {
-    if (device.currentValue("switch") == "off") {
+    boolean sessionReady = ensureSession()
+    if (sessionReady && device.currentValue("switch") == "off") {
         debugLog "off(): already off — skipping PUT /onState"
         return
     }
@@ -232,6 +235,7 @@ def setLevel(level, duration = 0) {
     Integer clamped = clampPercent(level)
     def rawLevel = device.currentValue("level")
     Integer currentLevel = (rawLevel != null) ? (rawLevel as Integer) : null
+    boolean sessionReady = ensureSession()
 
     infoLog "${device.displayName} level → ${clamped}"
     sendEvent(name: "level", value: clamped, unit: "%", descriptionText: "${device.displayName} level set to ${clamped}%", type: "digital")
@@ -243,7 +247,7 @@ def setLevel(level, duration = 0) {
         return
     }
 
-    if (currentLevel != null && currentLevel == clamped) {
+    if (sessionReady && currentLevel != null && currentLevel == clamped) {
         debugLog "setLevel: already ${clamped} — skipping pattern PUT"
         return
     }
@@ -264,6 +268,7 @@ def setColor(colorMap) {
     def curSat = device.currentValue("saturation")
     def curLevel = device.currentValue("level")
     def curMode = device.currentValue("colorMode")
+    boolean sessionReady = ensureSession()
 
     infoLog "${device.displayName} color → hue=${hue} sat=${saturation} level=${level}"
     sendEvent(name: "hue", value: hue, descriptionText: "${device.displayName} hue set to ${hue}", type: "digital")
@@ -280,7 +285,7 @@ def setColor(colorMap) {
     }
 
     // G-5: only skip if already in RGB mode and all three components match
-    if (curMode == "RGB" && curHue != null && curSat != null && curLevel != null
+    if (sessionReady && curMode == "RGB" && curHue != null && curSat != null && curLevel != null
             && (curHue as Integer) == hue
             && (curSat as Integer) == saturation
             && (curLevel as Integer) == level) {
@@ -321,6 +326,7 @@ def setColorTemperature(colorTemperature, level = null, transitionTime = null) {
     def curMode = device.currentValue("colorMode")
     def rawTemp = device.currentValue("colorTemperature")
     Integer currentTemp = (rawTemp != null) ? (rawTemp as Integer) : null
+    boolean sessionReady = ensureSession()
 
     warnColorTemperatureFallback()
     infoLog "${device.displayName} color temperature → ${kelvin}K level=${targetLevel} (RGB fallback)"
@@ -340,7 +346,7 @@ def setColorTemperature(colorTemperature, level = null, transitionTime = null) {
     }
 
     // G-6: only skip if already in CT mode and temperature matches
-    if (curMode == "CT" && currentTemp != null && currentTemp == kelvin) {
+    if (sessionReady && curMode == "CT" && currentTemp != null && currentTemp == kelvin) {
         debugLog "setColorTemperature: already ${kelvin}K in CT mode — skipping pattern PUT"
         return
     }
@@ -793,6 +799,14 @@ private Map buildPatternRequest(Map pattern, String label) {
     ]
 }
 
+private boolean ensureSession(boolean requiresDevice = true) {
+    if (hasUsableAccessToken() && (!requiresDevice || state.deviceId)) {
+        return true
+    }
+    continueSessionSetup()
+    return false
+}
+
 private void executeOrQueueRequest(Map request) {
     if (!credentialsConfigured()) {
         log.error "[Gemstone] Gemstone account email and password are required in Preferences before '${request?.requestLabel ?: 'this command'}' can run."
@@ -800,11 +814,12 @@ private void executeOrQueueRequest(Map request) {
         return
     }
 
-    if (!hasUsableAccessToken() || (request?.requiresDevice && !state.deviceId)) {
+    boolean requiresDevice = request?.requiresDevice == true
+    if (!ensureSession(requiresDevice)) {
         String reason = !hasUsableAccessToken() ? "no usable access token" : "deviceId not yet discovered"
         log.info "[Gemstone] Queuing '${request?.requestLabel ?: request?.path}' (${reason}) — will dispatch after session setup"
         queueRequest(request)
-        continueSessionSetup()
+
         return
     }
 
@@ -844,7 +859,7 @@ private void flushPendingRequests() {
         return
     }
     if (!hasUsableAccessToken()) {
-        continueSessionSetup()
+
         return
     }
     if (!state.deviceId) {
@@ -1033,6 +1048,7 @@ private void activateEffectWithPattern(String patternId, String resolvedName, Ma
     }
 
     Integer effectIndex = effectIndexForPatternId(patternId)
+    boolean sessionReady = ensureSession()
     infoLog "${device.displayName} effect → ${displayEffectName(resolvedName)}"
     rememberPattern(pattern)
     sendEvent(name: "level", value: wireBrightnessToLevel(safeInt(pattern.brightness, 255)), unit: "%", descriptionText: "${device.displayName} level set to ${wireBrightnessToLevel(safeInt(pattern.brightness, 255))}%", type: "digital")
@@ -1041,7 +1057,7 @@ private void activateEffectWithPattern(String patternId, String resolvedName, Ma
     updateCurrentEffectIndex(effectIndex)
     updateColorMode(COLOR_MODE_EFFECTS)
     String currentEffect = safeString(device.currentValue("effectName"))
-    if (resolvedName && currentEffect == resolvedName) {
+    if (sessionReady && resolvedName && currentEffect == resolvedName) {
         debugLog "setEffect: '${resolvedName}' already active — skipping pattern PUT"
         return
     }
@@ -1271,7 +1287,7 @@ private void discoverDevice() {
         return
     }
     if (!hasUsableAccessToken()) {
-        continueSessionSetup()
+
         return
     }
 
