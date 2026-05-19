@@ -9,6 +9,10 @@
  *                  missing descriptionText.
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
+ *  Version: 0.4.2 — 2026-05-18 — Add clearOverlayMessage() command to dismiss an active
+ *                                overlay popup on the tablet (calls FKB's setOverlayMessage
+ *                                with empty text). Complements setOverlayMessage(text) and
+ *                                deviceNotification(text) — both show, this one clears.
  *  Version: 0.4.1 — 2026-05-18 — BUG: guard NPE in beep() when toneFile preference is unset
  *                                (log.warn instead of NPE); demote HTTP 408/5xx callback
  *                                logging from error to warn (transient tablet unreachable);
@@ -45,7 +49,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.4.1"
+@Field static final String VERSION = "0.4.2"
 
 metadata {
     definition (name: "Fully Kiosk Browser", namespace: "mads", author: "Mads Kristensen",
@@ -92,6 +96,7 @@ metadata {
                                       [name:"Value*:", type:"STRING", desciption:"The setting to be applied."]]
         // Pick #3: Notification capability command
         command "setOverlayMessage",    [[name:"text*", type:"STRING", description:"Text to display as overlay popup on the tablet."]]
+        command "clearOverlayMessage"
         // Pick #4: Utility commands
         command "toBackground"
         command "clearCache"
@@ -675,6 +680,10 @@ void deviceNotification(String text) {
 def setOverlayMessage(String text) {
     logger("[setOverlayMessage] text:${text}", "trace")
     sendCommandPost("cmd=setOverlayMessage&text=${java.net.URLEncoder.encode(text, "UTF-8")}")
+}
+def clearOverlayMessage() {
+    logger("[clearOverlayMessage] ", "trace")
+    sendCommandPost("cmd=setOverlayMessage&text=")
 }
 // Pick #6: Motion detection toggle — disable camera overnight for battery savings
 def enableMotionDetection() {
