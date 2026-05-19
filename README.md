@@ -75,25 +75,6 @@ For advanced users or offline installations:
 4. **Save** and create a virtual device using the driver
 5. **Configure** device preferences (see per-driver README)
 
-## Compatibility
-
-**Hub Requirements:**
-
-- ✅ Hubitat Elevation C-7, C-8
-- ✅ Platform Version: 2.3.3.x or newer
-
-**Network Requirement| :**
-
-| Driver       | Network | Details                                                               |
-| ------------ | ------- | --------------------------------------------------------------------- |
-| Daikin Wi-fi | Local   | Direct IP access to BRP069B adapter • No cloud account needed         |
-| Honeywell T6 Pro | Local   | Z-Wave only • No external network access required         |
-| Fully Kiosk | Local   | Direct IP access to tablet device • Local network required         |
-| Gemstone     | Cloud   | Outbound HTTPS to Gemstone cloud                                      |
-| SunStat      | Cloud   | Outbound HTTPS to Watts® Home cloud                                   |
-| PurpleAir AQI | Cloud   | Outbound HTTPS to PurpleAir cloud API (api.purpleair.com)                                   |
-| Touchstone   | Local   | Direct IP access to device • Requires Tuya local key (one-time setup) |
-
 ## Contributing
 
 **Found a bug or have an idea?** Open an [issue](https://github.com/madskristensen/hubitat-drivers/issues) or send a pull request!
