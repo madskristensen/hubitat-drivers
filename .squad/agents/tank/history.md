@@ -46,6 +46,22 @@ Tank-17's 8-arg form was ALSO rejected — Hubitat's built-in interface supports
 
 ---
 
+## 2026-05-19 — Cypher flagged 3 Touchstone retry-logic improvements
+
+**Context:** Cypher completed live troubleshooting of Mads's Touchstone fireplace outage (likely localKey rotation). Identified 3 driver defects in the retry loop that contributed to indefinite retry behavior without surfacing a clear "device unreachable" signal.
+
+**Flagged improvements (prioritized by Tank):**
+
+1. **retryIndex reset on heartbeat ACKs (line 869):** Reset fires on every frame including Tuya heartbeats (cmd 9) that have no AES payload. Causes infinite oscillation: 5s → 15s → (heartbeat resets to 0) → 5s → 15s... Suggested fix: only reset retryIndex when frame carries actual DP data.
+
+2. **No retry cap:** `scheduleRetry()` retries every 30s indefinitely after permanent failures (wrong key, device removed). Suggested fix: add `state.retryCount` counter; after threshold (e.g., 10 consecutive), stop retrying, call `updateOnlineStatus("offline", "...")`, and log at `log.error` level so Mads sees clear persistent signal.
+
+3. **No socket recycle after timeouts:** TCP half-open state never cleared after prolonged responseTimeouts. Suggested fix (optional, lower priority): after retry cap threshold, close and reopen socket before giving up.
+
+**Decision record:** `.squad/decisions.md` 2026-05-19 entry "Driver Improvement: Retry Cap + retryIndex Reset Scope (Touchstone Fireplace)".
+
+---
+
 # Tank — Driver Developer
 
 **Status:** Shipped 3 community driver forks + 2 polish versions (2026-05-18 through 2026-05-19). T6 Pro v0.4.0 live on Mads's Downstairs thermostat. PurpleAir, Fully Kiosk, T6 Pro all permanent forks (PurpleAir has PR-draft staging ready). Stack complete; awaiting next hardware target.

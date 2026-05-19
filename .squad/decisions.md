@@ -1,6 +1,64 @@
 # Decisions
 
-Generated 2026-05-19T04:57:12Z
+Generated 2026-05-19T06:58:11Z
+
+---
+
+## 2026-05-19 — Driver Improvement: Retry Cap + retryIndex Reset Scope (Touchstone Fireplace)
+
+**Date:** 2026-05-19  
+**Author:** Cypher  
+**Driver:** `drivers/touchstone-fireplace/touchstone-fireplace.groovy`  
+**Status:** Flagged — Tank to decide and implement
+
+### Context
+
+Mads woke up to a fireplace outage caused by an unresponsive device (most likely localKey rotation or device bad state). The driver's retry loop ran indefinitely and never surfaced a clear "device unreachable" status. Two separate issues in the retry logic contributed.
+
+### Issue 1 — retryIndex reset on ANY frame receipt (including heartbeats)
+
+**Location:** `parse()` → successful `consumeReceiveBuffer()` branch, line 869
+
+```groovy
+state.retryIndex = 0
+```
+
+**Problem:** This fires on every successfully parsed frame, including Tuya heartbeat ACKs (cmd 9). Heartbeat frames carry no AES payload — they succeed at the TCP level regardless of whether the `localKey` is correct. So a device that is online but has a stale/rotated key will:
+- ACK every heartbeat → reset retryIndex to 0 every ~20s
+- Drop every AES-encrypted cmd 13 silently → trigger responseTimeout every 5s
+- Result: the backoff oscillates 5s → 15s → (heartbeat resets to 0) → 5s → 15s… forever
+
+**Suggested fix:** Only reset `retryIndex` when a frame carries actual DP data (i.e., `response?.dps instanceof Map` is true, inside `processFrame()`), not on heartbeat ACKs or any other non-DP frame.
+
+### Issue 2 — No retry cap; loop runs forever
+
+**Location:** `scheduleRetry()`, lines 1008-1014
+
+```groovy
+private void scheduleRetry(String reason) {
+    Integer currentIndex = safeInt(state.retryIndex, 0)
+    Integer delay = RETRY_DELAYS_SECONDS[Math.min(currentIndex, RETRY_DELAYS_SECONDS.size() - 1)]
+    state.retryIndex = Math.min(currentIndex + 1, RETRY_DELAYS_SECONDS.size() - 1)
+    unschedule("retryPendingRequests")
+    runIn(delay, "retryPendingRequests")
+    log.warn "[Touchstone] ${reason} Retrying in ${delay}s."
+}
+```
+
+`RETRY_DELAYS_SECONDS = [5, 15, 30]` (line 123). There is no counter that limits total retry attempts. After a permanent failure (wrong key, device removed), the driver retries every 30s indefinitely.
+
+**Suggested fix:** Add a `state.retryCount` counter incremented in `scheduleRetry()` and reset in the successful-frame path. After a threshold (e.g. 10 consecutive failures), stop retrying, call `updateOnlineStatus("offline", "Device unreachable after N retries — re-initialize to retry")`, and log at `log.error` level so Mads sees a clear, persistent signal rather than recurring warns.
+
+### Issue 3 — Socket may be half-open after prolonged cmd timeouts
+
+**Observation:** The retry loop (`retryPendingRequests`) does NOT close and reopen the socket after N consecutive timeouts. The SKILL.md "do NOT close socket on responseTimeout" guidance is correct for the common transient case, but for a device that is persistently unresponsive it means the half-open TCP socket is never replaced.
+
+**Suggested fix (optional, lower priority):** After the retry cap threshold is reached (Issue 2), also close and reopen the socket before giving up. This clears any half-open TCP state and gives the reconnect backoff a chance to detect a genuine IP change.
+
+### Non-Goals
+
+- **Do not add retry cap to the heartbeat path** — heartbeats serve as the connection keepalive and should continue unconditionally as long as the socket is open.
+- **Do not change `RETRY_DELAYS_SECONDS`** — the current values (5s, 15s, 30s) are appropriate for the transient retry case.
 
 ---
 
