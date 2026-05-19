@@ -1,0 +1,17 @@
+{
+  "packageName": "PurpleAir AQI Virtual Sensor",
+  "minimumHEVersion": "2.2.0",
+  "author": "Peter Miller (pfmiller0) — fork maintained by Mads Kristensen",
+  "version": "0.1.0",
+  "dateReleased": "2026-05-18",
+  "releaseNotes": "Local-test fork of pfmiller0/Hubitat PurpleAir AQI Virtual Sensor v1.3.2. Applies 3 Trinity-audited bug fixes: AQ&U string mismatch, LRAPA/Woodsmoke case-sensitivity + wrong PM2.5 field, failCount operator-precedence breaking exponential backoff. This fork is TEMPORARY — intended for local validation before submitting fixes as a PR to pfmiller0/Hubitat.",
+  "drivers": [
+    {
+      "id": "purpleair-aqi-virtual-sensor",
+      "name": "PurpleAir AQI Virtual Sensor",
+      "namespace": "hyposphere.net",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/purpleair-aqi.groovy",
+      "required": true
+    }
+  ]
+}
