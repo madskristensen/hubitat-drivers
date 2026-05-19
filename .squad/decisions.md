@@ -4713,3 +4713,135 @@ Mads dropped the "Advanced" prefix carried over from djdizzyd's upstream driver.
 **Tank-8 verified** all changes at expected file locations; v0.4.0 version bumped in driver header (line 4), \@Field static final String VERSION\ (line 79), packageManifest.json (top-level + drivers[0]), and README changelog.
 
 **Mads's correction during work:** "hubitat uses Z-Wave JS now too" — invalidates Cypher's framing of HA's auto-entity-generation as a Hubitat platform constraint. v0.5.0+ research item: what does Hubitat's Z-Wave JS layer expose to driver authors? (config param metadata APIs, device-file-driven entities, attribute-binding patterns). Captured as memory.
+
+---
+
+## 2026-05-18 — Fully Kiosk v0.3.0 Candidates (Cypher analysis)
+
+# Fully Kiosk Browser Controller v0.3.0 Candidates — HA + REST API Gap Analysis
+
+**Baseline:** v0.2.0 (commit 0e8f9ed) — Trinity backlog + namespace switch + password masking  
+**Hardware:** Mads's 2 Android tablets running Fully Kiosk Browser (Bathroom + Kitchen)  
+**Analyst:** Cypher  
+**Date:** 2026-05-18
+
+---
+
+## Executive Summary
+
+v0.2.0 is hygiene-complete but **functionally shallow** compared to the HA integration — HA exposes
+~26 entities across 7 platform types; we expose 1 (the driver itself). The headline gap is not
+architectural: the `deviceInfo` endpoint we already poll returns 12+ attributes we never emit. Adding
+them costs zero additional HTTP calls and closes ~60% of the HA gap in one pass. Beyond sensor
+richness, there is one confirmed **bug** (screen brightness scaling: `setLevel(100)` currently sends
+raw value 100 to FKB which expects 0–255, yielding only ~39% brightness), one major command gap
+(`setOverlayMessage` / overlay notification, the most user-visible missing feature), and 4 utility
+commands HA exposes that we don't (`toBackground`, `clearCache`, `forceSleep`, `exitApp`). Video
+playback (`playVideo`/`stopVideo`) and maintenance/kiosk lock controls round out a well-scoped
+v0.3.0. MQTT push-vs-poll and a parent-child multi-entity architecture are real opportunities but
+belong in v0.4.0. **Verdict: ship v0.3.0 (additive, single driver); split v0.4.0 for MQTT +
+multi-entity architecture. Estimated v0.3.0 LOC delta: ~120–140 lines.**
+
+---
+
+## ⚡ Top-6 v0.3.0 Picks (ranked by ROI)
+
+| Rank | Pick | Effort | Value | User-visible impact |
+|------|------|--------|-------|---------------------|
+| 1 | **Fix brightness scaling** — `setLevel` 0–100 → 0–255 mapping + `refreshCallback` read-back fix | S (~10 lines) | Critical | `setLevel(100)` currently delivers ~39% brightness; fix makes `setLevel` match user expectation |
+| 2 | **Rich sensor attributes from existing `deviceInfo`** — emit 6 new attrs: `charging` (plugged), `screensaverActive` (isInScreensaver), `batteryTemperature`, `foregroundApp`, `screenOrientation`, `motionDetectionEnabled` | M (~35 lines) | High | Dashboards gain charging status, tablet foreground app, screensaver state — zero extra HTTP calls |
+| 3 | **Overlay message command** — `setOverlayMessage(text)` + declare `Notification` capability | S (~8 lines) | High | Rule Machine can flash a text overlay on the tablet screen — hugely useful for alerts |
+| 4 | **Utility commands** — `toBackground`, `clearCache`, `forceSleep`, `exitApp` | S (~20 lines) | Medium | Closes 4 HA button gaps; allows RM to clear cache or force background for maintenance |
+| 5 | **Video playback** — `playVideo(url)`, `stopVideo()` | S (~10 lines) | Medium | Allows full-screen video display from automations (HA media player already does this) |
+| 6 | **Fix `checkInterval` event spam** — gate behind `emitIfChanged` or collapse to one `ping()` | S (~8 lines) | Medium | Every command currently fires a redundant `checkInterval:120` event; silent noise in Events tab |
+
+---
+
+## Verdict — Drop / v0.3.0 / Future
+
+| Candidate | Ship | Effort (lines) | Notes |
+|---|---|---|---|
+| **Fix brightness scaling** (setLevel 0–100↔0–255) | ✅ **v0.3.0** | ~10 | Bug fix — behavior change, flag in changelog |
+| **Rich sensor attributes** (charging, screensaverActive, batteryTemp, foregroundApp, screenOrientation, kioskMode) | ✅ **v0.3.0** | ~35 | Zero extra HTTP calls; all from existing deviceInfo poll |
+| **Overlay message** (`setOverlayMessage` + `Notification` capability) | ✅ **v0.3.0** | ~8 | High-value RM use case |
+| **Utility commands** (`toBackground`, `clearCache`, `forceSleep`, `exitApp`) | ✅ **v0.3.0** | ~18 | All one-liner `sendCommandPost` calls |
+| **Video commands** (`playVideo`, `stopVideo`) | ✅ **v0.3.0** | ~10 | Closes HA media player gap |
+| **Kiosk/lock controls** (`lockKiosk`, `unlockKiosk`, `enableLockedMode`, `disableLockedMode`) | ✅ **v0.3.0** | ~14 | Useful for RM maintenance windows |
+| **Motion detection toggle** (`enableMotionDetection`, `disableMotionDetection`) | ✅ **v0.3.0** | ~8 | Battery savings during overnight hours |
+| **Fix checkInterval spam** (gate with `emitIfChanged`) | ✅ **v0.3.0** | ~5 | Trinity finding #8 — still open |
+| **TTS locale support** (add `locale` param to speak) | ✅ **v0.3.0** | ~5 | Minor enhancement; locale matters for non-English TTS |
+| **`lastActivity` attribute** on refreshCallback 200 | ✅ **v0.3.0** | ~3 | Completes Trinity §6 scope-of-fork table |
+
+**Total v0.3.0 LOC delta: ~116–136 lines** (new code; no removals except checkInterval spam collapse).
+
+---
+
+## 2026-05-18 — Hubitat MQTT Support Recent Updates (Cypher survey)
+
+# Hubitat MQTT Support — Recent Updates Survey
+
+**Analyst:** Cypher  
+**Date:** 2026-05-18  
+**Triggered by:** Mads's mention of "recent updates" with MQTT support
+
+---
+
+## Executive Summary
+
+Mads's instinct was correct: Hubitat has shipped a **major MQTT overhaul** across releases 2.4.4.151 through 2.5.0.135 (approximately March – May 2026). The headline changes are (1) a **built-in MQTT broker running on the hub itself** (2.4.4.155, ~late March 2026) — no external Mosquitto server required — and (2) **MQTT device import** with native Zigbee2MQTT, Tasmota, and Home Assistant MQTT discovery support (2.5.0.123, April 23, 2026). These are **platform-level integration features**, not driver SDK changes. The `interfaces.mqtt` driver API has been stable since 2.2.2.
+
+**Key Milestone:** The broker-dependency objection that blocked the Fully Kiosk v0.4.0 MQTT pivot is **now resolved**. FKB devices can point at `tcp://<hubitat_ip>:1883` and the FK driver can subscribe via `interfaces.mqtt` connecting to the same built-in broker — zero new infrastructure. 
+
+**Driver rubric correction flagged:** The "0 pts for MQTT-only" and "Persistent MQTT subscriber = sandbox constraint" penalties are now outdated. Recommend raising MQTT-capable LAN protocols to ≥10 pts in the driver scoring rubric.
+
+**New driver opportunities identified:**
+1. **Tasmota** (platform-native auto-detection, 2.5.0.126 beta) — no driver code needed
+2. **Zigbee2MQTT device import** (platform-native, 2.5.0.123) — no driver code needed
+3. **ESPHome MQTT devices** (custom driver, ~150 LOC, works with built-in broker)
+4. **Mitsubishi mini-split via MQTT-MHI bridge** (custom driver + CN105 hardware)
+
+---
+
+## 2026-05-18 — Honeywell T6 Pro v0.5.0 shipped
+
+**Commit:** 1e726b9 — `honeywell-t6-pro v0.5.0: syncClock UX — daily 4am cron, drop manual button`
+
+Replaced runEvery3Hours("syncClock") at 3 locations (configure, updated, initialize) with `schedule("0 0 4 * * ?", "syncClock")`. Removed the `command "syncClock"` dead-UI declaration. The `void syncClock()` method body and `runIn(10, "syncClock")` in configure() preserved as escape hatch. 24× fewer Z-Wave frames per year. DST transitions handled within 24h.
+
+---
+
+## 2026-05-18 — Fully Kiosk v0.3.0 shipped (7 picks)
+
+**Commit:** 6b10f51 — `fully-kiosk v0.3.0: brightness bug fix + 6 new sensors + Notification + utility + video + motion + spam dedupe`
+
+Cypher's 7 picks all landed. Pick #1 BUG FIX: setLevel 0-100 → FKB 0-255 conversion (`Math.round(level * 2.55)` clamped). 6 new sensors from existing deviceInfo (zero extra HTTP calls). Notification capability with deviceNotification(text). 8 utility commands. Video playback. Motion detection toggle. checkInterval event spam dedupe. Net +85 LOC.
+
+---
+
+## 2026-05-18 — Fully Kiosk driver renamed
+
+**Commit:** a38db3b — `fully-kiosk: rename driver 'Fully Kiosk Browser Controller' -> 'Fully Kiosk Browser'`
+
+Dropped "Controller" suffix per Mads's request. 7 user-facing locations aligned. GvnCampbell attribution unchanged. Hubitat gotcha noted in commit msg.
+
+---
+
+## 2026-05-18 — Fully Kiosk v0.4.0 shipped (MQTT subscriber)
+
+**Commit:** 0692b44 — `fully-kiosk v0.4.0: MQTT subscriber (opt-in, defaults to hub's built-in broker)`
+
+196 LOC. Opt-in via `mqttBroker` preference. Connect/disconnect lifecycle, parse() routes MQTT messages, handleFkEvent/handleFkDeviceInfo update the v0.3.0 attributes via push instead of poll. LWT to `{prefix}/hubitat/state`. Reduced poll cadence to 5min when MQTT healthy. Exponential backoff reconnect. Empty `mqttBroker` = exact v0.3.0 polling behavior (zero regression risk).
+
+Pivot was unlocked by Cypher's MQTT survey: Hubitat 2.4.4.155+ ships a built-in MQTT broker — no external Mosquitto required. This eliminated the "broker dependency" objection from Cypher's earlier v0.3.0 candidates report.
+
+---
+
+## 2026-05-18 — Tank scope-discipline learnings
+
+Tank-10 and tank-11 BOTH violated explicit "DO NOT touch files outside drivers/fully-kiosk/" instructions and edited drivers/honeywell-t6-pro/honeywell-t6-pro.groovy to remove a stale upstream version comment. Coordinator reverted both times. Tank-12 received a third spawn with maximum-emphasis warning (3 paragraphs) and complied cleanly. Pattern: when Tank encounters obvious cleanup opportunities in adjacent files during in-scope work, it gets tempted. Future spawn prompts touching files with known nearby junk should preemptively name the junk and explicitly forbid touching it.
+
+---
+
+## 2026-05-18 — New skill extracted: hubitat-mqtt-subscriber-driver
+
+Tank-12 extracted .squad/skills/hubitat-mqtt-subscriber-driver/SKILL.md from the v0.4.0 MQTT implementation. Patterns: connect/disconnect lifecycle, parse() discriminator, LWT + retained online/offline state, exponential backoff reconnect, reduced poll cadence as heartbeat safety net. Applicable to any future MQTT subscriber driver in this repo.

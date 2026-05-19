@@ -45,6 +45,12 @@ Mads's complete stack now has **zero open BUILD candidates**.
 - Fixed octal: `043:2` → `0x43:2` in CMD_CLASS_VERS (was reading 0x23 Scene Controller instead of 0x43 Thermostat Setpoint)
 - Full namespace/author alignment; `Initialize` capability + lifecycle hooks; README restructure to repo template
 
+### Honeywell T6 Pro v0.5.0 (syncClock UX)
+- Replaced `runEvery3Hours("syncClock")` with `schedule("0 0 4 * * ?", "syncClock")` in `configure()`, `updated()`, and `initialize()` — 24× fewer Z-Wave frames
+- Removed `command "syncClock"` declaration — dead UI button since auto-sync already handles all cases
+- `void syncClock()` method body preserved; still called by `schedule()` and by `runIn(10,"syncClock")` in `configure()`
+- Post-update timing subtlety: if user runs `updated()` at 4:30am, next sync is 23.5h later — "Configure" button is the documented escape hatch for immediate sync
+
 ### Honeywell T6 Pro v0.4.0 (3 additive Cypher picks) ✅ SHIPPED LIVE
 - descriptionText on 3 event handlers (thermostatOperatingState, thermostatFanMode, thermostatMode)
 - thermostatFanState type "string" → "enum" with 8 values
@@ -67,5 +73,28 @@ Mads's complete stack now has **zero open BUILD candidates**.
 - Groovy numeric literals: `043` is **octal** (= 0x23), not `0x43` — always use `0x` prefix for hex
 - Z-Wave device config: fingerprint `inClusters` is authoritative; CMD_CLASS_VERS can have author assumptions — cross-check both sources
 - UX pattern: emitIfChanged + descriptionText + lastActivity (Pattern B for cloud, Pattern A for LAN ping) is the canonical hygiene standard across the repo
+
+
+## 2026-05-18 — Fully Kiosk v0.3.0 shipped (7 Cypher picks)
+
+Closed the HA integration gap with all 7 Cypher-ranked v0.3.0 picks in a single additive pass. Pick #1 (brightness BUG FIX): `setLevel()` now converts 0–100 → `Math.round(level.toBigDecimal() * 2.55).toInteger()` clamped 0–255 before sending to FKB, and `refreshCallback()` reads back raw 0–255 and divides by 2.55 to emit the correct 0–100 SwitchLevel value — both with null guards. Pick #2: added 6 emitIfChanged attributes in refreshCallback from the existing deviceInfo payload — zero extra HTTP calls: `charging` (from `plugged`), `screensaverActive` (from `isInScreensaver`), `batteryTemperature` (null-guarded), `foregroundApp` (null-guarded), `screenOrientation` (mapped 0/1 → "portrait"/"landscape"), `kioskMode`. Pick #3: added `capability "Notification"` + `void deviceNotification(String)` + `setOverlayMessage(String)` both routing to `cmd=setOverlayMessage` with URL-encoded text. Pick #4: 8 utility commands (toBackground, clearCache, forceSleep, exitApp, lockKiosk, unlockKiosk, enableLockedMode, disableLockedMode) — all thin `sendCommandPost` one-liners. Pick #5: `playVideo(url)` and `stopVideo()`. Pick #6: `enableMotionDetection()` / `disableMotionDetection()` delegate to the existing `setBooleanSetting("motionDetection", true/false)`. Pick #7: all 4 `sendEvent([name:"checkInterval"...])` sites replaced with `emitIfChanged()` — value is always 120 so only the first emit per session fires. One discrepancy vs Cypher's spec: Cypher listed `motionDetectionEnabled` as a Pick #2 candidate but that field requires `listSettings` (not in `deviceInfo`), so `kioskMode` from `deviceInfo.kioskMode` was substituted as the 6th attribute (matching Cypher's own verdict table). Net LOC delta +85 (Cypher estimated ~116–136; difference because command stubs are 3 lines each and checkInterval fix was net-neutral).
+
+
+## 2026-05-18 — Fully Kiosk v0.4.0 shipped (MQTT subscriber, opt-in)
+
+Added ~195 LOC of MQTT support as an additive, preference-gated layer. Architecture decisions:
+
+- **Opt-in gate:** all MQTT logic is gated on `settings.mqttBroker?.trim()` in `initialize()`. Empty preference = exact v0.3.0 behavior, zero regression risk.
+- **parse() routing:** MQTT description strings start with `"mqtt"` in Hubitat; LAN HTTP push strings do not. Added a `description?.startsWith("mqtt")` check at the top of `parse()` to route to `parseMqttMessage()` before the existing LAN path.
+- **Lifecycle:** `mqttConnect()` in `initialize()` when broker is set; `mqttDisconnect()` in `updated()` (before re-init) and `uninstalled()` (new method added). Disconnect-before-reconnect pattern ensures broker URL/credential changes take effect.
+- **LWT topic:** `{prefix}/hubitat/state` with `"offline"` (retained, QoS 1). `"online"` published on successful connect.
+- **Poll cadence:** `runEvery5Minutes("refresh")` when MQTT broker is configured (scheduled optimistically in `initialize()`); `mqttClientStatus()` confirms 5-min on connect, falls back to 1-min on disconnect.
+- **Reconnect:** exponential backoff via `state.mqttRetryDelay`: 10 → 20 → 40 → 80 → 160 → 300 (capped). Reset on successful connect.
+- **MQTT-pushed attributes:** `switch` (screenOn/screenOff), `motion` (motionDetected), `charging` (pluggedAC/unpluggedAC), `battery` (batteryLevel), `foregroundApp` — via `handleFkEvent()`. ALL v0.3.0 attributes additionally via `handleFkDeviceInfo()` from `{prefix}/deviceInfo/{deviceID}` payloads.
+- **Poll-only fallback:** `level` (brightness), `currentPageUrl`, `screensaverActive`, `batteryTemperature`, `screenOrientation`, `kioskMode` also covered by `handleFkDeviceInfo()` from MQTT — no attributes are polling-only when MQTT is connected and FKB publishes `deviceInfo`.
+- **FK deviceID caveat:** FKB's MQTT topic includes its own `deviceID` segment which may differ from Hubitat's MAC-based `deviceNetworkId`. Subscribed to `{prefix}/#` (wildcard) to avoid hardcoding the deviceID format. Documented: use a unique `mqttTopicPrefix` per tablet (e.g. `fully-bathroom`) when multiple tablets share the same broker.
+- **Password masking:** broker URL masked via `replaceAll(/:\/\/[^:@\/]+:)[^@\/]+(@)/, '$1***$2')` before logging.
+- **New skill:** extracted reusable pattern to `.squad/skills/hubitat-mqtt-subscriber-driver/SKILL.md`.
+- **Scope discipline:** ONLY modified `drivers/fully-kiosk/fully-kiosk.groovy`, `drivers/fully-kiosk/packageManifest.json`, `drivers/fully-kiosk/README.md`, and this history file. No T6, no PurpleAir, no other files touched. If I ever find myself reading or considering edits to files outside `drivers/fully-kiosk/`, I will stop and re-read the scope warning.
 
 

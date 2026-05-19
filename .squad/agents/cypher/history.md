@@ -1,29 +1,15 @@
 # Cypher — Integration / Protocol Engineer
 
-**Status:** 2026-05-18 — HA gap analysis complete. T6 Pro v0.4.0 candidates delivered and merged into decisions.md by Scribe. Driver is near feature-complete vs HA Z-Wave JS; 3 polish picks identified (~27 lines total).
+## Session Arc 2026-05-18: Multi-Platform Audit (MQTT Discovery, FK v0.3.0, T6 v0.4.0)
 
----
+**Summary:** 3 simultaneous audit passes completed:
+1. **Hubitat MQTT Platform Survey** — Hubitat 2.4.4.155+ ships built-in MQTT broker; `interfaces.mqtt` stable since 2.2.2. FK v0.4.0 MQTT subscriber is now viable without external broker.
+2. **Fully Kiosk v0.3.0 HA Gap Analysis** — 7 picks identified: brightness-scaling bug fix + 6 rich sensor attrs from existing poll + overlay-message command + utility commands (toBackground, clearCache, forceSleep, exitApp) + video playback (playVideo, stopVideo) + kiosk/lock toggles + checkInterval spam fix. Total delta: ~116–136 LOC.
+3. **T6 Pro v0.4.0 HA Gap Analysis** — 3 picks: descriptionText on 3 event handlers + thermostatFanState enum fix + Notification type 9 handler. ~27 LOC.
 
-## 2026-05-18T18:30:49-07:00 — Honeywell T6 Pro v0.4.0 HA Gap Analysis
+**Key Learnings:** Built-in MQTT broker eliminates infrastructure barrier for FK pivot. Driver rubric "0 pts for MQTT" is now outdated; recommend raising MQTT-capable LAN protocols to ≥10 pts.
 
-**Task:** Comparative analysis — what does HA Z-Wave JS give T6 Pro users that v0.3.0 doesn't?
-
-**Key findings:**
-- Z-Wave JS device file `th6320zw.json` (mfr:0x0039, prod:0x0011, deviceId:0x0008) covers params 1–42 only — exact match to our driver. Params 43–45 are in the Honeywell template but NOT referenced from the ZW2003 device file. ZW2007-only confirmed.
-- Z-Wave JS `compat` flags: `skipConfigurationNameQuery/InfoQuery` — device has S2 timing quirk. Our static `configParams` map already handles this correctly without an explicit workaround.
-- HA's biggest advantage is architectural (per-param entities), not protocol-level. Cannot be replicated in a Hubitat driver.
-- Three genuine polish gaps in v0.3.0: (1) `descriptionText` missing on thermostatOperatingState/FanMode/Mode events, (2) `thermostatFanState` declared "string" not "enum", (3) no Notification type 9 handler.
-
-**v0.4.0 Top-3 Picks:**
-1. `descriptionText` on 3 event handlers (~6 lines) — matches v0.2.0 pattern
-2. `thermostatFanState` type "string" → "enum" (~6 lines) — v0.3.0 oversight
-3. Notification type 9 System handler stub (~15 lines) — surfaces firmware alerts
-
-**Ruled out:** humidity setpoint (no CC), filter timer reset (no CC), outdoor temp (display-only), params 43–45 (ZW2007-only), outdoor humidity (not supported).
-
-**Deliverable:** `.squad/decisions/inbox/cypher-honeywell-t6-pro-v0.4.0-candidates.md`
-
----
+**Deliverables:** All 3 reports generated and merged into decisions.md (2026-05-18).
 
 ## Prior Status
 
