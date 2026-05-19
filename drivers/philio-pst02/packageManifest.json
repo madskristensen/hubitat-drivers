@@ -1,0 +1,19 @@
+{
+  "packageName": "Philio PST02 Enhanced",
+  "author": "Mads Kristensen",
+  "minimumHEVersion": "2.3.0",
+  "dateReleased": "2026-05-19",
+  "version": "1.0.0",
+  "communityLink": "",
+  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/philio-pst02/README.md",
+  "drivers": [
+    {
+      "id": "edcb2f24-7a68-42c2-8f25-58a7f01c815c",
+      "name": "Philio PST02 Enhanced",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/philio-pst02/philio-pst02.groovy",
+      "required": true,
+      "version": "1.0.0"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+# Philio PST02 Enhanced
+
+Hubitat driver for Philio PST02 A/B/C sensors with a guided configuration UX for parameters 5/6/7.
+
+## Why this fork
+
+The original PST02 drivers often expose raw bitmask integers (`para5`, `para6`, `para7`) that are difficult to remember and maintain.  
+This fork keeps proven device behavior but adds a guided preference model that calculates those parameter values automatically.
+
+## Highlights
+
+1. **Guided mode (recommended):** Human-readable toggles/dropdowns for parameter 5, 6, and 7 behavior.
+2. **Variant-aware handling:** Auto-detects PST02-B vs PST02-A/C and applies only relevant bit options.
+3. **Advanced raw mode:** Still available for power users who want explicit numeric values.
+4. **HA/Z-Wave JS aligned labels:** Guided options use the same parameter naming model used by modern Z-Wave JS device configs.
+
+## Install
+
+### HPM
+
+1. Apps → Hubitat Package Manager → Install → **From a URL**
+2. Use:
+   `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/philio-pst02/packageManifest.json`
+
+### Manual
+
+Import:
+`https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/philio-pst02/philio-pst02.groovy`
+
+Then assign the device driver type:
+**Philio PST02 Enhanced**
+
+## Changelog
+
+| Version | Date       | Notes |
+|---------|------------|-------|
+| 1.0.0   | 2026-05-19 | Initial Mads fork with guided parameter 5/6/7 UX, variant-aware bitmask calculation, and optional advanced raw override. |

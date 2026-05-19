@@ -2,7 +2,7 @@
 
 Community Hubitat Elevation drivers by Mads Kristensen.
 
-**8 production-ready drivers** • 🌐 5 Local LAN • ☁️ 3 Cloud API • 📦 HPM Ready
+**9 production-ready drivers** • 🌐 6 Local LAN • ☁️ 3 Cloud API • 📦 HPM Ready
 
 ## Available Drivers
 
@@ -38,6 +38,7 @@ Community Hubitat Elevation drivers by Mads Kristensen.
 | Driver                     | Type  | Key Features                                                                 | Docs                                         |
 | -------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------- |
 | **Minoston Smart Plug 2-Channel (MP24Z)** | Local | Dual-outlet child endpoints • Parent/child sync hardening • Z-Wave associations • Auto-off per channel | [Docs](drivers/minoston-mp24z/README.md)        |
+| **Philio PST02 Enhanced** | Local | Motion/contact/temp/lux sensor • Guided parameter UI (no raw bitmask math) • Variant-aware A/B/C handling | [Docs](drivers/philio-pst02/README.md)        |
 
 ## Quick Start
 
@@ -63,9 +64,10 @@ Community Hubitat Elevation drivers by Mads Kristensen.
    Daikin WiFi:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/daikin-wifi/packageManifest.json
    Fully Kiosk:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/fully-kiosk/packageManifest.json
    Gemstone Lights:  https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/packageManifest.json
-    Honeywell T6:     https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/honeywell-t6-pro/packageManifest.json
-    Minoston MP24Z:   https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/minoston-mp24z/packageManifest.json
-    PurpleAir AQI:    https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/packageManifest.json
+     Honeywell T6:     https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/honeywell-t6-pro/packageManifest.json
+     Minoston MP24Z:   https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/minoston-mp24z/packageManifest.json
+    Philio PST02:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/philio-pst02/packageManifest.json
+     PurpleAir AQI:    https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/packageManifest.json
    SunStat Connect:  https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/packageManifest.json
    Touchstone:       https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/packageManifest.json
    ```
