@@ -48,6 +48,7 @@ Z-Wave thermostat driver for the Honeywell T6 Pro (model TH6320ZW2003). Supports
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 0.3.0 | 2026-05-18 | Emit `thermostatFanState` attribute from `ThermostatFanStateReport` (Pick #1); handle battery-low notification events 10/11 with `log.warn` + `sendEvent` for `battery` (Pick #2); fix `CMD_CLASS_VERS` octal bug `043` → `0x43` for Thermostat Setpoint CC (Pick #3). |
 | 0.2.0 | 2026-05-18 | Polish pass (Trinity backlog C1–C5): add `descriptionText` to temperature and humidity events (C1); BigDecimal equality in `eventProcess()` to prevent `68` vs `68.0` false events (C2); remove dead `configurationGet(parameterNumber: 52)` saving 2 Z-Wave frames per fan-state event (C3); add `descriptionText` to `supportedThermostatModes` and `supportedThermostatFanModes` sendEvents (C4); remove redundant `runIn(10,"syncClock")` from `refresh()` (C5). Namespace switched to `mads`. Added `Initialize` capability. |
 | 0.1.0 | 2026-05-18 | Initial fork. Apply Trinity audit fixes: add `txtEnable` preference (BLOCKER), fix `device.currentValue("thermostatOperatingState")` in two locations (MAJOR), add `unschedule("syncClock")` in `configure()` (MAJOR). |
 
