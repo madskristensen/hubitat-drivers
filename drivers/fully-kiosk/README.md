@@ -1,4 +1,4 @@
-# Fully Kiosk Browser Controller
+# Fully Kiosk Browser
 
 A Hubitat driver for controlling **Fully Kiosk Browser** on wall-mounted Android tablets via the local REST API.
 
@@ -30,7 +30,7 @@ Tested on Mads Kristensen's two wall-mounted tablets (Bathroom + Kitchen).
 
 1. Open **Drivers Code** in Hubitat → **New Driver**
 2. Paste the contents of [`fully-kiosk.groovy`](fully-kiosk.groovy) → **Save**
-3. Create a new virtual device and select **Fully Kiosk Browser Controller** as the driver.
+3. Create a new virtual device and select **Fully Kiosk Browser** as the driver.
 
 ### Configuration
 

@@ -1,5 +1,5 @@
 {
-  "packageName": "Fully Kiosk Browser Controller",
+  "packageName": "Fully Kiosk Browser",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
   "dateReleased": "2026-05-18",
@@ -9,7 +9,7 @@
   "drivers": [
     {
       "id": "ead8e688-5b88-48b7-97f9-16b0d921bd2f",
-      "name": "Fully Kiosk Browser Controller",
+      "name": "Fully Kiosk Browser",
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/fully-kiosk/fully-kiosk.groovy",
       "required": true,

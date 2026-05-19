@@ -1,5 +1,5 @@
 /**
- *  Fully Kiosk Browser Controller (Hubitat) — Fork
+ *  Fully Kiosk Browser (Hubitat) — Fork
  *
  *  Fork by: Mads Kristensen — 2026-05-18
  *  Source: github.com/GvnCampbell/Hubitat
@@ -26,8 +26,6 @@
  *                                descriptionText on checkInterval events, checkInterval 60→120,
  *                                setLevel event moved to callback, UUID in manifest, Security note in README
  *  Version: 0.1.0 — 2026-05-18 — Initial fork; apply Trinity audit fixes
- *
- *  [original GvnCampbell MIT/Apache copyright block preserved verbatim below]
  */
 
 import groovy.transform.Field
@@ -35,7 +33,7 @@ import groovy.transform.Field
 @Field static final String VERSION = "0.3.0"
 
 metadata {
-    definition (name: "Fully Kiosk Browser Controller", namespace: "mads", author: "Mads Kristensen",
+    definition (name: "Fully Kiosk Browser", namespace: "mads", author: "Mads Kristensen",
                 importUrl: "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/fully-kiosk/fully-kiosk.groovy") {
         capability "Actuator"
         capability "Alarm"
@@ -708,7 +706,7 @@ private void emitIfChanged(String name, value, String descTxt, String unit = nul
 // C2: auto-disable debug logging after 30 minutes
 def logsOff() {
     device.updateSetting("logEnable", [value: "false", type: "bool"])
-    log.info "Fully Kiosk Browser Controller: debug logging auto-disabled after 30 minutes"
+    log.info "Fully Kiosk Browser: debug logging auto-disabled after 30 minutes"
 }
 
 // FIX #4 (logger): replaced the inverted multi-level logger (where "debug"
