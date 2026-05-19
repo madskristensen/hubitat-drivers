@@ -1,6 +1,39 @@
+## 2026-05-18 — Spawn tank-18 — Fully Kiosk v0.4.6
+
+**Task:** v0.4.6 — Drop to 4-arg `interfaces.mqtt.connect()`, remove LWT locals
+
+**Source:** Mads Kristensen — live bug: Hubitat throwing
+`"No signature of method: hubitat.helper.interfaces.Mqtt.connect() is applicable for argument types:
+(java.lang.String, GStringImpl, null, null, String, Integer, Boolean, String)"`.
+Tank-17's 8-arg form was ALSO rejected — Hubitat's built-in interface supports the 4-arg form only.
+
+**Changes made (drivers/fully-kiosk/ only):**
+
+#### fully-kiosk.groovy
+
+- **Header (lines 12–23):** Added `Version: 0.4.6 — 2026-05-18` changelog entry above 0.4.5
+- **VERSION field (line 87):** `"0.4.5"` → `"0.4.6"`
+- **`mqttConnect()`:** Removed 4 now-unused LWT locals (`lwtTopic`, `lwtPayload`, `lwtQos`, `lwtRetained`). Replaced 8-arg `interfaces.mqtt.connect(...)` with 4-arg form `(brokerUrl, clientId, username ?: null, password ?: null)`.
+- **`mqttClientStatus()` success branch (line 854):** `interfaces.mqtt.publish("${prefix}/hubitat/state", "online", 1, true)` — **untouched**. Manual online-state publish preserved.
+
+#### packageManifest.json
+
+- Both `"version"` fields → `"0.4.6"`
+
+#### README.md
+
+- New `0.4.6` row inserted above `0.4.5` in the changelog table
+- LWT limitation note added to MQTT setup section: no automatic offline publish; subscribers should treat stale state as "unknown"
+
+**Scope compliance:** Only `drivers/fully-kiosk/` and `.squad/agents/tank/history.md` (full path) modified. ✅
+
+---
+
 # Tank — Driver Developer
 
 **Status:** Shipped 3 community driver forks + 2 polish versions (2026-05-18 through 2026-05-19). T6 Pro v0.4.0 live on Mads's Downstairs thermostat. PurpleAir, Fully Kiosk, T6 Pro all permanent forks (PurpleAir has PR-draft staging ready). Stack complete; awaiting next hardware target.
+
+---
 
 ## 2026-05-18 — 3 Trinity Audits Complete + Forks Shipped
 
@@ -11,110 +44,92 @@
 
 Mads's complete stack now has **zero open BUILD candidates**.
 
-## 2026-05-18 — Shipped Forks
+### Fully Kiosk v0.1.0–v0.4.5 Summary (rapid iteration)
 
-### PurpleAir AQI v0.1.0 (3 bug fixes)
-- Fixed `apply_conversion()` "AQ and U" → "AQ&U" dead-code check
-- Fixed `sensorCheck()` case mismatch: "lrapa"/"woodsmoke" → "LRAPA"/"Woodsmoke" (was fetching wrong PM2.5 field)
-- Fixed `httpResponse()` failCount precedence: `(state.failCount ?: 0) + 1` (exponential backoff was broken)
-- Status: TEMPORARY fork; delete once upstream merges PR
+- **v0.1.0:** 4 critical fixes (password security, emitIfChanged, descriptionText, logger inversion bug)
+- **v0.2.0:** 5 Trinity deferred items (descriptionText, logsOff auto-disable, security doc, checkInterval, setLevel async)
+- **v0.3.0:** 7 Cypher HA integration picks (setLevel brightness fix, 6 emitIfChanged attributes, Notification + overlay, 8 utility commands, video + motion controls, checkInterval emitIfChanged)
+- **v0.4.1:** 3 live tablet bugs (beep() NPE guard, 408/5xx demote to warn, setScreenBrightness removed — BREAKING)
+- **v0.4.2:** Added clearOverlayMessage() command
+- **v0.4.3:** 4 Cypher event-name mismatches fixed (motionDetected→onMotion, unpluggedAC→unplugged, batteryLevel→onBatteryLevelChanged, foregroundApp removed)
+- **v0.4.4:** Defensive leading-slash handling (dual MQTT subscriptions + topic normalization)
+- **v0.4.5:** Fixed invalid `mqtt.connect()` signature (was 5-arg with Map, switched to 8-arg with explicit LWT params)
 
-### Fully Kiosk v0.1.0 (4 critical fixes)
-- Password security: `type:"string"` → `type:"password"` + URI masking in logs
-- Event hygiene: `emitIfChanged()` on 4 attributes; prevents 5,760+ unnecessary events/day
-- descriptionText: Added to parse(), motion(), acceleration() handlers
-- Logger: Replaced backwards multi-level enum with standard `logEnable` bool
-- Status: PERMANENT fork; GvnCampbell silent 4.5 years
+### PurpleAir v0.1.0–v0.2.0 Summary
 
-### Fully Kiosk v0.2.0 (5 Trinity deferred items)
-- descriptionText on checkInterval events (3 sites)
-- logsOff auto-disable 30-min pattern (Gemstone standard)
-- Security doc in README
-- checkInterval 60→120 (2× polling cadence for health robustness)
-- setLevel now async; emits only on HTTP 200
+- **v0.1.0:** 3 critical fixes (AQ&U dead-code check, LRAPA/Woodsmoke case mismatch, failCount precedence for backoff)
+- **v0.2.0:** 5 Trinity + full alignment (emitIfChanged, descriptionText, quota warning, UUID for HPM, lastActivity healthcheck, namespace alignment, logsOff auto-disable, PM2.5 null guards, README rebuild)
 
-### Honeywell T6 Pro v0.1.0 (3 critical fixes) [djdizzyd fork]
-- Added missing `txtEnable` preference (had been permanently false, breaking all info logs)
-- Fixed `device.currentValue=="cooling"` → `device.currentValue("thermostatOperatingState")=="cooling"` in 2 locations (method reference never equals string; broke fan-state logic)
-- Added `unschedule("syncClock")` to configure() (prevented scheduler zombie accumulation)
-- Namespace: `djdizzyd` → `mads`
+### Honeywell T6 Pro v0.1.0–v0.5.0 Summary + v0.4.0 LIVE
 
-### Honeywell T6 Pro v0.3.0 (3 Cypher survey picks)
-- Emit `thermostatFanState` attribute (data already parsed, never exposed)
-- Battery-low notification (events 10/11 of type-8; was silently discarded)
-- Fixed octal: `043:2` → `0x43:2` in CMD_CLASS_VERS (was reading 0x23 Scene Controller instead of 0x43 Thermostat Setpoint)
-- Full namespace/author alignment; `Initialize` capability + lifecycle hooks; README restructure to repo template
-
-### Honeywell T6 Pro v0.5.0 (syncClock UX)
-- Replaced `runEvery3Hours("syncClock")` with `schedule("0 0 4 * * ?", "syncClock")` in `configure()`, `updated()`, and `initialize()` — 24× fewer Z-Wave frames
-- Removed `command "syncClock"` declaration — dead UI button since auto-sync already handles all cases
-- `void syncClock()` method body preserved; still called by `schedule()` and by `runIn(10,"syncClock")` in `configure()`
-- Post-update timing subtlety: if user runs `updated()` at 4:30am, next sync is 23.5h later — "Configure" button is the documented escape hatch for immediate sync
-
-### Honeywell T6 Pro v0.4.0 (3 additive Cypher picks) ✅ SHIPPED LIVE
-- descriptionText on 3 event handlers (thermostatOperatingState, thermostatFanMode, thermostatMode)
-- thermostatFanState type "string" → "enum" with 8 values
-- Notification type 9 handler added (else if branch for System events; handles idle/hw-failure/sw-failure with log.warn)
-- Running live on Mads's Downstairs thermostat
-
-### PurpleAir v0.2.0 (5 Trinity deferred items + full alignment)
-- emitIfChanged on 4 sendEvent calls (removes ~35,040 duplicate events/year)
-- sites descriptionText with proper formatting
-- Quota warning in polling preference
-- UUID generation for HPM packageManifest
-- lastActivity + touchActivity (Pattern B healthcheck)
-- Namespace/author: `pfmiller0` → `mads`; attribution preserved
-- logsOff auto-disable (logEnable bool)
-- Null guards on PM2.5 float parses
-- README rebuilt to repo template (What It Is / Capabilities / HPM / Architecture / Fixes / Attribution)
+- **v0.1.0:** 3 critical fixes (txtEnable, device.currentValue fix, unschedule syncClock, namespace alignment)
+- **v0.3.0:** 3 Cypher survey picks (thermostatFanState emit, battery-low notification, octal/hex fix 043→0x43)
+- **v0.5.0:** syncClock UX optimization (24× fewer Z-Wave frames)
+- **v0.4.0:** 3 additive Cypher picks ✅ SHIPPED LIVE (descriptionText, thermostatFanState enum, notification type 9)
 
 **Key learnings:**
-- Fork-cleanup pattern: preserve copyright verbatim, add attribution block, apply audited fixes only with FIX comments citing severity, use Daikin/SunStat templates for packageManifest.json and README
+- Fork-cleanup pattern: preserve copyright verbatim, add attribution block, apply audited fixes only with FIX comments citing severity, use Daikin/SunStat templates
 - Groovy numeric literals: `043` is **octal** (= 0x23), not `0x43` — always use `0x` prefix for hex
 - Z-Wave device config: fingerprint `inClusters` is authoritative; CMD_CLASS_VERS can have author assumptions — cross-check both sources
-- UX pattern: emitIfChanged + descriptionText + lastActivity (Pattern B for cloud, Pattern A for LAN ping) is the canonical hygiene standard across the repo
+- UX pattern: emitIfChanged + descriptionText + lastActivity (Pattern B for cloud, Pattern A for LAN ping) is the canonical hygiene standard
+- **Scope discipline pattern (Tank-13–16):** Explicit 3-paragraph warnings work; 100% compliance when scope violations are named and emphasized
 
+---
 
-## 2026-05-18 — Fully Kiosk v0.3.0 shipped (7 Cypher picks)
+## 2026-05-18 — Fully Kiosk MQTT Architecture (v0.4.0)
 
-Closed the HA integration gap with all 7 Cypher-ranked v0.3.0 picks in a single additive pass. Pick #1 (brightness BUG FIX): `setLevel()` now converts 0–100 → `Math.round(level.toBigDecimal() * 2.55).toInteger()` clamped 0–255 before sending to FKB, and `refreshCallback()` reads back raw 0–255 and divides by 2.55 to emit the correct 0–100 SwitchLevel value — both with null guards. Pick #2: added 6 emitIfChanged attributes in refreshCallback from the existing deviceInfo payload — zero extra HTTP calls: `charging` (from `plugged`), `screensaverActive` (from `isInScreensaver`), `batteryTemperature` (null-guarded), `foregroundApp` (null-guarded), `screenOrientation` (mapped 0/1 → "portrait"/"landscape"), `kioskMode`. Pick #3: added `capability "Notification"` + `void deviceNotification(String)` + `setOverlayMessage(String)` both routing to `cmd=setOverlayMessage` with URL-encoded text. Pick #4: 8 utility commands (toBackground, clearCache, forceSleep, exitApp, lockKiosk, unlockKiosk, enableLockedMode, disableLockedMode) — all thin `sendCommandPost` one-liners. Pick #5: `playVideo(url)` and `stopVideo()`. Pick #6: `enableMotionDetection()` / `disableMotionDetection()` delegate to the existing `setBooleanSetting("motionDetection", true/false)`. Pick #7: all 4 `sendEvent([name:"checkInterval"...])` sites replaced with `emitIfChanged()` — value is always 120 so only the first emit per session fires. One discrepancy vs Cypher's spec: Cypher listed `motionDetectionEnabled` as a Pick #2 candidate but that field requires `listSettings` (not in `deviceInfo`), so `kioskMode` from `deviceInfo.kioskMode` was substituted as the 6th attribute (matching Cypher's own verdict table). Net LOC delta +85 (Cypher estimated ~116–136; difference because command stubs are 3 lines each and checkInterval fix was net-neutral).
+Added ~195 LOC of MQTT support as an additive, preference-gated layer:
 
+- **Opt-in gate:** all MQTT logic gated on `settings.mqttBroker?.trim()` in `initialize()`; empty = exact v0.3.0 behavior
+- **parse() routing:** `description?.startsWith("mqtt")` routes to `parseMqttMessage()` before LAN path
+- **Lifecycle:** mqttConnect() on initialize, mqttDisconnect() on updated/uninstalled
+- **LWT topic:** `{prefix}/hubitat/state` with "offline" (retained, QoS 1) on disconnect, "online" on connect-success
+- **Poll cadence:** `runEvery5Minutes()` when MQTT configured; 1-min fallback on disconnect
+- **Reconnect:** exponential backoff (10→20→40→80→160→300s) with reset on success
+- **MQTT-pushed:** switch, motion, charging, battery, foregroundApp via handleFkEvent(); all v0.3.0 attributes additionally via handleFkDeviceInfo()
+- **Poll-only fallback:** level, currentPageUrl, screensaverActive, batteryTemperature, screenOrientation, kioskMode from deviceInfo
+- **FK deviceID caveat:** subscribed to `{prefix}/#` wildcard to avoid hardcoding deviceID format
+- **Password masking:** broker URL masked in logs before output
+- **New skill:** extracted reusable pattern to `.squad/skills/hubitat-mqtt-subscriber-driver/SKILL.md`
 
-## 2026-05-18 — Fully Kiosk v0.4.2 shipped (clearOverlayMessage)
+---
 
-Added `clearOverlayMessage()` command — the missing dismiss companion to `setOverlayMessage(text)` / `deviceNotification(text)`.
-- **Command declaration** at line 95 (directly below `setOverlayMessage` in metadata block)
-- **Method body** at lines 679–682 (directly below `setOverlayMessage(String text)` method)
-- API pattern: calls `cmd=setOverlayMessage&text=` (empty text = clear; FKB documented behavior)
-- No parameters; logger trace prefix matches sibling commands
-- v0.4.2 bumped in 4 places: driver header, `@Field VERSION`, `packageManifest.json` (top-level + drivers[0]), README changelog
-- Scope discipline: ONLY `drivers/fully-kiosk/fully-kiosk.groovy`, `drivers/fully-kiosk/packageManifest.json`, `drivers/fully-kiosk/README.md`, and this history file. No T6, no PurpleAir, no other files.
+## 2026-05-19 — Post-Ship Housekeeping (Scribe-14)
 
+**Tank-17 minor bug detected & fixed:** Tank-17's history entry was written to `tank/history.md` at repo root instead of canonical `.squad/agents/tank/history.md` (likely CWD-relative path bug in Tank's MultiEdit tool under certain conditions). Scribe relocated the entry with separator, deleted stray directory, and updated decisions.md with v0.4.5 shipment note.
 
+---
 
+## Archive: Tank-17, Tank-16, Tank-15 Detailed Spawns (2026-05-18)
 
-Applied 3 bugs reported from Mads's live tablet test:
-- **Fix #1 — beep() NPE guard (line 361-368):** Added `if (!toneFile?.trim())` check with `log.warn` and early return before the URLEncoder.encode call. Confirmed preference name is `toneFile` (input at line 116, `name:"toneFile"`).
-- **Fix #2 — 408/5xx demote to warn (lines 352-359, 570-577, 709-716, 744-751):** Patched all 4 `Invalid response` sites in `setLevelCallback`, `refreshCallback`, `updateDeviceDataCallback`, `sendCommandCallback`. Pattern: cast `response?.status as Integer`, then 408 and 5xx→warn, all other non-200→error. `logger()` function confirmed accepts "warn" (line ~990).
-- **Fix #3 — Remove setScreenBrightness (BREAKING):** Deleted `command "setScreenBrightness", ["Number"]` declaration from metadata block; deleted `def setScreenBrightness(value)` method body (3 lines). README 0.3.0 entry updated to remove "still accepts raw 0–255 for expert use" sentence. v0.4.1 README entry added with prominent ⚠️ BREAKING callout.
-- **Scope discipline:** ONLY modified `drivers/fully-kiosk/fully-kiosk.groovy`, `drivers/fully-kiosk/packageManifest.json`, `drivers/fully-kiosk/README.md`, and this history file. No T6, no PurpleAir, no other files touched.
+### Tank-17: v0.4.5 mqtt.connect() signature fix
 
+**Issue:** Mads reported live MQTT connection failure: `No signature of method: hubitat.helper.interfaces.Mqtt.connect() is applicable for argument types: (java.lang.String, GStringImpl, null, null, java.util.LinkedHashMap)`
 
+**Root cause:** v0.4.0 called 5-arg form `interfaces.mqtt.connect(brokerUrl, clientId, username, password, optionsMap)` with Map for LWT; Hubitat does not support this.
 
+**Fix:** Switched to 8-arg documented form: `interfaces.mqtt.connect(brokerUrl, clientId, username, password, lwtTopic, lwtQos, lwtRetained, lwtPayload)` with explicit LWT parameters. Behavior fully preserved.
 
-Added ~195 LOC of MQTT support as an additive, preference-gated layer. Architecture decisions:
+**Scope:** fully-kiosk v0.4.5 (all 3 files: driver, manifest, README)
 
-- **Opt-in gate:** all MQTT logic is gated on `settings.mqttBroker?.trim()` in `initialize()`. Empty preference = exact v0.3.0 behavior, zero regression risk.
-- **parse() routing:** MQTT description strings start with `"mqtt"` in Hubitat; LAN HTTP push strings do not. Added a `description?.startsWith("mqtt")` check at the top of `parse()` to route to `parseMqttMessage()` before the existing LAN path.
-- **Lifecycle:** `mqttConnect()` in `initialize()` when broker is set; `mqttDisconnect()` in `updated()` (before re-init) and `uninstalled()` (new method added). Disconnect-before-reconnect pattern ensures broker URL/credential changes take effect.
-- **LWT topic:** `{prefix}/hubitat/state` with `"offline"` (retained, QoS 1). `"online"` published on successful connect.
-- **Poll cadence:** `runEvery5Minutes("refresh")` when MQTT broker is configured (scheduled optimistically in `initialize()`); `mqttClientStatus()` confirms 5-min on connect, falls back to 1-min on disconnect.
-- **Reconnect:** exponential backoff via `state.mqttRetryDelay`: 10 → 20 → 40 → 80 → 160 → 300 (capped). Reset on successful connect.
-- **MQTT-pushed attributes:** `switch` (screenOn/screenOff), `motion` (motionDetected), `charging` (pluggedAC/unpluggedAC), `battery` (batteryLevel), `foregroundApp` — via `handleFkEvent()`. ALL v0.3.0 attributes additionally via `handleFkDeviceInfo()` from `{prefix}/deviceInfo/{deviceID}` payloads.
-- **Poll-only fallback:** `level` (brightness), `currentPageUrl`, `screensaverActive`, `batteryTemperature`, `screenOrientation`, `kioskMode` also covered by `handleFkDeviceInfo()` from MQTT — no attributes are polling-only when MQTT is connected and FKB publishes `deviceInfo`.
-- **FK deviceID caveat:** FKB's MQTT topic includes its own `deviceID` segment which may differ from Hubitat's MAC-based `deviceNetworkId`. Subscribed to `{prefix}/#` (wildcard) to avoid hardcoding the deviceID format. Documented: use a unique `mqttTopicPrefix` per tablet (e.g. `fully-bathroom`) when multiple tablets share the same broker.
-- **Password masking:** broker URL masked via `replaceAll(/:\/\/[^:@\/]+:)[^@\/]+(@)/, '$1***$2')` before logging.
-- **New skill:** extracted reusable pattern to `.squad/skills/hubitat-mqtt-subscriber-driver/SKILL.md`.
-- **Scope discipline:** ONLY modified `drivers/fully-kiosk/fully-kiosk.groovy`, `drivers/fully-kiosk/packageManifest.json`, `drivers/fully-kiosk/README.md`, and this history file. No T6, no PurpleAir, no other files touched. If I ever find myself reading or considering edits to files outside `drivers/fully-kiosk/`, I will stop and re-read the scope warning.
+### Tank-16: v0.4.4 defensive leading-slash handling
+
+**Issue:** FKB MQTT topics may have leading slash (FKB docs show `/fully/event/...` and `/fully/deviceInfo/...`); MQTT treats `/fully/` and `fully/` as separate address spaces.
+
+**Fix:** Added second `interfaces.mqtt.subscribe("/${prefix}/#", 0)` subscribe call + leading-slash strip in parser: `if (topic.startsWith("/")) { topic = topic.substring(1) }`. Result: robust to either FKB convention.
+
+**Scope:** fully-kiosk v0.4.4 (all 3 files)
+
+### Tank-15: v0.4.3 MQTT event-name mismatches
+
+**Issue:** Cypher's reality check found 4 event-name mismatches in `handleFkEvent()`:
+- driver listening for `"motionDetected"` → FKB publishes `"onMotion"`
+- driver listening for `"unpluggedAC"` → FKB publishes `"unplugged"`
+- driver listening for `"batteryLevel"` → FKB publishes `"onBatteryLevelChanged"`
+- driver listening for `"foregroundApp"` → FKB does not publish as event (attribute from deviceInfo only)
+
+**Fix:** Renamed case statements + removed dead `foregroundApp` case. Cypher confirmed `"pluggedAC"` is correct; no rename needed.
+
+**Scope:** fully-kiosk v0.4.3 (all 3 files)
 
 

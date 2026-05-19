@@ -4,6 +4,20 @@ Generated 2026-05-18T17:59:14Z
 
 ---
 
+## 2026-05-18 — Fully Kiosk v0.4.5 shipped (mqtt.connect signature fix)
+
+**Commit:** 47ba616 — `fully-kiosk v0.4.5: BUG fix invalid interfaces.mqtt.connect() signature`
+
+v0.4.0's mqttConnect() passed `interfaces.mqtt.connect(broker, clientId, user, pass, lwtMap)` — a 5-arg form with a Map for LWT options. Hubitat rejects this:
+
+> `No signature of method: hubitat.helper.interfaces.Mqtt.connect() is applicable for argument types: (java.lang.String, GStringImpl, null, null, LinkedHashMap)`
+
+Switched to Hubitat's documented 8-arg form: `interfaces.mqtt.connect(broker, clientId, user, pass, lwtTopic, lwtQos, lwtRetained, lwtPayload)`. LWT design preserved — `{prefix}/hubitat/state` publishes `offline` (retained QoS 1) on disconnect, `online` on connect-success in mqttClientStatus.
+
+**Tank-17 minor bug:** wrote its history entry to `tank/history.md` at repo root instead of `.squad/agents/tank/history.md`. Coordinator caught this, Scribe relocated. Tank's MultiEdit/Create tool may be using CWD-relative paths instead of TEAM_ROOT-anchored paths under some conditions. Future spawn prompts should reinforce: history.md path is ALWAYS `.squad/agents/{name}/history.md` regardless of CWD.
+
+---
+
 ## 2026-05-18 — Fully Kiosk MQTT Reality Check (Cypher follow-up)
 
 ---
