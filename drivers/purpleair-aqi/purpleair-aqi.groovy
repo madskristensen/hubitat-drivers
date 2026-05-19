@@ -1,17 +1,28 @@
 /**
- *  PurpleAir AQI Virtual Sensor (Hubitat) — Local-test fork
+ *  PurpleAir AQI Virtual Sensor
+ *  Author:  Mads Kristensen
+ *  Version: 0.2.0 — 2026-05-18
+ *  License: MIT
  *
- *  Fork by: Mads Kristensen — 2026-05-18
- *  Source: github.com/pfmiller0/Hubitat/blob/main/PurpleAir%20AQI%20Virtual%20Sensor.groovy
- *  Forked TEMPORARILY because: 3 bugs in conversion + retry logic discovered by
- *                              Trinity audit (AQ&U string mismatch, LRAPA/Woodsmoke
- *                              case-sensitivity + wrong PM2.5 field, failCount
- *                              operator-precedence breaking exponential backoff).
- *  Goal: TEST FIXES LOCALLY, then submit as PR back to pfmiller0/Hubitat.
- *        This fork should NOT outlive upstream PR acceptance — delete from this
- *        repo and switch back to upstream once merged.
+ *  Reads AQI data from the PurpleAir cloud API (api.purpleair.com/v1/sensors).
+ *  Supports geolocation-based multi-sensor averaging or a specific sensor index.
+ *  Implements US EPA Barkjohn 2021 AQI correction for wildfire smoke, plus
+ *  Woodsmoke, AQ&U, LRAPA, and CF=1 correction algorithms.
  *
- *  Version: 0.1.0 — 2026-05-18 — Initial test fork; apply Trinity audit fixes
+ *  Source: github.com/pfmiller0/Hubitat — forked from v1.3.2 by Peter Miller
+ *  (pfmiller0). Original upstream code is preserved below with its copyright.
+ *  This fork applies bug fixes and Hubitat best-practice improvements; it is a
+ *  permanent driver in this repo, not a staging area.
+ *
+ *  Changelog:
+ *    0.2.0 — 2026-05-18 — namespace → mads; emitIfChanged on all poll events
+ *      (eliminates ~35,040 duplicate events/year at 1-hr default cadence);
+ *      descriptionText on sites event uses device.displayName; 1-min interval
+ *      quota warning added; UUID in packageManifest; fix IQAir→PurpleAir log
+ *      prefix; logsOff auto-disable after 30 min; lastActivity (Pattern B);
+ *      sentinel .isNumber() guards on pm2.5 field before .toFloat() parse
+ *    0.1.0 — 2026-05-18 — Initial fork; Trinity audit fixes: AQ&U string
+ *      mismatch, LRAPA/Woodsmoke case + wrong PM2.5 field, failCount precedence
  *
  *  [original pfmiller0 copyright block preserved verbatim below]
  */
@@ -25,14 +36,14 @@
 
 import groovy.transform.Field
 
-@Field final static String VERSION = "1.3.2"
+@Field static final String DRIVER_VERSION = "0.2.0"
 
 metadata {
 	definition (
 		name: "PurpleAir AQI Virtual Sensor",
-		namespace: "hyposphere.net",
-		author: "Peter Miller",
-		importUrl: "https://raw.githubusercontent.com/pfmiller0/Hubitat/main/PurpleAir%20AQI%20Virtual%20Sensor.groovy"
+		namespace: "mads",
+		author: "Mads Kristensen",
+		importUrl: "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/purpleair-aqi.groovy"
 	)
 	{
 		capability "Sensor"
@@ -43,13 +54,14 @@ metadata {
 		attribute "conversion", "string" // Conversion algorithm
 		attribute "category", "string" // Description of current air quality
 		attribute "sites", "string" // List of sensor sites used
+		attribute "lastActivity", "string"
 
 		command "refresh"
 	}
 
 	preferences {
 		input "X_API_Key", "text", title: "PurpleAir API key", required: true, description: "Contact contact@purpleair.com to request an API key"
-		input "update_interval", "enum", title: "Update interval", required: true, options: [["1": "1 min"], ["5": "5 min"], ["10": "10 min"], ["15": "15 min"], ["30": "30 min"], ["60": "1 hr"], ["180": "3 hr"], ["0": "disabled"]], defaultValue: "60"
+		input "update_interval", "enum", title: "Update interval", required: true, options: [["1": "1 min"], ["5": "5 min"], ["10": "10 min"], ["15": "15 min"], ["30": "30 min"], ["60": "1 hr"], ["180": "3 hr"], ["0": "disabled"]], defaultValue: "60", description: "⚠️ The '1 min' option generates ~43,800 API requests/month per sensor — close to the free tier's 1M-points/month limit if multiple sensors are queried. Use 60 min (default) for normal operation."
 		input "conversion", "enum", title: "Apply conversion", required: false, description: "See map.purpleair.com for details", options: [["US EPA": "US EPA"], ["Woodsmoke": "Woodsmoke"], ["AQ&U": "AQ&U"], ["CF=1": "CF=1"], ["LRAPA": "LRAPA"]]
 		if (! conversion) {
 			input "avg_period", "enum", title: "Averaging period", required: true, description: "Readings averaged over what time", options: [["pm2.5": "1 min"], ["pm2.5_10minute": "10 mins"], ["pm2.5_30minute": "30 mins"], ["pm2.5_60minute": "1 hour"], ["pm2.5_6hour": "6 hours"], ["pm2.5_24hour": "1 day"], ["pm2.5_1week": "1 week"]], defaultValue: "pm2.5_60minute"
@@ -68,13 +80,13 @@ metadata {
 			input "Read_Key", "text", title: "Private key", required: false, description: "Required to access private devices"
 			input "sensor_index", "number", title: "Sensor index", required: true, description: "Select=INDEX in URL when viewing a sensor on map.purpleair.com", defaultValue: 82101
 		}
-		input "debugMode", "bool", title: "Debug logging", required: true, defaultValue: false
+		input "logEnable", "bool", title: "Enable debug logging (auto-off after 30 minutes)", defaultValue: false
 	}
 }
 
 // Parse events into attributes. Required for device drivers but not used
 def parse(String description) {
-	log.debug("IQAir: Parsing '${description}'")
+	if (logEnable) log.debug("PurpleAir: Parsing '${description}'")
 }
 
 def installed() {
@@ -126,6 +138,9 @@ def initialize() {
 }
 
 def updated() {
+	if (logEnable) {
+		runIn(1800, "logsOff")
+	}
 	configure()
 }
 
@@ -253,7 +268,7 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 		// Filter out lower quality devices
 		//sensorData = resp.getJson().data.findAll {it[RESPONSE_FIELDS["confidence"]] >= (confidenceThreshold as Integer) }
 		sensorData = resp.getJson().data.findAll {it[RESPONSE_FIELDS["confidence"]] >= 90}
-		if ( debugMode ) {
+		if ( logEnable ) {
 			List confidence = sensorData.collect {['name': it[RESPONSE_FIELDS['name']], 'confidence': it[RESPONSE_FIELDS['confidence']].toInteger()]}
 			List dropped = confidence.findAll {it["confidence"] < 90}
 			//List dropped = resp.getJson().data.findAll {it[RESPONSE_FIELDS["confidence"]] < 90}
@@ -300,15 +315,17 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 		if (weighted_avg) {
 			sensor_coords = [it[RESPONSE_FIELDS['latitude']].toFloat(), it[RESPONSE_FIELDS['longitude']].toFloat()]
 		}
-		pm25_conv = apply_conversion(conversion?:"none", it[RESPONSE_FIELDS[data.pm25_count]].toFloat(), this_humidity)
-		
-		//log.debug("${it[RESPONSE_FIELDS['name']]} ${it[RESPONSE_FIELDS[data.pm25_count]]}")
-		if (! it[RESPONSE_FIELDS[data.pm25_count]]) {
-			log.error("${it[RESPONSE_FIELDS['name']]} has no pm25 data")
+		// Sentinel guard: PurpleAir may return null/non-numeric pm2.5 fields for faulted sensors
+		String rawPm25 = it[RESPONSE_FIELDS[data.pm25_count]]?.toString()
+		//logDebug "${it[RESPONSE_FIELDS['name']]} raw pm25: ${rawPm25}"
+		if (!rawPm25?.isNumber()) {
+			log.error("${it[RESPONSE_FIELDS['name']]} has no valid pm25 data (value: ${rawPm25})")
 		} else {
+			Float pm25Value = rawPm25 as Float
+			pm25_conv = apply_conversion(conversion?:"none", pm25Value, this_humidity)
 			sensors << [
 				'site': it[RESPONSE_FIELDS['name']],
-				'pm25': it[RESPONSE_FIELDS[data.pm25_count]].toFloat(),
+				'pm25': pm25Value,
 				'pm25_conv': pm25_conv,
 				'confidence': it[RESPONSE_FIELDS['confidence']].toInteger(),
 				'distance': distance(data.coords, sensor_coords),
@@ -318,7 +335,7 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 			]
 		}
 	}
-	if ( debugMode ) {
+	if ( logEnable ) {
 		log.debug "coords: ${data.coords}"
 		log.debug "site: ${sensors.collect { it['site'] }}"
 		log.debug "particle ct query: ${data.pm25_count}"
@@ -359,19 +376,18 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 		log.error "No sensors found in search area"
 	} else {
 		if (sensors.size() == 1) {
-			sendEvent(name: "sites", value: sites, descriptionText: "AQI reported from site ${sites}")
+			emitIfChanged("sites", sites, "${device.displayName} sites is ${sites}")
 		} else {
-			sendEvent(name: "sites", value: sites, descriptionText: "AQI is averaged from ${sensors.size()} sites ${sites}")
+			emitIfChanged("sites", sites, "${device.displayName} sites averaged from ${sensors.size()} sites: ${sites}")
 		}
-		sendEvent(name: "category", value: AQIcategory, descriptionText: "${device.displayName} category is ${AQIcategory}")
+		emitIfChanged("category", AQIcategory, "${device.displayName} category is ${AQIcategory}")
 		if (conversion) {
-			sendEvent(name: "conversion", value: conversion, descriptionText: "PM 2.5 AQI conversion algorithm is ${conversion}")
-			//sendEvent(name: "aqi", value: aqi2_5Value, unit: "PM 2.5 AQI (${conversion})", descriptionText: "${device.displayName} AQI level is ${aqi2_5Value}")
-			sendEvent(name: "aqi", value: aqi2_5Value, unit: "PM 2.5 AQI (${conversion})", descriptionText: "${AQIcategory}")
+			emitIfChanged("conversion", conversion, "${device.displayName} conversion is ${conversion}")
+			emitIfChanged("aqi", aqi2_5Value, "${device.displayName} AQI is ${aqi2_5Value}", "PM 2.5 AQI (${conversion})")
 		} else {
-			//sendEvent(name: "aqi", value: aqi2_5Value, unit: "PM 2.5 AQI", descriptionText: "${device.displayName} AQI level is ${aqi2_5Value}")
-			sendEvent(name: "aqi", value: aqi2_5Value, unit: "PM 2.5 AQI", descriptionText: "${AQIcategory}")
+			emitIfChanged("aqi", aqi2_5Value, "${device.displayName} AQI is ${aqi2_5Value}", "PM 2.5 AQI")
 		}
+		touchActivity()
 	}
 }
 
@@ -637,5 +653,31 @@ Float[] distance2degrees(Float latitude) {
 }
 
 void logDebug(String s) {
-	if ( debugMode ) log.debug s
+	if (logEnable) log.debug s
+}
+
+private void emitIfChanged(String name, value, String descTxt, String unit = null) {
+	def current = device.currentValue(name)
+	boolean changed
+	if (current instanceof Number || value instanceof Number) {
+		try { changed = (current as BigDecimal) != (value as BigDecimal) }
+		catch (Exception e) { changed = current?.toString() != value?.toString() }
+	} else {
+		changed = current?.toString() != value?.toString()
+	}
+	if (!changed) return
+	Map evt = [name: name, value: value, descriptionText: descTxt]
+	if (unit) evt.unit = unit
+	sendEvent(evt)
+}
+
+private void touchActivity() {
+	sendEvent(name: "lastActivity",
+	          value: new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX"),
+	          descriptionText: "${device.displayName} last activity")
+}
+
+void logsOff() {
+	log.info "PurpleAir AQI: debug logging disabled"
+	device.updateSetting("logEnable", [value: false, type: "bool"])
 }

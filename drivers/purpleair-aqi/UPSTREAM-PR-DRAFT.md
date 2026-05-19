@@ -1,8 +1,10 @@
 # UPSTREAM PR DRAFT
 
-> **For Mads:** Copy the title and body below into the GitHub PR at
+> **STATUS: De-prioritized.** v0.2.0 forked Mads's namespace and applied broader improvements (emitIfChanged, lastActivity, sentinel guards, logsOff, descriptionText hygiene, UUID in manifest); the original 3-bug fixes remain cherry-pickable as a minimal upstream PR but are no longer the design goal. See directive 2026-05-18T17:31 in `.squad/decisions/inbox/`.
+
+> **For Mads:** If you ever want to submit the 3-bug minimal PR to pfmiller0, copy the title and body below into the GitHub PR at
 > https://github.com/pfmiller0/Hubitat/compare
-> Fill in the `[bracket]` placeholders with your actual test data, then delete this file.
+> Fill in the `[bracket]` placeholders with your actual test data. The v0.2.0 improvements are NOT part of this PR — cherry-pick only the 3 original fixes.
 
 ---
 
