@@ -87,6 +87,36 @@ Trinity's 3 code-quality audits have all shipped as Tank forks:
 
 ---
 
+## 2026-05-18T17:51:43-07:00 — Honeywell T6 Pro Z-Wave Feature-Gap Survey
+
+**Task:** Survey full Z-Wave capability surface of TH6320ZW2003; identify gaps vs. v0.2.0 driver; rank for v0.3.0.
+
+**Model confirmed:** TH6320ZW2003, mfr:0039 prod:0011 deviceId:0008 (from driver fingerprint). Z-Wave Alliance product ID 2893. Later SKU is TH6320ZW2007 (SmartStart added).
+
+**CCs surveyed:** 20 CCs in fingerprint inClusters + 5 in CMD_CLASS_VERS. Total unique: ~22. **Config params surveyed:** 42 (ZW2003) + 3 additional (ZW2007 only, params 43–45).
+
+**Top-3 v0.3.0 picks:**
+1. **Emit `thermostatFanState` attribute** — data already parsed, never emitted. 10 lines. Free (no new polling).
+2. **Battery-low notification** — events 10/11 of type-8 Notification silently `break`. Safety gap for battery-powered units.
+3. **Fix `CMD_CLASS_VERS` octal bug** — `043:2` is Groovy octal (= 0x23), not 0x43 (Thermostat Setpoint). 1-char fix.
+
+**Ruled out (confidently):**
+- Schedule CC: not in device CC list; device has no Z-Wave schedule programming.
+- Keypad lock: no Indicator CC on ZW2003.
+- Outdoor temp via Z-Wave: param 3 enables wired sensor, display-only, NOT reported to controller.
+- Vacation hold CC: no separate hold CC; setpoint-based hold already works.
+
+**Protocol learnings:**
+- Z-Wave product portals (z-wavealliance.org) are inaccessible. Go directly to OpenZWave XML repos (domoticz/domoticz Config/, OpenZWave upstream) and OpenHAB ZWave binding DB for device config data.
+- For Z-Wave thermostats: device fingerprint `inClusters` is the authoritative CC list. CMD_CLASS_VERS can contain extra CCs from author assumptions — cross-check against fingerprint.
+- ThermostatFanState CC v1 (0x45): values include "running high" (stage 2) and "running medium" — useful for 2-stage HVAC monitoring. Not the same as ThermostatFanMode.
+- Groovy numeric literals: `043` is **octal** (= decimal 35 = 0x23), NOT 0x43. Always use `0x` prefix for hex in Groovy/Hubitat driver maps.
+
+**Deliverable:** `.squad/decisions/inbox/cypher-honeywell-t6-zwave-survey.md`  
+**Skill filed:** `.squad/skills/zwave-thermostat-audit-checklist/SKILL.md`
+
+---
+
 ## 2026-05-18T17:50:00Z — PurpleAir v0.2.0 Polish — PR-Bound Constraint Dropped
 
 **Directive update (2026-05-18T17:31):** Mads's "quality-first" priority supersedes the earlier PR-bound staging constraint. PurpleAir fork v0.2.0 has been polished with the full deferred-improvement backlog and Mads namespace ownership (commit 4b720aa). 

@@ -4058,3 +4058,354 @@ applied throughout.
    feasible after polish — but never compromise quality for PR-friendliness.
 
 **Scope:** All three forks — Honeywell, Fully Kiosk, PurpleAir.
+
+---
+
+## 2026-05-18 — Honeywell T6 Pro Z-Wave Feature-Gap Survey
+*[Source: .squad/decisions/inbox/cypher-honeywell-t6-zwave-survey.md]*
+
+# Cypher — Honeywell T6 Pro Z-Wave Feature-Gap Survey
+**Prepared by:** Cypher (Integration / Protocol Engineer)  
+**Date:** 2026-05-18T17:51:43-07:00  
+**Target:** v0.3.0 planning for `drivers/honeywell-t6-pro/honeywell-t6-pro.groovy`  
+**Current driver:** v0.2.0, commit ac5b939  
+**Requestor:** Mads Kristensen
+
+---
+
+## ⚡ Top-3 v0.3.0 Picks (don't bury the lede)
+
+| Rank | Feature | Effort | Why |
+|------|---------|--------|-----|
+| **#1** | Emit `thermostatFanState` attribute | ~10 lines | CC already parsed, value never surfaced. Gives 2-stage HVAC visibility for RM rules. Zero new Z-Wave traffic. |
+| **#2** | Handle battery-low notification events | ~8 lines | Events 10/11 of Power Management notification (type 8) silently `break`. Replace-battery warnings are swallowed. Safety gap, 0 new polling. |
+| **#3** | Fix `CMD_CLASS_VERS` octal bug (`043` → `0x43`) | 1 char | Thermostat Setpoint CC is registered at version for decimal-35 (0x23 = Scene Controller Config) not 0x43. Hubitat parses Setpoint Reports at v1 default. Low risk in practice but wrong. |
+
+---
+
+## 1. Model Identity + Z-Wave Cert Reference
+
+| Field | Value |
+|-------|-------|
+| **Commercial name** | Honeywell T6 Pro Z-Wave Programmable Thermostat |
+| **Model number** | TH6320ZW2003 (US/Canada/Mexico) |
+| **Fingerprint confirmed in driver** | `mfr:"0039", prod:"0011", deviceId:"0008"` — matches Z-Wave Alliance DB exactly |
+| **Z-Wave Alliance product ID** | 2893 |
+| **Z-Wave Alliance product page URL** | https://products.z-wavealliance.org/products/2893/ *(direct access: 404 — site down; confirmed via OpenZWave XML metadata that embeds this URL)* |
+| **Z-Wave cert** | Z-Wave Plus certified |
+| **Power** | 3×AA battery **or** 24VAC (C-wire); driver detects both via PowerSource capability |
+| **Later SKU** | TH6320ZW2007 — adds SmartStart (S2), Indicator CC v3, Multi Channel Association v3, and params 43–45 |
+
+**Source quality note:** The Z-Wave Alliance portal (`products.z-wavealliance.org`) was inaccessible at retrieval time (404). All CC data is sourced from:  
+1. Driver fingerprint `inClusters` (primary, directly from device)  
+2. OpenZWave XML file in domoticz/domoticz repo (identical to OZW upstream, revision 4, last updated 2020-09-09) — cites Z-Wave Alliance product 2893  
+3. OpenHAB ZWave binding DB doc for TH6320ZW2007 (newer SKU; overlapping CC list cross-validated)  
+
+Official Honeywell/Resideo installer guide URL found: `https://Products.Z-WaveAlliance.org/ProductManual/File?folder=&filename=Manuals/2893/33-00414-01-min.pdf` — also inaccessible (mirrors Z-Wave Alliance domain). A newer guide URL is available at OpenSmarthouse: `https://opensmarthouse.org/zwavedatabase/1527/reference/33-00587EFS-07_-_T6_PRO_Z-Wave_Thermostat.pdf` (covers both TH6320ZW2003 and TH6320ZW2007; retrieval not attempted as PDF).
+
+---
+
+## 2. Full Command Class List
+
+Hex codes from driver fingerprint `inClusters` string. Version from `CMD_CLASS_VERS` map in driver where present; otherwise from OpenZWave/OpenHAB cross-reference.
+
+| CC Hex | CC Name | Version | Used in Driver? | Gap / Note |
+|--------|---------|---------|-----------------|------------|
+| 0x5E | Z-Wave Plus Info | v2 | ✅ Registered | Lifeline advertising. Hub uses. No driver action needed. |
+| 0x85 | Association | v2 | ✅ Registered + handler | Group 1 set to hub node in `setDefaultAssociation()`. Correct. |
+| 0x86 | Version | v2 | ✅ Registered + handler | `VersionReport` → `firmwareVersion`/`protocolVersion` state data. |
+| 0x59 | Association Group Info | v1 | ✅ Registered | No explicit handler; hub reads group names. Acceptable. |
+| 0x31 | Sensor Multilevel | v5 | ✅ Registered v5, handler present | Types 1 (air temp) and 5 (humidity) decoded. See Gap §3 for outdoor temp type. |
+| 0x80 | Battery | v1 | ✅ Registered + handler | `BatteryReport` → `battery` attribute. Low-battery (0xFF) → 1%. |
+| 0x81 | Clock | v1 | ✅ Registered + `syncClock()` | `clockSet` every 3 hours. Already sound. |
+| 0x70 | Configuration | v1 | ✅ Registered + full configParams map | All 42 params exposed in preferences. **See §3 for param detail.** |
+| 0x5A | Device Reset Locally | v1 | ✅ Registered | Hub auto-handles reset notification. No driver action needed. |
+| 0x72 | Manufacturer Specific | v1 (driver) / v2 (cert) | ✅ v2 handler | `DeviceSpecificReport` reads serial number. Registered at v1 but v2 handler used — minor mismatch, backward-compatible. |
+| 0x71 | Notification (Alarm) | v3 | ✅ Registered v3, partial handler | **GAP:** Only notification type 8 (Power Management) handled. Types 9 (System), 11 (Clock), etc. fall through to no-op. See §4 item D. |
+| 0x73 | Powerlevel | v1 | ✅ Registered | No explicit handler; framework handles automatically for Z-Wave health tests. |
+| 0x9F | Security 2 (S2) | v1 | N/A — hub layer | Transport/encryption handled by Hubitat hub. Zero driver code needed. |
+| 0x44 | Thermostat Fan Mode | v3 | ✅ Registered v3 + handler | Fan mode get/set/report for auto/on/circulate. Correct. |
+| 0x45 | Thermostat Fan State | v1 | ✅ Registered v1 + **partial** handler | **GAP #1 (TOP-3):** Handler receives state but only uses it to conditionally re-query operating state. `newstate` is computed from `THERMOSTAT_FAN_STATE` map (8 values including "running high", "running medium") but **never emitted as an attribute**. |
+| 0x40 | Thermostat Mode | v2 | ✅ Registered v2 + handler | Mode get/set/report for off/heat/cool/auto/emergency heat. Correct. |
+| 0x42 | Thermostat Operating State | v1 | ✅ Registered v1 + handler | State report → `thermostatOperatingState` attribute. 7 states mapped. |
+| 0x43 | Thermostat Setpoint | v2 (implied) | ⚠️ **BUG:** `CMD_CLASS_VERS` entry is `043:2` not `0x43:2` | **GAP #3 (TOP-3):** In Groovy, `043` is **octal** 43 = decimal 35 = 0x23 (Scene Controller Config). `0x43` (Thermostat Setpoint) has **no version registered**. Hub parses Setpoint Reports at v1 default. Commands use `thermostatSetpointV2` correctly; reports parse fine at v1 (backward-compatible), but the map entry is wrong. Fix: change `043:2` → `0x43:2`. |
+| 0x6C | Supervision | v1 | ✅ Handler present | `SupervisionGet` → sends `SupervisionReport` with status 0xFF. Correct Z-Wave Plus behavior. |
+| 0x55 | Transport Service | v2 | N/A — hub layer | Fragmented Z-Wave frames. Hub handles. Zero driver code needed. |
+| 0x7A | Firmware Update MD | v2 | ✅ Registered | Not in fingerprint `inClusters` but registered. OTA update support framework. Hub handles. |
+| 0x2B | Scene Activation | v1 | ✅ Registered | Not in fingerprint; likely leftover from template. No handler. Harmless. |
+| 0x2C | Scene Actuator Config | v1 | ✅ Registered | Same — template artifact. No handler. Harmless. |
+| 0x8F | Multi Cmd | v1 | ✅ Registered + handler | `MultiCmdEncap` handler dispatches inner commands. Used by hub for efficiency. |
+
+**TH6320ZW2007-only CCs (not in TH6320ZW2003 fingerprint):**
+
+| CC Hex | CC Name | Version | Notes |
+|--------|---------|---------|-------|
+| 0x87 | Indicator | v3 | Possibly used for keypad lock status. **Not relevant for ZW2003.** |
+| 0x8E | Multi Channel Association | v3 | Supersedes Association v2 for multi-endpoint. ZW2003 single-endpoint device. **Not needed.** |
+
+---
+
+## 3. Full Configuration Parameter List
+
+Source: OpenZWave XML (domoticz/domoticz, revision 4, cites ZWA product 2893) + OpenHAB ZWave DB (TH6320ZW2007). All 42 params confirmed for TH6320ZW2003; params 43–45 are TH6320ZW2007-only (not confirmed for ZW2003).
+
+| Param | Name | Size | Default | Range | Exposed in Driver? | Notes |
+|-------|------|------|---------|-------|--------------------|-------|
+| 1 | Schedule Type | 1 | 2 (5-2) | 0–4 | ✅ `configParam1` | 0=No schedule, 1=Same every day, 2=5-2, 3=5-1-1, 4=Every day unique |
+| 2 | Temperature Scale | 1 | 0 (°F) | 0–1 | ✅ `configParam2` | 0=Fahrenheit, 1=Celsius |
+| 3 | Outdoor Temperature Sensor | 1 | 0 (No) | 0–1 | ✅ `configParam3` | 0=Disabled, 1=Wired. **Wired sensor only displayed on-screen; NOT reported to Z-Wave controller.** |
+| 4 | Equipment Type | 1 | 2 (Hi-Eff Gas) | 0–9 | ✅ `configParam4` | Gas, Oil, Electric, Fan Coil, HP (A2A, Geo), Hot Water, Steam |
+| 5 | Reversing Valve | 1 | 0 | 0–1 | ✅ `configParam5` | 0=O/B on Cool, 1=O/B on Heat |
+| 6 | Cool Stages | 1 | 1 | 0–2 | ✅ `configParam6` | Number of cooling stages |
+| 7 | Heat Stages (Aux/Emergency) | 1 | 1 | 0–2 | ✅ `configParam7` | |
+| 8 | Aux/Emergency Control | 1 | 0 | 0–1 | ✅ `configParam8` | Both vs Either |
+| 9 | Aux Heat Type | 1 | 0 | 0–1 | ✅ `configParam9` | Electric vs Gas/Oil |
+| 10 | Emergency Heat Type | 1 | 0 | 0–1 | ✅ `configParam10` | Electric vs Gas/Oil |
+| 11 | Fossil Kit Control | 1 | 0 | 0–1 | ✅ `configParam11` | Thermostat vs External |
+| 12 | Auto Changeover | 1 | 0 (Off) | 0–1 | ✅ `configParam12` | ⚠️ OZW notes: "ADVANCED — HVAC professional only" |
+| 13 | Auto Differential | 1 | 0 | 0–5 °F | ✅ `configParam13` | Min °F to switch heat↔cool in auto mode; not a deadband |
+| 14 | High Cool Stage Finish | 1 | 0 (No) | 0–1 | ✅ `configParam14` | Finish 2nd stage before switching to 1st |
+| 15 | High Heat Stage Finish | 1 | 0 (No) | 0–1 | ✅ `configParam15` | |
+| 16 | Aux Heat Droop | 1 | 0 (Comfort) | 0,2–15 °F | ✅ `configParam16` | °F below setpoint before aux kicks in. Value 1 not accepted. |
+| 17 | Up Stage Timer Aux Heat | 1 | 0 (Off) | 0–15 | ✅ `configParam17` | Time before staging up to aux: 30 min – 16 hr |
+| 18 | Balance Point (Compressor Lockout) | 1 | 65 °F | 0,5–65 in 5° steps | ✅ `configParam18` | Outdoor temp below which compressor locked out |
+| 19 | Aux Heat Outdoor Lockout | 1 | 0 (Off) | 0,5–65 in 5° steps | ✅ `configParam19` | Outdoor temp above which aux heat locked out |
+| 20 | Cool Stage 1 Cycle Rate (CPH) | 1 | 3 | 1–6 | ✅ `configParam20` | Cycles per hour |
+| 21 | Cool Stage 2 Cycle Rate (CPH) | 1 | 3 | 1–6 | ✅ `configParam21` | |
+| 22 | Heat Stage 1 Cycle Rate (CPH) | 1 | 3 | 1–12 | ✅ `configParam22` | |
+| 23 | Heat Stage 2 Cycle Rate (CPH) | 1 | 3 | 1–12 | ✅ `configParam23` | |
+| 24 | Aux Heat Cycle Rate (CPH) | 1 | 9 | 1–12 | ✅ `configParam24` | |
+| 25 | Emergency Heat Cycle Rate (CPH) | 1 | 9 | 1–12 | ✅ `configParam25` | |
+| 26 | Compressor Protection | 1 | 5 min | 0–5 min | ✅ `configParam26` | Min off time before compressor restarts |
+| 27 | Adaptive Intelligent Recovery | 1 | 1 (On) | 0–1 | ✅ `configParam27` | Pre-conditions system to hit setpoint at scheduled time |
+| 28 | Minimum Cool Temperature | 1 | 50 °F | 50–99 °F | ✅ `configParam28` | Setpoint floor for cooling |
+| 29 | Maximum Heat Temperature | 1 | 90 °F | 40–90 °F | ✅ `configParam29` | Setpoint ceiling for heating |
+| 30 | Number of Air Filters | 1 | 0 | 0–2 | ✅ `configParam30` | Must be ≥1 to enable params 31/32 |
+| 31 | Air Filter 1 Reminder | 1 | 0 (Off) | 0–19 | ✅ `configParam31` | Run-time days or calendar-based intervals |
+| 32 | Air Filter 2 Reminder | 1 | 0 (Off) | 0–19 | ✅ `configParam32` | |
+| 33 | Humidification Pad Reminder | 1 | 0 (Off) | 0–2 | ✅ `configParam33` | 6 or 12 months |
+| 34 | Dehumidification Filter Reminder | 1 | 0 (Off) | 0–12 months | ✅ `configParam34` | |
+| 35 | Ventilation Filter Reminder | 1 | 0 (Off) | 0,3,6,9,12 months | ✅ `configParam35` | |
+| 36 | Number of UV Devices | 1 | 0 | 0–2 | ✅ `configParam36` | Must be ≥1 to enable params 37/38 |
+| 37 | UV Bulb 1 Reminder | 1 | 0 (Off) | 0,6,12,24 months | ✅ `configParam37` | |
+| 38 | UV Bulb 2 Reminder | 1 | 0 (Off) | 0,6,12,24 months | ✅ `configParam38` | |
+| 39 | Idle Brightness | 1 | 0 | 0–5 | ✅ `configParam39` + `IdleBrightness` command | Also exposed as standalone command. Level 0 = off, 5 = brightest. |
+| 40 | Clock Format | 1 | 0 (12 hr) | 0–1 | ✅ `configParam40` | 0=12-hour, 1=24-hour |
+| 41 | Daylight Saving | 1 | 1 (On) | 0–1 | ✅ `configParam41` | Auto DST adjustment |
+| 42 | Temperature Offset (Sensor Cal) | 1 | 0 | −3 to +3 °F | ✅ `configParam42` + `SensorCal` command | Also exposed as standalone command. Driver emits `currentSensorCal` attribute. |
+| **43** | **Humidity Offset** | **1** | **0** | **−12 to +12** | **❌ NOT in driver** | **TH6320ZW2007 only** (not confirmed for ZW2003). Calibrate humidity sensor. |
+| **44** | **Temperature Reporting Resolution** | **1** | **1 (1°F)** | **0–5** | **❌ NOT in driver** | **TH6320ZW2007 only.** Deadband before temp is reported: 0.5°F, 1°F, 2°F, 3°F, 4°F, 5°F. **DIRECTLY affects hub API chattiness.** |
+| **45** | **Humidity Reporting Resolution** | **1** | **1** | **1–5 %** | **❌ NOT in driver** | **TH6320ZW2007 only.** Min % change before humidity reported to controller. |
+
+---
+
+## 4. Specifically-Checked Feature Checklist
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Vacation hold / temporary hold** | PARTIAL | Setpoint-based hold works correctly (setHeatingSetpoint/setCoolingSetpoint creates a hold). No `thermostatHold` attribute to observe hold state from Hubitat. The device returns to schedule on next scheduled event; driver has no way to report this transition. Inferred-only hold attribute is possible but risks false data. |
+| **Equipment status / staged HVAC** | PARTIAL — **ADD** | `ThermostatFanStateReport` decoded to 8 states including "running high" (stage 2 active) and "running medium". Handler computes `newstate` then discards it. **The single largest Z-Wave data gap in the driver.** |
+| **Outdoor temperature sensor** | NOT REPORTED via Z-Wave | Param 3 enables a wired outdoor sensor, which the T6 Pro displays on-screen. **The outdoor temperature is NOT sent to the Z-Wave controller.** SensorMultilevel types polled by driver are type 1 (air temp) and type 5 (humidity); no additional sensor type for outdoor temp. Source: driver code + community confirmation. Not an official Resideo statement — flagged as community knowledge. |
+| **Filter change reminder / runtime hours** | NOT IMPLEMENTED | Params 30–35 configure reminder intervals. The T6 Pro tracks internally. Whether the device emits a Notification CC report when reminder triggers is **uncertain** — Z-Wave Notification CC has no standard "filter change" event type, and the official manual URL is inaccessible. Notification type 9 (System) handler is missing from driver, but it is unclear if T6 Pro actually sends one. Reminder is likely display-only. **Flag: source quality low.** |
+| **UV lamp control** | NOT APPLICABLE | Params 36–38 are reminder schedules for UV germicidal lamps. No Z-Wave CC exists to control UV lamp on/off. These are already exposed in driver preferences. |
+| **Schedule programming via Z-Wave** | NOT SUPPORTED by device | `SCHEDULE` CC (0x53) and `THERMOSTAT_SCHEDULE` CC (0x5A — not the same as Device Reset Locally) are absent from the device's CC list. Param 1 configures schedule type but schedules are programmed locally on the thermostat keypad only. `setSchedule()` stub correctly warns "not supported." |
+| **Keypad lock / child lock** | NOT SUPPORTED on ZW2003 | `INDICATOR` CC (0x87) is absent from TH6320ZW2003 fingerprint. TH6320ZW2007 adds Indicator v3 which may control/report keypad lock. No configuration parameter in params 1–42 covers keypad lock either — it may only be accessible via the physical installer menu. |
+| **Temperature display units (F/C)** | ✅ ALREADY EXPOSED | Param 2 (`configParam2`) in preferences. |
+| **Heat/cool changeover behavior (auto)** | ✅ ALREADY EXPOSED | Param 12 (`configParam12` Auto Changeover) + Param 13 (`configParam13` Auto Differential) in preferences. |
+| **Backlight behavior** | ✅ ALREADY EXPOSED | Param 39 exposed as `configParam39` preference **and** as `IdleBrightness` command with `idleBrightness` attribute. |
+| **Minimum on/off time (compressor protection)** | ✅ ALREADY EXPOSED | Param 26 (`configParam26`) in preferences. |
+| **System type detection** | ✅ ALREADY EXPOSED | Params 4 (Equipment Type), 6 (Cool Stages), 7 (Heat Stages), 8 (Aux/E Control) all in preferences. |
+| **Battery vs C-wire detection** | ✅ ALREADY IMPLEMENTED | `BatteryV1.BatteryReport` → `battery` attribute. `NotificationReport` events 2/3 of type 8 → `powerSource` attribute (mains/battery). **PARTIAL GAP:** Notification events 10/11 ("replace battery soon" / "replace battery now") silently `break` — no warning emitted. **See ADD #2.** |
+| **Z-Wave Plus — Supervision** | ✅ IMPLEMENTED | `zwaveEvent(SupervisionGet)` handler present, sends `SupervisionReport(status: 0xFF)`. Correct. |
+| **Z-Wave Plus — Multilevel Association** | N/A for ZW2003 | Not in ZW2003 CC list. ZW2007 adds `MULTI_CHANNEL_ASSOCIATION_V3`. Single-endpoint device; Association v2 group 1 is sufficient. |
+| **Z-Wave Plus — Lifeline reporting** | ✅ IMPLEMENTED | `setDefaultAssociation()` sets group 1 to hub node ID. |
+
+---
+
+## 5. Findings Ranked: ADD / PROBABLY-ADD / MAYBE / SKIP
+
+### ADD
+
+**A. Emit `thermostatFanState` attribute**  
+The THERMOSTAT_FAN_STATE map is already defined (`THERMOSTAT_FAN_STATE=[0x00:"idle", 0x01:"running", 0x02:"running high", 0x03:"running medium", 0x04:"circulation mode", ...]`). The `zwaveEvent(ThermostatFanStateReport)` handler reads it but throws the value away after using it for a conditional re-query. This is not a design choice — it's an omission.  
+
+For Mads specifically: both T6 Pros control 2-stage systems (based on param 6 defaults). "running high" = stage 2 compressor active. This data is available **for free** (pushed by device on state change) and requires no polling.
+
+**B. Handle battery-low notification events**  
+`NotificationReport` type 8 (Power Management), events 10 ("replace battery soon") and 11 ("replace battery now") currently just `break` with no action. Given Mads has a battery-powered Upstairs unit, silently dropping these is a safety omission. The device will flash on-screen; the hub will not notify.
+
+**C. Fix `CMD_CLASS_VERS` octal bug**  
+Change `043:2` to `0x43:2` in the `CMD_CLASS_VERS` map. The driver currently registers version for 0x23 (Scene Controller Config) instead of 0x43 (Thermostat Setpoint). In practice this means Setpoint Reports are parsed at v1 default — which works because v2 is backward-compatible for heating/cooling setpoints. However the bug hides a potential parsing failure for "AutoChangeOver" setpoint type (setpoint type 0x0A) if the device ever reports it.
+
+### PROBABLY-ADD
+
+**D. Add params 43–45 for TH6320ZW2007 users**  
+Params 43 (Humidity Offset), 44 (Temperature Reporting Resolution), 45 (Humidity Reporting Resolution) exist on TH6320ZW2007. The TH6320ZW2003 documentation (OZW XML, params 1–42 only) does NOT list these. If Mads ever upgrades Upstairs to a ZW2007, or if the ZW2003 firmware silently accepts them, these are worth having.  
+
+Param 44 specifically (Temperature Reporting Resolution) is relevant to Mads's "low API chattiness" directive: a value of 2 (2°F deadband) would halve temperature report frequency. Default is 1°F. Until confirmed working on ZW2003, defer.
+
+**E. Add Notification type 9 (System) handler stub**  
+The driver handles only type 8. Adding a type 9 handler with `log.warn` for any `event > 0` would surface firmware alerts (hardware/software failures). Low effort (~15 lines). Source quality for filter-reminder alerts via this channel is uncertain.
+
+### MAYBE
+
+**F. `thermostatHold` attribute (inferred)**  
+Track driver-initiated setpoint changes with `state.holdActive = true` and clear on `setThermostatMode()`. Emit a `thermostatHold` attribute. This is driver-inferred (optimistic), not device-reported, so it will drift if setpoints are changed physically at the thermostat. Useful for RM rules but not trustworthy across long periods. No Hubitat standard capability for hold; custom attribute needed.
+
+**G. Outdoor temperature readout**  
+If the T6 Pro ever sends a SensorMultilevel report for the outdoor sensor (type 2 or type 56 per Z-Wave spec), the driver's `SensorMultilevelReport` handler would need to catch it. Current behavior: unrecognized sensor types fall through to no-op. It is almost certain the ZW2003 does NOT report outdoor temp over Z-Wave — but adding a catch for sensor type 2 costs 5 lines and costs nothing if the device never sends it.
+
+### SKIP
+
+| Feature | Reason |
+|---------|--------|
+| Z-Wave Schedule CC | Not in device CC list. Device doesn't support remote schedule programming via Z-Wave. |
+| Keypad lock (ZW2003) | No Indicator CC on ZW2003. Physical-menu only. |
+| UV lamp on/off control | No Z-Wave control interface; params 36–38 are reminder-only (already exposed). |
+| Vacation hold as distinct mode | "Hold" on T6 Pro is achieved by setting a setpoint; no separate Z-Wave hold CC. setpointSet already works correctly. |
+| Scene Activation / Scene Actuator Config | In CMD_CLASS_VERS but absent from device fingerprint. Likely template artifacts. No T6 Pro scenes capability. Remove on cleanup. |
+| Filter runtime hours as attribute | Device does not report filter runtime hours via Z-Wave; tracked internally. No CC for reading this. |
+
+---
+
+## 6. Top-3 v0.3.0 Recommendation with Specs
+
+---
+
+### Recommendation #1 — Emit `thermostatFanState` attribute
+
+**Why first:** This is the only genuine sensor data the device reports that the driver discards. Every other gap is either a bug, a missing param, or a device limitation. This surfaces 2-stage HVAC monitoring with **zero new Z-Wave frames** — the device already pushes ThermostatFanStateReport on every state change.
+
+**Hubitat capability fit:** No standard Hubitat capability covers fan operating state (as opposed to fan mode). Custom attribute is appropriate. The driver already has `THERMOSTAT_FAN_STATE` values defined.
+
+**Z-Wave CC shape:**  
+- CC: `THERMOSTAT_FAN_STATE` v1 (0x45)  
+- Frame: `THERMOSTAT_FAN_STATE_REPORT` → `fanOperatingState` byte  
+- Values: 0x00=idle, 0x01=running, 0x02=running high, 0x03=running medium, 0x04=circulation mode, 0x05=humidity circulation, 0x06=right-left circulation, 0x07=quiet circulation  
+- No new Get command needed — device pushes on change; `refresh()` can call `zwave.thermostatFanStateV1.thermostatFanStateGet()` (already does)
+
+**UX:** Attribute `thermostatFanState` displayed on device detail page. RM rules can use it: `if thermostatFanState is "running high" notify "Stage 2 active"`.
+
+**Implementation for Tank:**
+```groovy
+// In metadata definition block, add:
+attribute "thermostatFanState", "enum", ["idle","running","running high","running medium",
+  "circulation mode","humidity circulation mode","right - left circulation mode","quiet circulation mode"]
+
+// In zwaveEvent(hubitat.zwave.commands.thermostatfanstatev1.ThermostatFanStateReport cmd):
+// ADD after the existing newstate / logDebug lines, BEFORE the conditional re-query:
+eventProcess(name: "thermostatFanState", value: newstate,
+    descriptionText: "${device.displayName} fan state is ${newstate}")
+```
+
+**Effort:** ~8 lines (1 attribute declaration + 2 lines in handler). No new state, no polling.  
+**Risks:** None. Read-only attribute from device-pushed report. The 8 ThermostatFanState values are Z-Wave spec-defined, not T6 Pro proprietary.
+
+---
+
+### Recommendation #2 — Handle battery-low notification events
+
+**Why second:** Mads has (or plans) a battery-powered Upstairs T6 Pro. Events 10/11 of Power Management notification silently `break` — the hub learns nothing when the thermostat wants new batteries. This is a safety gap: a dead thermostat in a PNW winter is a frozen-pipe risk.
+
+**Z-Wave CC shape:**  
+- CC: `NOTIFICATION` v3 (0x71) — already handled  
+- Frame: `NOTIFICATION_REPORT`, `notificationType=8` (Power Management)  
+- Event 10: "Replace battery soon"  
+- Event 11: "Replace battery now"  
+- These are in the existing `switch (cmd.event)` block, already there as `break` stubs
+
+**UX:** Emit a `battery` event with a warning value (1%) on event 11 (Replace Now) and a `batteryStatus` event on event 10 (Replace Soon). Log a `log.warn` for both. RM notification rules on the `battery` attribute already in place for most users.
+
+**Implementation for Tank:**
+```groovy
+// Replace the existing case 10 and case 11 break stubs:
+case 10:
+    evt.name = "battery"
+    evt.value = "10"
+    evt.descriptionText = "${device.displayName} battery is low — replace soon"
+    evt.isStateChange = true
+    log.warn evt.descriptionText
+    break
+case 11:
+    evt.name = "battery"
+    evt.value = "1"
+    evt.descriptionText = "${device.displayName} battery is critically low — replace now"
+    evt.isStateChange = true
+    log.warn evt.descriptionText
+    break
+```
+
+**Effort:** ~12 lines (replacing 4 empty `break` stubs).  
+**Risks:** Battery value 10%/1% is a soft signal — not from `BatteryReport` but from a Notification event. It will show `10` in the battery attribute until the next actual `BatteryReport` overwrites it. Minor display inaccuracy. Alternative: emit a custom `batteryAlert` attribute to avoid stomping battery%. **Tank should choose which approach matches the repo's attribute hygiene preference.**
+
+---
+
+### Recommendation #3 — Fix `CMD_CLASS_VERS` octal bug (`043` → `0x43`)
+
+**Why third:** One-character fix with correctness value. The Thermostat Setpoint CC (0x43) is registered in the version map at 0x23 (Scene Controller Config) instead of 0x43. This is because `043` in Groovy is **octal** notation. The immediate risk is low (v1 and v2 Thermostat Setpoint share the same Report format for heating/cooling setpoint types), but "AutoChangeOver" setpoint type (0x0A) added in v3 would be affected if the device uses it. The wrong map entry also causes the version-lookup table to be silently incorrect, which is the kind of quiet incorrectness Mads's quality-first standard rejects.
+
+**Fix:**  
+```groovy
+// Change in CMD_CLASS_VERS map:
+// FROM:
+043:2
+// TO:
+0x43:2
+```
+
+**Effort:** 1 character change in 1 line.  
+**Risks:** None. The Hubitat Z-Wave framework uses this map for parsing inbound Report frames. Changing from incorrect 0x23 to correct 0x43 ensures Setpoint Reports are explicitly parsed at v2 instead of implicitly at v1 default.
+
+---
+
+## 7. Sources
+
+| # | Document | URL | Retrieval date | Quality |
+|---|----------|-----|----------------|---------|
+| 1 | Driver fingerprint `inClusters` (primary source for CC list) | `drivers/honeywell-t6-pro/honeywell-t6-pro.groovy`, line 59 | 2026-05-18 (local) | **PRIMARY — direct device fingerprint** |
+| 2 | OpenZWave XML for TH6320ZW2003 (via domoticz mirror, revision 4) | https://raw.githubusercontent.com/domoticz/domoticz/c3673648397397930b057fa33f7630e8add4c8c2/Config/honeywell/th6320zw2003.xml | 2026-05-18 | **HIGH — cites ZWA product 2893; param list confirms 1–42** |
+| 3 | OpenHAB ZWave binding DB, TH6320ZW2007 (newer SKU; same family) | https://raw.githubusercontent.com/openhab/org.openhab.binding.zwave/59419c568a0115bad7a1e7a27aa9b84db6e3d497/doc/resideo/th6320zw2007_0_0.md | 2026-05-18 | **HIGH for ZW2007 CC list + params 43–45; MEDIUM for ZW2003 exact parity** |
+| 4 | djdizzyd original driver (upstream baseline) | https://raw.githubusercontent.com/djdizzyd/hubitat/master/Drivers/Honeywell/Advanced-Honeywell-T6-Pro.groovy | 2026-05-18 | **MEDIUM — identical configParams 1–42, confirms our fork baseline** |
+| 5 | Z-Wave Alliance product page 2893 (T6 Pro) | https://products.z-wavealliance.org/products/2893/ | NOT ACCESSIBLE (404 at retrieval time) | **Referenced via OZW XML metadata; URL confirmed** |
+| 6 | Official installer guide PDF (via Z-Wave Alliance) | https://Products.Z-WaveAlliance.org/ProductManual/File?folder=&filename=Manuals/2893/33-00414-01-min.pdf | NOT ACCESSIBLE (domain down at retrieval time) | Referenced in OZW XML; content not read |
+| 7 | T6 Pro installer guide at OpenSmarthouse (covers ZW2003 + ZW2007) | https://opensmarthouse.org/zwavedatabase/1527/reference/33-00587EFS-07_-_T6_PRO_Z-Wave_Thermostat.pdf | NOT FETCHED (PDF) | Listed in OpenHAB DB entry; not read directly |
+
+**⚠️ Source gaps to flag:**  
+- Official Resideo/Honeywell parameter reference PDF was not accessible. Parameter table in this document sourced from OpenZWave XML + OpenHAB DB (both derived from Z-Wave Alliance data). This is standard practice but means we cannot cite page numbers.  
+- Outdoor temperature "not reported via Z-Wave" claim: sourced from driver code (only types 1+5 polled) + widespread community knowledge. Not from an official Resideo spec sheet.  
+- Filter-change-notification-via-Z-Wave claim ("uncertain"): Z-Wave Notification CC spec has no standardized filter-change event type; T6 Pro manual inaccessible; claim is based on spec inference only.
+
+---
+
+## Appendix A — v0.3.0 Full Change List (for Tank's reference)
+
+If all three top picks plus two PROBABLY-ADD items are approved, v0.3.0 scope:
+
+| Item | Category | Lines delta |
+|------|----------|------------|
+| Emit `thermostatFanState` attribute | Feature | +~10 |
+| Battery-low notification events 10/11 | Safety fix | +~12 |
+| Fix `CMD_CLASS_VERS` `043` → `0x43` | Correctness bug | 1-char |
+| Add params 43–45 (ZW2007 users, conditional) | Feature | +~15 |
+| Notification type 9 (System) stub | Enhancement | +~20 |
+| **Total** | | **~55–60 lines** |
+
+This is a compact v0.3.0. All changes are additive or single-line fixes. No existing behavior changed. No new polling added.
+
+
+---
+
+## 2026-05-18 — Honeywell T6 Pro v0.3.0 shipped
+
+**Commit:** e38c4d3 — honeywell-t6-pro v0.3.0: fanState emit + battery-low handling + octal CC fix
+
+**Three Cypher-survey picks applied (additive only):**
+1. **Pick #1 — thermostatFanState emit** (~10 lines): Attribute declared in definition() block; ventProcess(name: "thermostatFanState", ...) added in zwaveEvent(ThermostatFanStateReport). Existing operating-state re-query logic preserved. RM rules / dashboards can now read fan state independently.
+2. **Pick #2 — Battery-low notification handling** (~8 lines): Cases 10 (replace soon) and 11 (replace now) in NotificationReport type-8 switch now emit log.warn + idempotency-gated sendEvent for attery at 10%% / 1%%. Surfaces low battery before device fully dies.
+3. **Pick #3 — Octal CC version fix** (1 char):  43:2 →  x43:2 in CMD_CLASS_VERS map. 5-year-old latent bug — driver had been negotiating v1 of Thermostat Setpoint CC instead of v2.
+
+**Production-safe**: Additive only; v0.2.0 regression-free baseline preserved. Running on Mads's live Downstairs thermostat.
+
+**Tank-6 verified** all 3 changes applied at the expected file locations; v0.3.0 version bumped in driver header, @Field static final String VERSION, packageManifest.json, and README changelog.
+
+**Compaction context**: This shipment was the v0.3.0 work pending from the Cypher-6 Z-Wave API survey. Mads's prior directives ("quality first", "best they can be", "my namespace and standards") informed the work going additive-only with no refactor.

@@ -73,7 +73,7 @@ For advanced users or offline installations:
 | Daikin Wi-fi | Local   | Direct IP access to BRP069B adapter • No cloud account needed         |
 | Gemstone     | Cloud   | Outbound HTTPS to Gemstone cloud                                      |
 | SunStat      | Cloud   | Outbound HTTPS to Watts® Home cloud                                   |
-| Touchston    | Local   | Direct IP access to device • Requires Tuya local key (one-time setup) |
+| Touchstone   | Local   | Direct IP access to device • Requires Tuya local key (one-time setup) |
 
 ## Contributing
 

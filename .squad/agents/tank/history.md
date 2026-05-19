@@ -112,7 +112,13 @@ Forked djdizzyd's Advanced Honeywell T6 Pro Thermostat into drivers/honeywell-t6
 
 ---
 
-## Honeywell T6 Pro v0.2.0 Polish Pass (2026-05-18T17:36:00-07:00)
+## Honeywell T6 Pro v0.3.0 (2026-05-18T18:05:00-07:00)
+
+Applied exactly 3 changes per Cypher's survey: (1) Pick #1 — Added `attribute "thermostatFanState", "string"` to `definition()` block (line 57); wired `eventProcess(name:"thermostatFanState", ...)` in `zwaveEvent(ThermostatFanStateReport)` (line 571) — `thermostatFanState` is not exposed by any existing capability so explicit `attribute` declaration was needed. (2) Pick #2 — cases 10 and 11 in `zwaveEvent(NotificationReport)` type-8 branch (lines 234–243) now emit `log.warn` + idempotency-gated `sendEvent` for `battery` at 10% / 1% — does not double-fire with `BatteryReport`'s own `eventProcess()`-based path. (3) Pick #3 — `043:2` → `0x43:2` in `CMD_CLASS_VERS` (line 77), fixing Groovy octal parse that was registering Scene Controller Config (0x23) instead of Thermostat Setpoint (0x43). No other entries in the map had leading-zero octal issues. v0.4.0 candidate noted: `zwaveEvent(ThermostatFanStateReport)` emits `thermostatFanState` but does not log `if (txtEnable)` around the descriptionText — minor inconsistency with temperature/humidity handlers added in v0.2.0.
+
+---
+
+
 
 Applied all 5 Trinity deferred-backlog items (C1–C5) plus namespace/author alignment and style cleanup. C1: added `descriptionText` to temperature and humidity `eventProcess()` calls in `zwaveEvent(SensorMultilevelReport)`, including `if (txtEnable) log.info` for consistency with battery events. C2: replaced string equality in `eventProcess()` with BigDecimal compare (matching the canonical `emitIfChanged` pattern from sunstat-thermostat-child) — prevents `68` vs `68.0` false-positive events from Z-Wave float responses. C3: removed dead `sendToDevice(zwave.configurationV1.configurationGet(parameterNumber: 52))` from `zwaveEvent(ThermostatFanStateReport)` — parameter 52 is not in configParams, saving 2 wasted Z-Wave frames per fan-state event. C4: added `descriptionText` to both `sendEvent` calls in `initializeVars()`. C5: removed `runIn(10, "syncClock")` from `refresh()` — the 3-hour repeating schedule already handles clock sync. Namespace switched from `djdizzyd` to `mads` in both the driver `definition()` and `packageManifest.json`; author field cleaned to `"Mads Kristensen"`. Added `Initialize` capability and `initialize()` lifecycle hook for hub-restart-safe scheduling. Driver header updated to v0.2.0 changelog format matching Daikin/SunStat style. README restructured with What It Is / Install / Capabilities / Changelog / Attribution / License sections matching daikin-wifi/README.md template.
 
