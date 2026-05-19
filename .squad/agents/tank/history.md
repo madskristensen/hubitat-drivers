@@ -258,3 +258,51 @@ pfmiller0's `PurpleAir AQI Virtual Sensor.groovy` is the cloud-API driver that p
 
 ---
 
+## Tank Work — PurpleAir AQI Fork + PR Draft (2026-05-18T17:15:27-07:00)
+
+**Task:** Apply Trinity's 3 audit fixes to pfmiller0's PurpleAir AQI Virtual Sensor, place in repo as a local-test fork, and produce a PR-ready draft.
+
+**Files created:** `drivers/purpleair-aqi/` (4 files)
+- `purpleair-aqi.groovy` — patched driver (upstream v1.3.2 + 3 fixes)
+- `packageManifest.json` — HPM manifest v0.1.0
+- `README.md` — install steps, what's fixed, upstream PR plan, attribution
+- `UPSTREAM-PR-DRAFT.md` — ready-to-paste GitHub PR description with before/after code snippets and test instructions per fix
+
+**3 fixes applied (minimal diff — PR-ready):**
+1. `apply_conversion()`: `"AQ and U"` → `"AQ&U"` — AQ&U was dead code
+2. `sensorCheck()`: `"lrapa"` → `"LRAPA"`, `"woodsmoke"` → `"Woodsmoke"` — case mismatch caused wrong PM2.5 field (`pm2.5` instead of `pm2.5_cf_1`)
+3. `httpResponse()`: `state.failCount?:0 + 1` → `(state.failCount ?: 0) + 1` — precedence bug; failCount never incremented
+
+**No git commit.** Coordinator handles git after all 3 Tank instances finish.
+**Fork policy:** TEMPORARY — delete once pfmiller0 merges the upstream PR.
+
+---
+
+## Tank Work — Fully Kiosk Browser Controller Fork (2026-05-18T17:15:27-07:00)
+
+**Task:** Apply Trinity's 4 audit fixes to GvnCampbell's Fully Kiosk Browser Controller (v1.41), place in repo as permanent fork.
+
+**Source:** `https://raw.githubusercontent.com/GvnCampbell/Hubitat/master/Drivers/FullyKioskBrowserController.groovy` (last commit 2021-11-20, confirmed 4.5+ years silent via `gh api`).
+
+**Files created:** `drivers/fully-kiosk/` (3 files)
+- `fully-kiosk.groovy` — fork with 4 Trinity audit fixes
+- `packageManifest.json` — HPM manifest v0.1.0
+- `README.md` — install steps, what's fixed, upstream status, attribution
+
+**4 fixes applied:**
+1. **Security (lines 109, 438–441, 545–549):** `serverPassword` pref changed from `type:"string"` to `type:"password"`; password masked in debug logs via `.replaceAll(/(?i)password=[^&]+/, 'password=***')` on the URI before logging in both `sendCommandPost()` and `refresh()`
+2. **Event hygiene (lines 449–461):** `refreshCallback()` 4 x `sendEvent` replaced with `emitIfChanged()` calls; helper added at line 567 — prevents 5,760+ unchanged events/day at 1-min poll cadence
+3. **descriptionText (lines 197–247):** All `sendEvent` calls in `parse()`, `motion()`, and `acceleration()` now include `descriptionText: "${device.displayName} ${attribute} is ${value}"`
+4. **Logger (lines 124–125, 586–595):** Replaced inverted multi-level `loggingLevel` enum (where `debug` > `trace` verbosity was backwards) with standard Hubitat `logEnable` bool; all trace/debug output gated by `logEnable`; info/warn/error always emit
+
+**Security note:** Password was in query string `uri` field (not `body`), so adapted Trinity's mask pattern to `safeParams.uri = safeParams.uri?.replaceAll(...)` rather than `safeParams.body`.
+
+**No git commit.** Coordinator handles git after all 3 Tank instances finish.
+
+---
+
+## Learnings - Honeywell T6 Pro Fork (2026-05-18T17:15:27-07:00)
+
+Forked djdizzyd's Advanced Honeywell T6 Pro Thermostat into drivers/honeywell-t6-pro/. Fix surface was 3 targeted changes: (1) added missing txtEnable preference declaration (BLOCKER - had been permanently false/silent for 4+ years), (2) fixed device.currentValue=="cooling" to device.currentValue("thermostatOperatingState")=="cooling" in two locations - zwaveEvent(ThermostatFanStateReport) line 533 and zwaveEvent(BasicSet) lines 556-558 - (MAJOR - method reference never equals a string, silently broke fan-state correction logic), (3) added unschedule("syncClock") at top of configure() to prevent zombie scheduler accumulation on repeated manual configure invocations (MAJOR).
+
+**Reusable fork-cleanup pattern:** See .squad/skills/hubitat-fork-cleanup-pattern/ for the general approach used here - preserve original copyright verbatim, add fork attribution block above it, apply only audited fixes with inline FIX comments citing severity, create packageManifest.json using Daikin as template, write README with What's Fixed table.

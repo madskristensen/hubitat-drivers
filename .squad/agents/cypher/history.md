@@ -71,3 +71,16 @@
 **User-pointed URLs as primary:** When a user provides a direct GitHub URL, treat it as primary evidence. Override prior search-based conclusions.
 
 **Platform constraint documentation:** OAuth callback pattern is only applicable if vendor provides public OAuth Authorization Server + public client registration. When vendor offers none (Gemstone, SunStat), pattern is not applicable. Governance principle established.
+
+---
+
+## Cross-Agent Update — Tank's 3 Community Driver Forks Shipped (2026-05-18T17:25:00Z)
+
+**From:** Scribe housekeeping merge (post-Tank session)
+
+Trinity's 3 code-quality audits have all shipped as Tank forks:
+- **Honeywell T6 Pro** (commit 1dc51af) — permanent fork; txtEnable BLOCKER + fan-state/scheduler fixes
+- **Fully Kiosk** (commit 32a9f2c) — permanent fork; password security + event hygiene + descriptionText fixes
+- **PurpleAir AQI** (commit ff3410f) — **PR-bound staging fork** (delete once upstream accepts PR)
+
+**Your next action:** Review the PR draft at `drivers/purpleair-aqi/UPSTREAM-PR-DRAFT.md` before Mads submits upstream. The 3 fixes are minimal (AQ&U, LRAPA/Woodsmoke case fixes, failCount precedence) and low-friction for maintainer review.

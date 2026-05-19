@@ -81,3 +81,26 @@ Trinity audited three drivers Mads runs in production against this repo's best-p
 ---
 
 **Last updated:** 2026-05-18T23:45:00Z (community driver audits merged to decisions.md)
+
+---
+
+## Cross-Agent Update — Your 3 Code-Quality Audits Shipped as Tank Forks (2026-05-18T17:25:00Z)
+
+**From:** Scribe housekeeping merge (post-Tank session)
+
+Your 3 community driver audits have all shipped as Tank-produced forks:
+
+1. **Honeywell T6 Pro** (commit 1dc51af) — permanent fork to `drivers/honeywell-t6-pro/`
+   - Fixes per your line citations: txtEnable BLOCKER + fan-state currentValue() method call fix + syncClock scheduler leak fix
+   - No regressions introduced — Tank kept minimum-change discipline
+
+2. **Fully Kiosk Browser Controller** (commit 32a9f2c) — permanent fork to `drivers/fully-kiosk/`
+   - Fixes per your line citations: password security mask + event-hygiene emitIfChanged + descriptionText cascade + logger enum reversal
+   - No regressions introduced — minimum-change discipline
+
+3. **PurpleAir AQI Virtual Sensor** (commit ff3410f) — **PR-bound staging fork** to `drivers/purpleair-aqi/`
+   - Fixes per your line citations: AQ&U case fix + LRAPA/Woodsmoke case fixes + failCount precedence fix
+   - Upstream PR draft staged at `drivers/purpleair-aqi/UPSTREAM-PR-DRAFT.md` — ready for Mads to submit after local validation
+   - Delete this fork from repo once pfmiller accepts upstream PR
+
+**All three audits validated against your line citations. Ready for Switch's hardware validation before any upstream PR submission.**

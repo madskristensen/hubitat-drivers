@@ -182,9 +182,23 @@ Event values (EventPresentState): `BSH.Common.EnumType.EventPresentState.Present
 
 **Polling cadence:** Use ≥120 seconds (720 req/day for one appliance). At 90s you're at 960/day — borderline.
 
-## SSE — Not Viable on Hubitat
+## SSE — Viable But Fragile on Hubitat
 
-The `GET /api/homeappliances/{haId}/events` endpoint is a persistent `text/event-stream` (SSE) connection. Hubitat's HTTP client (`httpGet`, `asynchttpGet`) is request-response only — it cannot consume a streaming connection. Use polling instead.
+The `GET /api/homeappliances/{haId}/events` endpoint is a persistent `text/event-stream` (SSE) connection.
+
+**`asynchttpGet` cannot consume it** (request-response only — correct).
+
+**BUT Hubitat's EventStream interface (`interfaces.eventStream` / `parse()` callback + `eventStreamStatus()`) CAN consume SSE** — this is a platform-level feature, not raw HTTP. The craigde/hubitat-homeconnect-v3 Stream Driver uses this and runs on real Hubitat hubs as of 2026-03.
+
+**Caveat: SSE via EventStream is fragile.** The craigde driver required 22+ patch releases in 65 days (Jan–Mar 2026) to stabilize: keep-alive detection failures, silent stream drops, Hubitat stripping newlines from parse() chunks, double-processing, reconnect race conditions. A production driver using SSE MUST implement:
+- A watchdog cron job (check for data gaps > 3 minutes, since HC sends KEEP-ALIVE every ~55s)
+- Exponential backoff on reconnect
+- Rate-limit state guards (don't reconnect-burst when already 429)
+- `connectionStatus` correction in `parse()` (Hubitat may fire STOP while stream is still alive)
+
+If your use case tolerates 2-3 minute delayed updates, **polling `GET /status` at 120s intervals (720 req/day)** is simpler and more reliable than EventStream SSE. Use polling for simple drivers; use SSE only if real-time updates are required and you're prepared to implement the full watchdog infrastructure.
+
+**Polling cadence reminder:** Use ≥120 seconds (720 req/day for one appliance). At 90s you're at 960/day — borderline safe.
 
 ## Comparison to SunStat
 

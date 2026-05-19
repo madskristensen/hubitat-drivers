@@ -1,0 +1,101 @@
+# Skill: hubitat-upstream-pr-fork-workflow
+
+**Confidence:** medium  
+**Origin:** PurpleAir AQI fork task (2026-05-18)
+
+---
+
+## Pattern: Temporary Fork → Local Test → Upstream PR
+
+When Trinity audits a community driver and finds small, high-confidence bugs in an
+**active upstream** (last commit ≤18 months), the correct workflow is:
+
+1. **Fork minimally** into `drivers/<slug>/` — apply ONLY the audited fixes, nothing else
+2. **Annotate** the fork clearly as temporary (attribution header + README note + `UPSTREAM-PR-DRAFT.md`)
+3. **Test locally** on Mads's hub
+4. **Submit PR upstream** using the draft as the PR body
+5. **Delete the fork** once the upstream PR is merged; repoint to upstream `importUrl`
+
+This is distinct from a permanent fork (used when upstream is abandoned ≥18 months or unresponsive).
+
+---
+
+## Required Files (4)
+
+| File | Purpose |
+|------|---------|
+| `<slug>.groovy` | Patched driver. Prepend fork attribution block. Preserve original copyright verbatim. Keep diff minimal. |
+| `packageManifest.json` | HPM manifest. Version `0.1.0`. Note "TEMPORARY fork" in releaseNotes. |
+| `README.md` | Sections: What This Is (TEMPORARY) / Install / What's Fixed (per bug, with before/after) / Upstream Status / Attribution / Changelog |
+| `UPSTREAM-PR-DRAFT.md` | Copy-pasteable GitHub PR: title, body with per-bug sections (before/after + test instructions), bracket placeholders for Mads to fill, sign-off line |
+
+---
+
+## Fork Attribution Block Template
+
+```groovy
+/**
+ *  <Driver Name> (Hubitat) — Local-test fork
+ *
+ *  Fork by: Mads Kristensen — <YYYY-MM-DD>
+ *  Source: github.com/<owner>/<repo>/blob/main/<file>
+ *  Forked TEMPORARILY because: <one-line reason — list bugs>
+ *  Goal: TEST FIXES LOCALLY, then submit as PR back to <owner>/<repo>.
+ *        This fork should NOT outlive upstream PR acceptance — delete from this
+ *        repo and switch back to upstream once merged.
+ *
+ *  Version: 0.1.0 — <YYYY-MM-DD> — Initial test fork; apply <audit> fixes
+ *
+ *  [original <author> copyright block preserved verbatim below]
+ */
+```
+
+---
+
+## UPSTREAM-PR-DRAFT.md Template
+
+```markdown
+# UPSTREAM PR DRAFT
+> For Mads: Copy title+body into GitHub PR. Fill [bracket] placeholders. Delete this file.
+
+## Title
+fix: <short description of bugs> (<N> bugs)
+
+## Body
+Hi <author> — thanks for maintaining this.
+
+I found <N> bugs while testing on [location] using [sensor/device ID] over [test period].
+
+### Bug 1 — <name>
+**Function:** `<fn>()`  **Approx. line:** ~<N>
+<one-paragraph explanation>
+```before/after code```
+**Test:** <how to verify the fix works>
+
+[repeat per bug]
+
+These fixes were validated against [location] using [device] over [test period].
+Thanks for maintaining this — <genuine compliment about the driver>.
+— Mads Kristensen
+```
+
+---
+
+## When to Use This Pattern vs. Permanent Fork
+
+| Condition | Pattern |
+|-----------|---------|
+| Upstream last commit ≤18 months | Temporary fork → PR |
+| Upstream last commit >18 months, issues/PRs ignored | Permanent fork |
+| Upstream actively broken in a way that blocks Mads today | Temporary fork immediately; don't wait |
+| Fix is >20 lines or architectural | Discuss with Trinity before forking |
+
+---
+
+## Key Rule: Keep the Diff Small
+
+The goal is PR acceptance, not feature completeness. If Trinity's audit lists MINOR
+hygiene items alongside BLOCKERs, only apply the BLOCKERs to the local-test fork.
+Submit hygiene as a follow-on PR after the BLOCKER PR is accepted.
+
+A small, focused diff is easier for the upstream maintainer to review and accept.
