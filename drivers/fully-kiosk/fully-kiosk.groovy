@@ -9,6 +9,19 @@
  *                  missing descriptionText.
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
+ *  Version: 0.3.0 — 2026-05-18 — Closes HA gap: brightness 0-100->0-255 conversion BUG FIX
+ *                                (setLevel(100) now means 100% not ~39%);
+ *                                6 new emitIfChanged sensor attributes from existing
+ *                                deviceInfo response (charging, screensaverActive,
+ *                                batteryTemperature, foregroundApp, screenOrientation,
+ *                                kioskMode — zero extra HTTP calls);
+ *                                Notification capability + deviceNotification(text) →
+ *                                overlay popup on tablet from RM;
+ *                                utility commands: toBackground/clearCache/forceSleep/
+ *                                exitApp/lockKiosk/unlockKiosk/enableLockedMode/disableLockedMode;
+ *                                video playback: playVideo(url)/stopVideo;
+ *                                motion detection on/off toggle;
+ *                                checkInterval event spam dedupe (Trinity finding #8).
  *  Version: 0.2.0 — 2026-05-18 — v0.2.0 polish: logsOff auto-disable, logEnable default false,
  *                                descriptionText on checkInterval events, checkInterval 60→120,
  *                                setLevel event moved to callback, UUID in manifest, Security note in README
@@ -17,57 +30,9 @@
  *  [original GvnCampbell MIT/Apache copyright block preserved verbatim below]
  */
 
-// Fully Kiosk Browser Driver 1.41
-// Github: https://github.com/GvnCampbell/Hubitat/blob/master/Drivers/FullyKioskBrowserController.groovy
-// Support: https://community.hubitat.com/t/release-fully-kiosk-browser-controller/12223
-/*
-[Change Log]
-    1.41: Fixed speak command.  Was broken with Hubitat firmware 2.9.0.
-            This will allow it to work with RM and not give an error.  
-	    Volume will be set if specified (optional), and voice is passed to the engine (optional) 
-    1.40: Requires Fully Kiosk Browser 1.43.1 or newer.
-        : Added auto configuration of webviewMixedContent
-            This allows FKB to report in device status to HE from dashboards that use https.
-            After upgrading click configure so all the settings get applied.
-    1.39: Added attribute "currentPageUrl"
-            This attribute is updated with the current page during polling (every minute).
-    1.38: Fixed switch reporting.
-    1.37: Added State Polling option to allow the driver to poll the device for updates instead of the device reporting in.
-            This solves the issue where the start page is SSL. Reporting will not work back to a non SSL endpoint.
-            This will gather the screen brightness,screen state and battery levels only.  Motion will not work.
-    1.36: Added 'restartApp' command. (Thanks tmleafs)
-    1.35: Added 'Battery' capability to track the ... battery.
-        : Added 'Switch' and 'SwitchLevel capabilities to turn the screen on/off and adjust the brightness
-        : Added 'AccelerationSensor' capability which triggers when tablet is moved.
-        : Added 'updateDeviceData' method to record device settings when the preferences is saved.
-        : Added 'HealthCheck' capability. Mainly used to help increment Last Activity when device is responding.
-        : Removed lastActivity custom attribute. Reduces event log noise.
-    1.33: Added 'MotionSensor' capability to monitor motion via the tablet camera.
-        : deviceNetworkId will now be set to the MAC of the IP Address to handle callbacks from FKB
-        : Fixed setStringSetting method
-        : Added 'Configure' capability.  
-          When you select configure it will configure FKB on the device to send events back to this driver.
-          Configure should be run when making configuration changes.
-          WARNING: selecting this will overwrite any custom javascript code you currently have setup in fully.
-    1.32: If using the FKB TTS Engine, starting text with "!" will cause all messages to be stopped and the new message
-          to play. Otherwise the message is added to the queue and will play when others are finished. (Requires FKB v1.38+)
-        : Sending a "!" TTS message will stop all currently playing messages to stop. (Requires FKB v1.38+)
-    1.31: Updated to use "{ }" instead of "< />" for SSML tags.
-    1.30: Added option to select the TTS engine used.
-            Hubitat (Amazon): https://docs.aws.amazon.com/polly/latest/dg/supportedtags.html
-            Fully Kiosk Browser (Google): https://cloud.google.com/text-to-speech/docs/ssml
-    1.24: Added setBooleanSetting,setStringSetting
-          Added lastActivity attribute
-    1.23: Updated speak() logging to escape XML in logging as speak command can support SSML XML
-    1.22: Updated HTTP calls so URL's are encoded properly
-    1.21: Fixed the import url to be correct
-    1.20: Change speak method to use Hubitat TTS methods. Set voice via Hubitat settings.
-    1.09: Changed volumeStream range to be 1-10 (0 doesn't work)
-          Made adjustements to setVolume to properly test for volumeStream value
-          Added playSound/stopSound commands.
-          Added the AudioVolume mute attributes.
-          Set default attributes when installed.
-*/
+import groovy.transform.Field
+
+@Field static final String VERSION = "0.3.0"
 
 metadata {
     definition (name: "Fully Kiosk Browser Controller", namespace: "mads", author: "Mads Kristensen",
@@ -85,8 +50,16 @@ metadata {
         capability "Configuration"
         capability "AccelerationSensor"
         capability "HealthCheck"
+        capability "Notification"
 
-        attribute "currentPageUrl", "String"
+        attribute "currentPageUrl",      "String"
+        // Pick #2: 6 new sensor attributes from existing deviceInfo response — zero extra HTTP calls
+        attribute "charging",            "String"
+        attribute "screensaverActive",   "String"
+        attribute "batteryTemperature",  "Number"
+        attribute "foregroundApp",       "String"
+        attribute "screenOrientation",   "String"
+        attribute "kioskMode",           "String"
 
         command "bringFullyToFront"
         command "launchAppPackage", ["String"]
@@ -105,6 +78,23 @@ metadata {
                                       [name:"Value*:", type:"ENUM", constraints:["true","false"], desciption:"The setting to be applied."]]
         command "setStringSetting",  [[name:"Key*", type:"STRING", description:"The key value associated with the setting to be updated."],
                                       [name:"Value*:", type:"STRING", desciption:"The setting to be applied."]]
+        // Pick #3: Notification capability command
+        command "setOverlayMessage",    [[name:"text*", type:"STRING", description:"Text to display as overlay popup on the tablet."]]
+        // Pick #4: Utility commands
+        command "toBackground"
+        command "clearCache"
+        command "forceSleep"
+        command "exitApp"
+        command "lockKiosk"
+        command "unlockKiosk"
+        command "enableLockedMode"
+        command "disableLockedMode"
+        // Pick #5: Video playback
+        command "playVideo",            [[name:"url*", type:"STRING", description:"URL of the video to play."]]
+        command "stopVideo"
+        // Pick #6: Motion detection toggle
+        command "enableMotionDetection"
+        command "disableMotionDetection"
     }
     preferences {
         input(name:"serverIP",       type:"string",  title:"Server IP Address",    defaultValue:"",    required:true)
@@ -231,8 +221,9 @@ def parse(description) {
             break
         default:
             // C1+C4: added descriptionText; value 60→120 (2× poll cadence avoids false offline on single missed poll)
-            sendEvent([name:"checkInterval", value:120,
-                       descriptionText:"${device.displayName} checkInterval is 120"])
+            // Pick #7: gate emit — value never changes, so subsequent calls are suppressed
+            emitIfChanged("checkInterval", 120,
+                          "${device.displayName} checkInterval is 120")
             logger(logprefix + "Unknown attribute: ${body.attribute}", "error")
             break
     }
@@ -283,10 +274,15 @@ def setLevel(level) {
     // C5: event now fires from setLevelCallback AFTER a successful HTTP response,
     // not optimistically before — prevents the event from lying if the call fails.
     // Security: URI logged through the same password-masking pattern as sendCommandPost().
+    // Pick #1 (BUG FIX): SwitchLevel uses 0-100; FKB screenBrightness expects 0-255.
+    // setLevel(100) previously sent raw 100 → FKB rendered ~39% brightness.
+    // Now converts 0-100 → 0-255 so setLevel(100) sends 255 (true 100% brightness).
     def logprefix = "[setLevel] "
     logger(logprefix + "level:${level}", "trace")
+    int fkbBrightness = Math.round(level.toBigDecimal() * 2.55).toInteger()
+    fkbBrightness = Math.min(255, Math.max(0, fkbBrightness))
     def postParams = [
-        uri: "http://${serverIP}:${serverPort}/?type=json&password=${serverPassword}&cmd=setStringSetting&key=screenBrightness&value=${level}",
+        uri: "http://${serverIP}:${serverPort}/?type=json&password=${serverPassword}&cmd=setStringSetting&key=screenBrightness&value=${fkbBrightness}",
         requestContentType: 'application/json',
         contentType: 'application/json'
     ]
@@ -299,8 +295,9 @@ def setLevelCallback(response, data) {
     def logprefix = "[setLevelCallback] "
     logger(logprefix + "response.status: ${response.status}", "trace")
     if (response?.status == 200) {
-        sendEvent([name:"checkInterval", value:120,
-                   descriptionText:"${device.displayName} checkInterval is 120"])
+        // Pick #7: gate checkInterval — value never changes so all subsequent emits are suppressed
+        emitIfChanged("checkInterval", 120,
+                      "${device.displayName} checkInterval is 120")
         sendEvent([name:"level", value:data.level,
                    descriptionText:"${device.displayName} level is ${data.level}"])
     } else {
@@ -485,10 +482,37 @@ def refreshCallback(response, data) {
         def switchVal = (response.json.screenOn == true) ? "on" : "off"
         emitIfChanged("switch",         switchVal,
                       "${device.displayName} switch is ${switchVal}")
-        emitIfChanged("level",          response.json.screenBrightness,
-                      "${device.displayName} level is ${response.json.screenBrightness}")
+        // Pick #1 (BUG FIX): FKB returns raw 0-255; convert back to SwitchLevel 0-100
+        if (response.json.screenBrightness != null) {
+            def levelVal = Math.round((response.json.screenBrightness as BigDecimal) / 2.55).toInteger()
+            levelVal = Math.min(100, Math.max(0, levelVal))
+            emitIfChanged("level", levelVal,
+                          "${device.displayName} level is ${levelVal}", "%")
+        }
         emitIfChanged("currentPageUrl", response.json.currentPage,
                       "${device.displayName} currentPageUrl is ${response.json.currentPage}")
+        // Pick #2: 6 new attributes from existing deviceInfo response — zero extra HTTP calls
+        def chargingVal = response.json.plugged ? "true" : "false"
+        emitIfChanged("charging",          chargingVal,
+                      "${device.displayName} charging is ${chargingVal}")
+        def ssVal = response.json.isInScreensaver ? "true" : "false"
+        emitIfChanged("screensaverActive", ssVal,
+                      "${device.displayName} screensaverActive is ${ssVal}")
+        if (response.json.batteryTemperature != null) {
+            def tempVal = response.json.batteryTemperature as BigDecimal
+            emitIfChanged("batteryTemperature", tempVal,
+                          "${device.displayName} batteryTemperature is ${tempVal}°C", "°C")
+        }
+        if (response.json.foregroundApp != null) {
+            emitIfChanged("foregroundApp", response.json.foregroundApp,
+                          "${device.displayName} foregroundApp is ${response.json.foregroundApp}")
+        }
+        def orientVal = (response.json.screenOrientation == 1) ? "landscape" : "portrait"
+        emitIfChanged("screenOrientation", orientVal,
+                      "${device.displayName} screenOrientation is ${orientVal}")
+        def kioskVal = response.json.kioskMode ? "true" : "false"
+        emitIfChanged("kioskMode",         kioskVal,
+                      "${device.displayName} kioskMode is ${kioskVal}")
     } else {
         logger(logprefix + "Invalid response: ${response.status}", "error")
     }
@@ -534,6 +558,15 @@ def stopSound() {
     logger("[stopSound] ", "trace")
     sendCommandPost("cmd=stopSound")
 }
+// Pick #5: Video playback
+def playVideo(String url) {
+    logger("[playVideo] url:${url}", "trace")
+    sendCommandPost("cmd=playVideo&url=${java.net.URLEncoder.encode(url, "UTF-8")}")
+}
+def stopVideo() {
+    logger("[stopVideo] ", "trace")
+    sendCommandPost("cmd=stopVideo")
+}
 def setBooleanSetting(key, value) {
     logger("[setBooleanSetting] key,value: ${key},${value}", "trace")
     sendCommandPost("cmd=setBooleanSetting&key=${key}&value=${value}")
@@ -541,6 +574,57 @@ def setBooleanSetting(key, value) {
 def setStringSetting(key, value) {
     logger("[setStringSetting] key,value: ${key},${value}", "trace")
     sendCommandPost("cmd=setStringSetting&key=${key}&value=${java.net.URLEncoder.encode(value, "UTF-8")}")
+}
+// Pick #4: Utility commands — thin wrappers over existing FKB REST endpoints
+def toBackground() {
+    logger("[toBackground] ", "trace")
+    sendCommandPost("cmd=toBackground")
+}
+def clearCache() {
+    logger("[clearCache] ", "trace")
+    sendCommandPost("cmd=clearCache")
+}
+def forceSleep() {
+    logger("[forceSleep] ", "trace")
+    sendCommandPost("cmd=forceSleep")
+}
+def exitApp() {
+    logger("[exitApp] ", "trace")
+    sendCommandPost("cmd=exitApp")
+}
+def lockKiosk() {
+    logger("[lockKiosk] ", "trace")
+    sendCommandPost("cmd=lockKiosk")
+}
+def unlockKiosk() {
+    logger("[unlockKiosk] ", "trace")
+    sendCommandPost("cmd=unlockKiosk")
+}
+def enableLockedMode() {
+    logger("[enableLockedMode] ", "trace")
+    sendCommandPost("cmd=enableLockedMode")
+}
+def disableLockedMode() {
+    logger("[disableLockedMode] ", "trace")
+    sendCommandPost("cmd=disableLockedMode")
+}
+// Pick #3: Notification capability — overlay popup on the tablet screen
+void deviceNotification(String text) {
+    logger("[deviceNotification] text:${text}", "trace")
+    sendCommandPost("cmd=setOverlayMessage&text=${java.net.URLEncoder.encode(text, "UTF-8")}")
+}
+def setOverlayMessage(String text) {
+    logger("[setOverlayMessage] text:${text}", "trace")
+    sendCommandPost("cmd=setOverlayMessage&text=${java.net.URLEncoder.encode(text, "UTF-8")}")
+}
+// Pick #6: Motion detection toggle — disable camera overnight for battery savings
+def enableMotionDetection() {
+    logger("[enableMotionDetection] ", "trace")
+    setBooleanSetting("motionDetection", true)
+}
+def disableMotionDetection() {
+    logger("[disableMotionDetection] ", "trace")
+    setBooleanSetting("motionDetection", false)
 }
 def updateDeviceData() {
     logger("[updateDeviceData] ", "trace")
@@ -560,8 +644,9 @@ def updateDeviceDataCallback(response, data) {
         device.updateDataValue("androidVersion",     response.json.androidVersion)
         device.updateDataValue("deviceModel",        response.json.deviceModel)
         // C1+C4: added descriptionText; value 60→120
-        sendEvent([name:"checkInterval", value:120,
-                   descriptionText:"${device.displayName} checkInterval is 120"])
+        // Pick #7: gate emit — value never changes, so subsequent calls are suppressed
+        emitIfChanged("checkInterval", 120,
+                      "${device.displayName} checkInterval is 120")
     } else {
         logger(logprefix + "Invalid response: ${response.status}", "error")
     }
@@ -589,8 +674,9 @@ def sendCommandCallback(response, data) {
     if (response?.status == 200) {
         logger(logprefix + "response.data: ${response.data}", "debug")
         // C1+C4: added descriptionText; value 60→120
-        sendEvent([name:"checkInterval", value:120,
-                   descriptionText:"${device.displayName} checkInterval is 120"])
+        // Pick #7: gate emit — value never changes, so subsequent calls are suppressed
+        emitIfChanged("checkInterval", 120,
+                      "${device.displayName} checkInterval is 120")
     } else {
         logger(logprefix + "Invalid response: ${response.status}", "error")
     }
