@@ -9,6 +9,13 @@
  *                  missing descriptionText.
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
+ *  Version: 0.4.4 — 2026-05-18 — BUG: defensive leading-slash handling for MQTT topics.
+ *                                FKB docs publish to /fully/event/... with leading slash;
+ *                                subscribe to both {prefix}/# and /{prefix}/#, then
+ *                                strip any leading slash in parseMqttMessage so the
+ *                                downstream dispatch works identically either way.
+ *                                Belt-and-suspenders fix for the topic-namespace
+ *                                ambiguity in the FKB documentation.
  *  Version: 0.4.3 — 2026-05-18 — BUG: fix 4 event-name mismatches in handleFkEvent() —
  *                                driver was listening for motionDetected/unpluggedAC/
  *                                pluggedAC/batteryLevel but FKB publishes onMotion/
@@ -58,7 +65,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.4.3"
+@Field static final String VERSION = "0.4.4"
 
 metadata {
     definition (name: "Fully Kiosk Browser", namespace: "mads", author: "Mads Kristensen",
@@ -833,6 +840,7 @@ void mqttClientStatus(String status) {
         // Use a unique prefix per device (e.g. "fully-bathroom") when running
         // multiple tablets on the same broker to avoid cross-device bleed.
         interfaces.mqtt.subscribe("${prefix}/#", 0)
+        interfaces.mqtt.subscribe("/${prefix}/#", 0)  // defensive: FKB docs show leading slash on topics
         // Publish online state retained so other subscribers see Hubitat is connected
         interfaces.mqtt.publish("${prefix}/hubitat/state", "online", 1, true)
         // Reduce poll to heartbeat safety net — MQTT push carries the real updates
@@ -861,6 +869,7 @@ private void parseMqttMessage(String description) {
     try {
         def msg     = interfaces.mqtt.parseMessage(description)
         def topic   = msg.topic as String
+        if (topic.startsWith("/")) { topic = topic.substring(1) }  // normalize: strip FKB leading slash
         def payload = msg.payload as String
         logger(logprefix + "topic: ${topic}", "trace")
         def prefix  = settings.mqttTopicPrefix?.trim() ?: "fully"
