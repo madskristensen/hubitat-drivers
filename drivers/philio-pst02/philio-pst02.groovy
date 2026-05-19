@@ -1,7 +1,7 @@
 /**
  *  Philio PST02 Multi-Sensor (PST02-A/B/C) — Hubitat Fork
  *  Author:  Mads Kristensen
- *  Version: 1.0.0 — 2026-05-19
+ *  Version: 1.1.0 — 2026-05-19
  *  License: Apache-2.0
  *
  *  Fork of kunPet/Denny Page "Philio PST02" Hubitat driver.
@@ -11,6 +11,7 @@
  *  Hubitat best-practice hardening.
  *
  *  Changelog:
+ *    1.1.0 — 2026-05-19 — Fix implicit global in SecurityMessageEncapsulation; remove duplicate ConfigurationReport case 12 and dangling break; fix log.warn misuse in configure/refresh/updated; guard WakeUpNotification log.debug with logEnable; re-enable auto-disable debug logging after 30 min; remove German upstream comments.
  *    1.0.0 — 2026-05-19 — Initial Mads fork. Replace raw para5/para6/para7 bitmask inputs with guided human-readable dropdowns derived from Z-Wave JS device configs. Add variant auto-detection (PST02-A/C vs PST02-B), raw-override mode, and Hubitat-standard header/logging.
  */
 
@@ -97,19 +98,19 @@ preferences
     input name: "para7Raw", title: "Advanced raw: Parameter 7", description: "Used only when Parameter mode is Advanced raw values", type: "number", defaultValue: "86", range: "0..255"
 
 	 // PIR Redetect interval: Parameter 8, Range 0-127, default 3 changed to 12, units of Ticks. 0 disables auto reporting.
-    input name: "pirInterval", title: "PIR Redetect Ticks", description: "8s per Tick", type: "number", defaultValue: "12", range: "0..127"
+    input name: "pirInterval", title: "P8: PIR Redetect Ticks", description: "8s per Tick", type: "number", defaultValue: "12", range: "0..127"
 
     // Auto Report Battery interval: Parameter 10, Range 0-127, default 12, units of Ticks. 0 disables auto reporting.
-    input name: "batteryInterval", title: "Battery Auto Report Ticks", description: "0 disables auto reporting", type: "number", defaultValue: "12", range: "0..127"
+    input name: "batteryInterval", title: "P10: Battery Auto Report Ticks", description: "0 disables auto reporting", type: "number", defaultValue: "12", range: "0..127"
 
 	// Auto Report Door interval: Parameter 11, Range 0-127, default 12, units of Ticks. 0 disables auto reporting.
-    input name: "doorInterval", title: "Door Auto Report Ticks", description: "0 disables auto reporting", type: "number", defaultValue: "12", range: "0..127"
+    input name: "doorInterval", title: "P11: Door Auto Report Ticks", description: "0 disables auto reporting", type: "number", defaultValue: "12", range: "0..127"
 
     // Auto Report Door interval: Parameter 12, Range 0-127, default 12, units of Ticks. 0 disables auto reporting.
-    input name: "luxInterval", title: "Lux Auto Report Ticks", description: "0 disables auto reporting", type: "number", defaultValue: "12", range: "0..127"
+    input name: "luxInterval", title: "P12: Lux Auto Report Ticks", description: "0 disables auto reporting", type: "number", defaultValue: "12", range: "0..127"
 
     // Auto Report Temperature interval: Parameter 13, Range 0-127, default 12 changed to 2, units of Ticks. 0 disables auto reporting.
-    input name: "temperatureInterval", title: "Temperature Auto Report Ticks", description: "0 disables auto reporting", type: "number", defaultValue: "2", range: "0..127"
+    input name: "temperatureInterval", title: "P13: Temperature Auto Report Ticks", description: "0 disables auto reporting", type: "number", defaultValue: "2", range: "0..127"
 
 //		    // Auto Report Humidity interval: Parameter 14, Range 0-127, default 12, units of Ticks. 0 disables auto reporting.
 //		    input name: "humidityInterval", title: "Humidity Auto Report Ticks", description: "0 disables auto reporting", type: "number", defaultValue: "12", range: "0..127"
@@ -118,16 +119,16 @@ preferences
 //		    input name: "waterInterval", title: "Water Auto Report Ticks", description: "0 disables auto reporting", type: "number", defaultValue: "12", range: "0..127"
 
     // Auto Report Tick interval: Parameter 20, Range 0-255, default 30, units of minutes. 0 disables all auto reporting.
-    input name: "tickInterval", title: "Auto Report Tick minutes", description: "0 disables ALL auto reporting", type: "number", defaultValue: "30", range: "0..255"
+    input name: "tickInterval", title: "P20: Auto Report Tick minutes", description: "0 disables ALL auto reporting. Set Wakeup interval minutes to match (min 30)", type: "number", defaultValue: "30", range: "0..255"
  
-	// Temperature differential report: Parameter 21, Range 0-127, default 1 changed to 3, units of degrees Fahrenheit  !! Feuer-TempÜberwachung !!!!!
+	// Temperature differential report: Parameter 21, Range 0-127, default 1 changed to 3, units of degrees Fahrenheit
     input name: "temperatureDifferential", title: "Temperature differential report", description: "0 disables differential reporting", type: "number", defaultValue: "3", range: "0..127"
 
 //		    // Humidity differential report: Parameter 23, Range 0-60, default 5, units of percent RH%
 //		    input name: "humidityDifferential", title: "Humidity differential report", description: "0 disables differential reporting", type: "number", defaultValue: "5", range: "0..60"
 
-	// Wakeup Interval: Number of minutes between wakeups, default 1440 changed to 180
-    input name: "wakeUpInterval", title: "Wakeup interval minutes", type: "number", defaultValue: "180", range: "30..7200"
+	// Wakeup Interval: Number of minutes between wakeups, default 1440 changed to 180. Device minimum is 30 minutes.
+    input name: "wakeUpInterval", title: "Wakeup interval minutes", description: "Device minimum: 30. Should match P20 tick minutes for timely report delivery", type: "number", defaultValue: "30", range: "30..7200"
 
     // Temperature offset: Adjustment amount for temperature measurement
     input name: "temperatureOffset", title: "Temperature offset degrees", type: "decimal", defaultValue: "0"
@@ -369,7 +370,7 @@ void installed()
     state.pendingResync = true
     state.pendingRefresh = true
     runIn(1, deviceSync)
-//    runIn(1800, logsOff)
+    runIn(1800, logsOff)
 }
 
 void updated()
@@ -524,20 +525,20 @@ void updated()
         }
     }
 
-    log.warn "debug logging is ${logEnable}"
-    log.warn "description logging is ${txtEnable}"
+    log.info "debug logging is ${logEnable}"
+    log.info "description logging is ${txtEnable}"
 }
 
 def configure()
 {
     state.pendingResync = true
-    log.warn "Configuration will resync when device wakes up"
+    log.info "Configuration will resync when device wakes up"
 }
 
 def refresh()
 {
     state.pendingRefresh = true
-    log.warn "Data will refresh when device wakes up"
+    log.info "Data will refresh when device wakes up"
 }
 
 def clearTamper()
@@ -618,7 +619,6 @@ def zwaveEvent(hubitat.zwave.commands.sensormultilevelv5.SensorMultilevelReport 
         default:
             log.warn "Unknown SensorMultilevelReport-Type: ${cmd.toString()}"
             return null
-            break
     }
 
     sendEvent(map)
@@ -679,7 +679,7 @@ def zwaveEvent(hubitat.zwave.commands.notificationv4.NotificationReport cmd)
 			} else if (val == 8) {
 				map.name = "motion"
 				map.value = "active"
-				map.isStateChange = true	//Event auch ohne Änderung value ?
+				map.isStateChange = true
 				map.descriptionText = "motion is ${map.value}"
 				//	if (logEnable) log.info "${device.displayName} motion is ${map.value}"
 				break
@@ -692,12 +692,10 @@ def zwaveEvent(hubitat.zwave.commands.notificationv4.NotificationReport cmd)
 			} else {
 				log.warn "Unknown NotificationReport-Event: ${cmd.toString()}"
 				return null
-				break
 			}
         default:
             log.warn "Unknown NotificationReport-Type: ${cmd.toString()}"
             return null
-            break
     }
 
     sendEvent(map)
@@ -741,7 +739,7 @@ def zwaveEvent(hubitat.zwave.commands.sensorbinaryv2.SensorBinaryReport cmd)
             map.name = "motion"
             if (cmd.sensorValue.toInteger() > 0 ) {
                 map.value = "active"
-				map.isStateChange = true	//Event auch ohne Änderung value ?
+				map.isStateChange = true
             } else {
                 map.value = "inactive"
             }
@@ -750,7 +748,6 @@ def zwaveEvent(hubitat.zwave.commands.sensorbinaryv2.SensorBinaryReport cmd)
         default:
             log.warn "Unknown SensorBinaryReport: ${cmd.toString()}"
             return null
-            break
     }
 
     sendEvent(map)
@@ -798,7 +795,7 @@ def zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd)
 //			break
 //		case 15: // Auto Report Water interval
 //			state.waterInterval = cmd.configurationValue[0]
-			break
+//			break
         case 20: // Auto Report tick interval
             state.tickInterval = cmd.configurationValue[0]
             break
@@ -808,7 +805,7 @@ def zwaveEvent(hubitat.zwave.commands.configurationv1.ConfigurationReport cmd)
 //		case 23: // Humidity Differential Report
 //			state.humidityDifferential = cmd.configurationValue[0]
 // 			break
-        case 3: case 4: case 9: case 12: case 22:
+        case 3: case 4: case 9: case 22:
 			break
 		default:
             log.warn "Configuration Report with unspecified Parameter: ${cmd.toString()}"
@@ -823,7 +820,7 @@ def zwaveEvent(hubitat.zwave.commands.wakeupv2.WakeUpIntervalReport cmd)
 
 def zwaveEvent(hubitat.zwave.commands.wakeupv2.WakeUpNotification cmd)
 {
-    log.debug "${device.displayName}: Received WakeUpNotification"
+    if (logEnable) log.debug "${device.displayName}: Received WakeUpNotification"
     runInMillis(200, deviceSync)
 }
 
@@ -837,7 +834,7 @@ void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd)
 
 def zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd)
 {
-    encapCmd = cmd.encapsulatedCommand()
+    def encapCmd = cmd.encapsulatedCommand()
     if (encapCmd)
     {
         return zwaveEvent(encapCmd)

@@ -34,4 +34,5 @@ Then assign the device driver type:
 
 | Version | Date       | Notes |
 |---------|------------|-------|
+| 1.1.0   | 2026-05-19 | Fix implicit global variable in SecurityMessageEncapsulation; remove duplicate case 12 and dangling break in ConfigurationReport; fix log.warn misuse in configure/refresh/updated; guard WakeUpNotification debug log with logEnable; re-enable auto-disable of debug logging after 30 min; remove German upstream comments. |
 | 1.0.0   | 2026-05-19 | Initial Mads fork with guided parameter 5/6/7 UX, variant-aware bitmask calculation, and optional advanced raw override. |
