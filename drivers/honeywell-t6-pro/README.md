@@ -20,7 +20,7 @@ Z-Wave thermostat driver for the Honeywell T6 Pro (model TH6320ZW2003). Supports
 2. Paste the raw URL:
    `https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/honeywell-t6-pro/honeywell-t6-pro.groovy`
 3. Click **Import** then **Save**.
-4. Go to the device using the old driver → **Edit** → change **Type** to `Advanced Honeywell T6 Pro Thermostat` → **Save**.
+4. Go to the device using the old driver → **Edit** → change **Type** to `Honeywell T6 Pro Thermostat` → **Save**.
 
 ## Capabilities
 
