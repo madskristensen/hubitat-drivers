@@ -9,6 +9,18 @@
  *                  missing descriptionText.
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
+ *  Version: 0.4.6 — 2026-05-18 — BUG: v0.4.5's 8-arg LWT form ALSO rejected by Hubitat
+ *                                (live error: "No signature of method ... applicable for
+ *                                argument types (String, GStringImpl, null, null, String,
+ *                                Integer, Boolean, String)"). Hubitat's
+ *                                interfaces.mqtt.connect() ONLY supports the 4-arg form
+ *                                (brokerUrl, clientId, username, password). LWT design
+ *                                partially dropped: the "online" publish on connect-success
+ *                                remains in mqttClientStatus; the automatic "offline" on
+ *                                disconnect is impossible via Hubitat's built-in MQTT
+ *                                interface. Subscribers consuming our retained state
+ *                                should treat absence of fresh "online" as "unknown",
+ *                                not as "offline".
  *  Version: 0.4.5 — 2026-05-18 — BUG: v0.4.0's mqttConnect passed 5 args with a Map for LWT;
  *                                Hubitat's interfaces.mqtt.connect() doesn't accept that
  *                                signature (live error from Mads's tablet test:
@@ -72,7 +84,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.4.5"
+@Field static final String VERSION = "0.4.6"
 
 metadata {
     definition (name: "Fully Kiosk Browser", namespace: "mads", author: "Mads Kristensen",
@@ -793,10 +805,6 @@ void mqttConnect() {
     try {
         def clientId = settings.mqttClientID?.trim() ?: "hubitat-fully-kiosk-${device.deviceNetworkId}"
         def prefix   = settings.mqttTopicPrefix?.trim() ?: "fully"
-        String lwtTopic    = "${prefix}/hubitat/state"
-        String lwtPayload  = "offline"
-        Integer lwtQos     = 1
-        Boolean lwtRetained = true
         // Mask any embedded credentials in the broker URL before logging
         def safeBroker = settings.mqttBroker?.replaceAll(/(:\/\/[^:@\/]+:)[^@\/]+(@)/, '$1***$2')
         logger(logprefix + "Connecting to ${safeBroker}, clientId: ${clientId}", "info")
@@ -804,11 +812,7 @@ void mqttConnect() {
             settings.mqttBroker,
             clientId,
             settings.mqttUsername ?: null,
-            settings.mqttPassword ?: null,
-            lwtTopic,
-            lwtQos,
-            lwtRetained,
-            lwtPayload
+            settings.mqttPassword ?: null
         )
     } catch (Exception e) {
         logger(logprefix + "Connection failed: ${e.message}", "error")

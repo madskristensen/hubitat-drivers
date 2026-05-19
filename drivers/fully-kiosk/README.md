@@ -62,6 +62,8 @@ Requires Fully Kiosk Browser v1.34+ and Hubitat firmware 2.4.4.155+ (built-in MQ
 
 **What stays polling:** `level` (screen brightness), `currentPageUrl`, `screensaverActive`, `batteryTemperature`, `screenOrientation`, `kioskMode` are updated from FKB's `deviceInfo` MQTT publish. The poll interval is reduced to 5 minutes as a heartbeat safety net while MQTT is connected (restored to 1 minute if MQTT disconnects).
 
+> **LWT note:** LWT (Last Will & Testament) is not supported by Hubitat's built-in MQTT interface. The driver publishes a retained `"online"` state to `{prefix}/hubitat/state` on connect-success only. There is no automatic `"offline"` publish on disconnect. Subscribers should **not** interpret a stale or absent state as `"offline"` — treat it as `"unknown"` instead.
+
 ---
 
 ## What's fixed (v0.1.0 vs upstream v1.41)
@@ -132,6 +134,7 @@ Fork maintained by **Mads Kristensen** — https://github.com/madskristensen
 
 | Version | Date       | Notes |
 |---------|------------|-------|
+| 0.4.6   | 2026-05-18 | **BUG: v0.4.5's 8-arg LWT form ALSO rejected by Hubitat.** Live error: *"No signature of method … applicable for argument types (String, GStringImpl, null, null, String, Integer, Boolean, String)"*. Hubitat's `interfaces.mqtt.connect()` ONLY supports the 4-arg form `(brokerUrl, clientId, username, password)`. LWT design partially dropped: the `"online"` retained publish on connect-success remains in `mqttClientStatus`; the automatic `"offline"` publish on disconnect is impossible via Hubitat's built-in MQTT interface. Subscribers consuming our retained state should treat absence of a fresh `"online"` as `"unknown"`, not as `"offline"`. |
 | 0.4.5   | 2026-05-18 | **BUG: invalid `mqttConnect()` signature causing live connect failure.** v0.4.0 called `interfaces.mqtt.connect(brokerUrl, clientId, username, password, optionsMap)` — a 5-arg form with a `Map` for LWT that Hubitat does not recognise (live error: *"No signature of method … applicable for argument types … java.util.LinkedHashMap"*). Switched to Hubitat's valid 8-arg form: `interfaces.mqtt.connect(brokerUrl, clientId, username, password, lwtTopic, lwtQos, lwtRetained, lwtPayload)`. LWT behaviour (`{prefix}/hubitat/state = "offline"`, retained, QoS 1) is fully preserved. |
 | 0.4.4   | 2026-05-18 | **BUG: defensive leading-slash handling for MQTT topics.**FKB docs publish to `/fully/event/...` with a leading slash; in MQTT, `/fully/...` and `fully/...` are technically different topic namespaces. Driver now subscribes to both `{prefix}/#` and `/{prefix}/#` so either form is received, then strips any leading slash at the top of `parseMqttMessage` so the downstream dispatch works identically either way. Belt-and-suspenders fix for the topic-namespace ambiguity in the FKB documentation. |
 | 0.4.3   | 2026-05-18 | **BUG: fix 4 event-name mismatches in `handleFkEvent()`.** Driver was listening for `motionDetected`/`unpluggedAC`/`pluggedAC`/`batteryLevel` but FKB publishes `onMotion`/`unplugged`/`pluggedAC`/`onBatteryLevelChanged` (verified against official FKB MQTT docs by Cypher). Renamed cases accordingly. Removed dead `foregroundApp` case — FKB does not publish that as an event; it arrives via the `deviceInfo` topic and is handled in `handleFkDeviceInfo()`. MQTT push events for motion, charging state, and battery level now actually fire. |
