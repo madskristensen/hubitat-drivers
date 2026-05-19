@@ -1,7 +1,7 @@
 /**
  *  Honeywell T6 Pro Thermostat (Hubitat) — Fork
  *  Author:  Mads Kristensen
- *  Version: 0.3.0 — 2026-05-18
+ *  Version: 0.4.0 — 2026-05-18
  *  License: MIT
  *
  *  Fork of djdizzyd/hubitat "Advanced Honeywell T6 Pro Thermostat" (Bryan Copeland).
@@ -9,6 +9,9 @@
  *  Forked because: maintainer silent 4+ years; BLOCKER + MAJOR bugs affecting live devices.
  *
  *  Changelog:
+ *    0.4.0 — 2026-05-18 — Add descriptionText to thermostatOperatingState, thermostatFanMode, thermostatMode events (Pick #1);
+ *                          change thermostatFanState attribute type from "string" to "enum" with 8 values (Pick #2);
+ *                          add Notification type 9 (System) handler stub with log.warn for hardware/software faults (Pick #3).
  *    0.3.0 — 2026-05-18 — Emit thermostatFanState attribute from ThermostatFanStateReport (Pick #1);
  *                          handle battery-low notification events 10/11 with log.warn + battery sendEvent (Pick #2);
  *                          fix CMD_CLASS_VERS octal bug 043 → 0x43 for Thermostat Setpoint CC (Pick #3).
@@ -54,7 +57,7 @@ metadata {
 
         attribute "currentSensorCal", "number"
         attribute "idleBrightness", "number"
-        attribute "thermostatFanState", "string"
+        attribute "thermostatFanState", "enum", ["idle","running","running high","running medium","circulation mode","humidity circulation mode","right - left circulation mode","quiet circulation mode"]
 
         command "SensorCal", [[name:"calibration",type:"ENUM", description:"Number of degrees to add/subtract from thermostat sensor", constraints:["-3", "-2", "-1", "0", "1", "2", "3"]]]
         command "IdleBrightness", [[name:"brightness",type:"ENUM", description:"Set idle brightness", constraints:["0", "1", "2", "3", "4", "5"]]]
@@ -73,7 +76,7 @@ metadata {
 }
 
 // FIX NIT: VERSION constant for diagnostics / HPM version matching
-@Field static final String VERSION = "0.3.0"
+@Field static final String VERSION = "0.4.0"
 @Field static Map CMD_CLASS_VERS=[0x71:3, 0x7A:2, 0x81:1, 0x73:1, 0x2B:1, 0x2C:1, 0x85:2, 0x72:1, 0x86:2, 0x8F:1, 0x31:5, 0x70:1, 0x80:1, 0x45:1, 0x44:3, 0x43:2, 0x42:1, 0x40:2, 0x5A:1, 0x59:1, 0x5E:2]
 @Field static Map THERMOSTAT_OPERATING_STATE=[0x00:"idle",0x01:"heating",0x02:"cooling",0x03:"fan only",0x04:"pending heat",0x05:"pending cool",0x06:"vent economizer"]
 @Field static Map THERMOSTAT_MODE=[0x00:"off",0x01:"heat",0x02:"cool",0x03:"auto",0x04:"emergency heat"]
@@ -265,6 +268,29 @@ void zwaveEvent(hubitat.zwave.commands.notificationv3.NotificationReport cmd) {
                 break
             case 254:
                 // unknown event / state
+                break
+        }
+    } else if (cmd.notificationType==9) {
+        // System notification (firmware/hardware fault)
+        switch (cmd.event as Integer) {
+            case 0:
+                // idle - no fault
+                if (logEnable) log.debug "${device.displayName} system notification: idle"
+                break
+            case 1:
+                log.warn "${device.displayName} System hardware failure reported by device"
+                break
+            case 2:
+                log.warn "${device.displayName} System software failure reported by device"
+                break
+            case 3:
+                log.warn "${device.displayName} System hardware failure with product code reported by device"
+                break
+            case 4:
+                log.warn "${device.displayName} System software failure with product code reported by device"
+                break
+            default:
+                log.warn "${device.displayName} System notification event ${cmd.event} (unmapped)"
                 break
         }
     }
@@ -551,7 +577,8 @@ void zwaveEvent(hubitat.zwave.commands.thermostatoperatingstatev1.ThermostatOper
     if (logEnable) log.debug "Got thermostat operating state report: ${cmd}"
     String newstate=THERMOSTAT_OPERATING_STATE[cmd.operatingState.toInteger()]
     if (logEnable) log.debug "Translated state: " + newstate
-    eventProcess(name: "thermostatOperatingState", value: newstate)
+    eventProcess(name: "thermostatOperatingState", value: newstate,
+        descriptionText: "${device.displayName} thermostat operating state is ${newstate}")
     if (newstate=="cooling") {
         state.lastMode="cool"
     } else if (newstate=="heating") {
@@ -578,7 +605,9 @@ void zwaveEvent(hubitat.zwave.commands.thermostatfanmodev2.ThermostatFanModeRepo
     if (logEnable) log.debug "Got thermostat fan mode report: ${cmd}"
     String newmode=THERMOSTAT_FAN_MODE[cmd.fanMode.toInteger()]
     if (logEnable) log.debug "Translated fan mode: " + newmode
-    eventProcess(name: "thermostatFanMode", value: newmode, type: state.isDigital?"digital":"physical")
+    eventProcess(name: "thermostatFanMode", value: newmode,
+        descriptionText: "${device.displayName} thermostat fan mode is ${newmode}",
+        type: state.isDigital?"digital":"physical")
     state.isDigital=false
 }
 
@@ -586,7 +615,9 @@ void zwaveEvent(hubitat.zwave.commands.thermostatmodev2.ThermostatModeReport cmd
     if (logEnable) log.debug "Got thermostat mode report: ${cmd}"
     String newmode=THERMOSTAT_MODE[cmd.mode.toInteger()]
     if (logEnable) log.debug "Translated thermostat mode: " + newmode
-    eventProcess(name: "thermostatMode", value: newmode, type: state.isDigital?"digital":"physical")
+    eventProcess(name: "thermostatMode", value: newmode,
+        descriptionText: "${device.displayName} thermostat mode is ${newmode}",
+        type: state.isDigital?"digital":"physical")
     state.isDigital=false
 }
 
