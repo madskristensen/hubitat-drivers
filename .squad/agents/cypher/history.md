@@ -161,3 +161,15 @@ Trinity's 3 code-quality audits have all shipped as Tank forks:
 4. Is TH6320ZW device-file data available in the Hubitat runtime?
 
 **Captured as memory** for Cypher's next protocol-architecture research sprint.
+
+---
+
+## 2026-05-18T19:50:00-07:00 — Mads Feedback: FKB MQTT v0.4.0 Reality-Check
+
+**Context:** Cypher's 2026-05-18 FKB MQTT reality-check analysis (merged into decisions.md) identified 4 event-name mismatches in the v0.4.0 driver's handleFkEvent() handler.
+
+**Mads feedback:** "This analysis was exactly what I needed. Your research confirmed the architecture was right and saved me hours of debugging. The fact that you found 'FKB only shows 3 fields' was the breakthrough — turns out the Enable MQTT toggle hides the config fields. That's why I couldn't see the Client ID and Topic customization options."
+
+**Impact on v0.4.0 design:** The v0.4.0 driver shipped with the correct topic structure and subscription pattern because Cypher's earlier feasibility work had pinned down what FKB actually exposes. The reality-check then caught the event-name mapping bugs (wrong case labels), which v0.4.3 fixed within hours of identification. This rapid-response cycle (Cypher research → Tank implementation → live validation → next patch) worked exceptionally well.
+
+**Lesson for future audits:** When a driver ships with new protocol support, a same-day reality-check against live device output (or official docs) catches silent-failure bugs that unit tests won't find. Mads's tablet running v0.4.0 with MQTT broker connected was the test harness; Cypher's analysis was the oracle.

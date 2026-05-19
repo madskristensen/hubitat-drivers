@@ -80,7 +80,27 @@ Mads's complete stack now has **zero open BUILD candidates**.
 Closed the HA integration gap with all 7 Cypher-ranked v0.3.0 picks in a single additive pass. Pick #1 (brightness BUG FIX): `setLevel()` now converts 0–100 → `Math.round(level.toBigDecimal() * 2.55).toInteger()` clamped 0–255 before sending to FKB, and `refreshCallback()` reads back raw 0–255 and divides by 2.55 to emit the correct 0–100 SwitchLevel value — both with null guards. Pick #2: added 6 emitIfChanged attributes in refreshCallback from the existing deviceInfo payload — zero extra HTTP calls: `charging` (from `plugged`), `screensaverActive` (from `isInScreensaver`), `batteryTemperature` (null-guarded), `foregroundApp` (null-guarded), `screenOrientation` (mapped 0/1 → "portrait"/"landscape"), `kioskMode`. Pick #3: added `capability "Notification"` + `void deviceNotification(String)` + `setOverlayMessage(String)` both routing to `cmd=setOverlayMessage` with URL-encoded text. Pick #4: 8 utility commands (toBackground, clearCache, forceSleep, exitApp, lockKiosk, unlockKiosk, enableLockedMode, disableLockedMode) — all thin `sendCommandPost` one-liners. Pick #5: `playVideo(url)` and `stopVideo()`. Pick #6: `enableMotionDetection()` / `disableMotionDetection()` delegate to the existing `setBooleanSetting("motionDetection", true/false)`. Pick #7: all 4 `sendEvent([name:"checkInterval"...])` sites replaced with `emitIfChanged()` — value is always 120 so only the first emit per session fires. One discrepancy vs Cypher's spec: Cypher listed `motionDetectionEnabled` as a Pick #2 candidate but that field requires `listSettings` (not in `deviceInfo`), so `kioskMode` from `deviceInfo.kioskMode` was substituted as the 6th attribute (matching Cypher's own verdict table). Net LOC delta +85 (Cypher estimated ~116–136; difference because command stubs are 3 lines each and checkInterval fix was net-neutral).
 
 
-## 2026-05-18 — Fully Kiosk v0.4.0 shipped (MQTT subscriber, opt-in)
+## 2026-05-18 — Fully Kiosk v0.4.2 shipped (clearOverlayMessage)
+
+Added `clearOverlayMessage()` command — the missing dismiss companion to `setOverlayMessage(text)` / `deviceNotification(text)`.
+- **Command declaration** at line 95 (directly below `setOverlayMessage` in metadata block)
+- **Method body** at lines 679–682 (directly below `setOverlayMessage(String text)` method)
+- API pattern: calls `cmd=setOverlayMessage&text=` (empty text = clear; FKB documented behavior)
+- No parameters; logger trace prefix matches sibling commands
+- v0.4.2 bumped in 4 places: driver header, `@Field VERSION`, `packageManifest.json` (top-level + drivers[0]), README changelog
+- Scope discipline: ONLY `drivers/fully-kiosk/fully-kiosk.groovy`, `drivers/fully-kiosk/packageManifest.json`, `drivers/fully-kiosk/README.md`, and this history file. No T6, no PurpleAir, no other files.
+
+
+
+
+Applied 3 bugs reported from Mads's live tablet test:
+- **Fix #1 — beep() NPE guard (line 361-368):** Added `if (!toneFile?.trim())` check with `log.warn` and early return before the URLEncoder.encode call. Confirmed preference name is `toneFile` (input at line 116, `name:"toneFile"`).
+- **Fix #2 — 408/5xx demote to warn (lines 352-359, 570-577, 709-716, 744-751):** Patched all 4 `Invalid response` sites in `setLevelCallback`, `refreshCallback`, `updateDeviceDataCallback`, `sendCommandCallback`. Pattern: cast `response?.status as Integer`, then 408 and 5xx→warn, all other non-200→error. `logger()` function confirmed accepts "warn" (line ~990).
+- **Fix #3 — Remove setScreenBrightness (BREAKING):** Deleted `command "setScreenBrightness", ["Number"]` declaration from metadata block; deleted `def setScreenBrightness(value)` method body (3 lines). README 0.3.0 entry updated to remove "still accepts raw 0–255 for expert use" sentence. v0.4.1 README entry added with prominent ⚠️ BREAKING callout.
+- **Scope discipline:** ONLY modified `drivers/fully-kiosk/fully-kiosk.groovy`, `drivers/fully-kiosk/packageManifest.json`, `drivers/fully-kiosk/README.md`, and this history file. No T6, no PurpleAir, no other files touched.
+
+
+
 
 Added ~195 LOC of MQTT support as an additive, preference-gated layer. Architecture decisions:
 

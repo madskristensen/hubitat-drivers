@@ -4,6 +4,278 @@ Generated 2026-05-18T17:59:14Z
 
 ---
 
+## 2026-05-18 — Fully Kiosk MQTT Reality Check (Cypher follow-up)
+
+---
+author: cypher
+date: 2026-05-18T18:30:00-07:00
+status: completed
+subject: FKB MQTT topic/event verification — identified 4 event-name mismatches
+---
+
+# Fully Kiosk MQTT — Reality Check
+
+**Triggered by:** Mads's live testing shows only Broker URL / Username / Password fields. v0.4.0 driver assumed more.
+**Analyst:** Cypher
+**Date:** 2026-05-18
+
+---
+
+## TL;DR
+
+FKB's MQTT feature IS a PLUS feature but is free to try indefinitely. The default topic structure
+(`fully/deviceInfo/{deviceId}` and `fully/event/{eventType}/{deviceId}`) is **confirmed correct**,
+and the v0.4.0 driver's wildcard subscription to `fully/#` will receive everything. However, the
+driver has **wrong event-type name mappings** (`motionDetected`, `unpluggedAC`, `batteryLevel`, and
+`foregroundApp` do not match FKB's actual published event names), so several push events will be
+silently dropped. The next step is a v0.4.3 patch to fix those four event-name mappings.
+
+---
+
+## What FKB Actually Exposes (free vs PLUS)
+
+**Source:** Official FKB documentation at https://www.fully-kiosk.com/en/#mqtt
+(fetched 2026-05-18; "Other Settings" section + dedicated "## MQTT Integration" section)
+
+MQTT is explicitly marked **PLUS** in the feature list:
+> "MQTT integration (ver. 1.34+)" — listed under PLUS features
+
+However, the same page states:
+> "All PLUS features are unlimited FREE to try."
+
+So MQTT should be accessible without paying. The settings appear under:
+**Settings → Other Settings → MQTT Integration (PLUS)**
+
+### Fields the app exposes
+
+| Field | Notes |
+|---|---|
+| Enable MQTT | Toggle — turns the entire feature on/off |
+| MQTT Broker URL | e.g. `tcp://broker:1883` or `ssl://…:8883` |
+| MQTT Broker Username | Optional |
+| MQTT Broker Password | Optional |
+| MQTT Client ID | Optional; random if blank; supports `$deviceId` variable. **Added in FKB 1.41+** |
+| MQTT Device Info Topic | Full topic string; default `$appId/deviceInfo/$deviceId`. **Added in FKB 1.41+** |
+| MQTT Event Topic | Full topic string; default `$appId/event/$event/$deviceId`. **Added in FKB 1.41+** |
+
+### Why Mads only sees three fields
+
+Two most likely explanations (in order of probability):
+
+1. **The "Enable MQTT" toggle must be switched ON first.** Android settings commonly hide
+   sub-fields until the parent toggle is enabled. Mads may have opened the MQTT section but
+   not yet flipped the toggle, so only the basic connection fields are shown.
+2. **The Client ID and Topic fields require scrolling** within the MQTT sub-section. They were
+   added in FKB 1.41 and appear below the Password field.
+
+**There is no evidence that the free-trial tier hides these fields.** The docs list all seven
+fields without a license-tier qualifier inside the MQTT sub-section.
+
+---
+
+## Actual Topic Structure
+
+**Source:** "## MQTT Integration" section of https://www.fully-kiosk.com/en/#mqtt (fetched 2026-05-18)
+
+### Default topics (no customization)
+
+> "The complete device info will be published every 60 seconds as
+> `fully/deviceInfo/[deviceId]` topic (retaining, QOS=1).
+> Events will be published as `fully/event/[eventId]/[deviceId]` topic (non-retaining, QOS=1)."
+
+| Topic pattern | Direction | Retained | QOS |
+|---|---|---|---|
+| `fully/deviceInfo/{deviceId}` | FKB → broker | Yes | 1 |
+| `fully/event/{eventType}/{deviceId}` | FKB → broker | No | 1 |
+
+The `$appId` placeholder defaults to `fully`. Users running FKB 1.41+ can override the full topic
+strings, but the **default is always `fully/…`**.
+
+### Configurable via FKB 1.41+
+
+If a user sets "MQTT Device Info Topic" to e.g. `mytablet/deviceInfo/$deviceId`, the default
+`fully/…` prefix no longer applies. The v0.4.0 driver's `mqttTopicPrefix` preference handles this
+case — the user must match the custom prefix they set in FKB.
+
+---
+
+## Payload Format
+
+**Source:** Official docs + JS-event API cross-reference (same page, fetched 2026-05-18)
+
+### deviceInfo topic payload
+
+Full JSON object — identical to the REST `?cmd=getDeviceInfo` response. Contains fields including
+`batteryLevel`, `screenOn`, `screenBrightness`, `currentPage`, `isPlugged`, `appVersionName`, etc.
+Published every 60 seconds (retained). The v0.4.0 `handleFkDeviceInfo()` method correctly parses
+this JSON.
+
+### Event topic payloads
+
+The docs do not specify event-topic payload format explicitly. Based on the JS interface event
+signatures (same page), payloads are likely:
+
+| Event | Likely payload |
+|---|---|
+| `screenOn`, `screenOff` | Empty or `{}` |
+| `onBatteryLevelChanged` | JSON with `$level` (e.g. `{"level":85}`) or plain integer string |
+| `pluggedAC`, `pluggedUSB`, `pluggedWireless`, `unplugged` | Empty or `{}` |
+| `onMotion` | Empty or `{}` |
+| `onWebUrlChanged` | URL string or JSON |
+| `foreground`, `background` | Empty or `{}` |
+
+**Note:** Battery and screen-state changes are also reliably delivered via the 60-second
+`deviceInfo` retained publish. The event topics provide real-time notification; `deviceInfo`
+provides ground truth.
+
+---
+
+## Complete List of FKB MQTT Events
+
+**Source:** "## MQTT Integration" section of https://www.fully-kiosk.com/en/#mqtt (fetched 2026-05-18)
+
+> `screenOn, screenOff, pluggedAC, pluggedUSB, pluggedWireless, unplugged,
+> networkReconnect, networkDisconnect, internetReconnect, internetDisconnect,
+> powerOn, powerOff, showKeyboard, hideKeyboard, onMotion, onDarkness, onMovement,
+> volumeUp, volumeDown, onQrScanCancelled, onBatteryLevelChanged,
+> onScreensaverStart, onScreensaverStop, onDaydreamStart, onDaydreamStop,
+> onItemPlay, onPlaylistPlay, facesDetected, foreground, background,
+> onWebUrlChanged, kioskLocked, kioskUnlocked`
+
+---
+
+## Implications for v0.4.0 Driver
+
+### ✅ What is CORRECT in v0.4.0
+
+| Feature | Status |
+|---|---|
+| Default `mqttTopicPrefix` = `"fully"` | ✅ Correct — matches FKB's default `$appId` |
+| Wildcard subscription `{prefix}/#` | ✅ Correct — catches both `fully/deviceInfo/…` and `fully/event/…` |
+| `${prefix}/event/` branch in `parseMqttMessage()` | ✅ Correct topic prefix check |
+| `${prefix}/deviceInfo` branch in `parseMqttMessage()` | ✅ Correct topic prefix check |
+| `parts[2]` for `eventType` in event topic `fully/event/{eventType}/{deviceId}` | ✅ Correct index |
+| `handleFkDeviceInfo()` parsing the 60-second JSON snapshot | ✅ Correct |
+| MQTT subscribe-only (no publish of commands) | ✅ Correct — FKB does not subscribe to any topics |
+
+### ❌ What is WRONG in v0.4.0 — event-name mismatches
+
+The driver's `handleFkEvent()` switch uses wrong event-type strings. FKB publishes different names:
+
+| Driver case label | FKB actual event name | Effect |
+|---|---|---|
+| `"motionDetected"` | `"onMotion"` | Motion events **silently dropped** |
+| `"unpluggedAC"` | `"unplugged"` | Unplug events **silently dropped** |
+| `"batteryLevel"` | `"onBatteryLevelChanged"` | Real-time battery events **silently dropped** |
+| `"foregroundApp"` | *(not a real FKB event)* | Dead code — never fires |
+
+**Additional unhandled events** worth adding:
+
+| FKB event | Suggested attribute |
+|---|---|
+| `pluggedUSB` | `charging` → `"true"` |
+| `pluggedWireless` | `charging` → `"true"` |
+| `onWebUrlChanged` | `currentURL` attribute |
+| `foreground` / `background` | driver-state metadata (optional) |
+
+### Is `mqttTopicPrefix` Meaningful?
+
+Yes — it maps to FKB's configurable "MQTT Device Info Topic" / "MQTT Event Topic" prefix. The
+default `"fully"` is correct for out-of-the-box FKB installs. The preference IS useful for users
+who customise their FKB topic strings (FKB 1.41+). No change needed here.
+
+---
+
+## Does FKB Support MQTT Commands FROM Hubitat?
+
+**No.** FKB is **publish-only** on MQTT. The documentation describes no subscription capability.
+All commands (screenOn, loadUrl, restart, etc.) must go via the **REST API** at
+`http://{deviceIp}:2323/?cmd=…`. The v0.4.0 driver already handles commands via REST — this is
+correct and should not change.
+
+---
+
+## Recommended Action
+
+### Option (a): v0.4.3 patch — fix event-name mappings ✅ RECOMMENDED
+
+Four event-name mismatches need fixing in `handleFkEvent()`. This is a pure bug fix; the topic
+structure, subscription pattern, and REST command path are all correct.
+
+**Changes required in `drivers/fully-kiosk/fully-kiosk.groovy`:**
+
+```groovy
+// BEFORE (wrong)          // AFTER (correct FKB event name)
+"motionDetected"     →     "onMotion"
+"unpluggedAC"        →     "unplugged"
+"batteryLevel"       →     "onBatteryLevelChanged"
+"foregroundApp"      →     remove (dead code) or map to "onWebUrlChanged"
+```
+
+Also add `pluggedUSB` and `pluggedWireless` cases to set `charging = true` (currently only
+`pluggedAC` is handled).
+
+**Battery payload note:** The driver's existing `onBatteryLevelChanged` handler tries to parse a
+`batteryLevel` JSON key from the payload. The actual payload format is unconfirmed by official
+docs; if events fire but battery doesn't update, fallback to the 60-second `deviceInfo` poll
+(which definitely contains `batteryLevel`) is already in place via `handleFkDeviceInfo()`.
+
+### For Mads immediately — verify FKB settings
+
+In FKB on the tablet:
+1. Go to **Settings → Other Settings → MQTT Integration**
+2. **Enable the "Enable MQTT" toggle** — additional fields (Client ID, topic customisation)
+   should appear below the Password field after enabling
+3. Confirm Broker URL is set correctly
+4. Scroll down to verify Client ID and topic fields are left at defaults (blank = use `fully/…`)
+
+---
+
+## Sources
+
+- https://www.fully-kiosk.com/en/#mqtt — official FKB documentation (fetched 2026-05-18)
+  - "Other Settings" section: MQTT field list
+  - "## MQTT Integration" section: topic structure, event names, payload notes
+- `drivers/fully-kiosk/fully-kiosk.groovy` v0.4.0: driver source reviewed 2026-05-18
+- Home Assistant `python-fullykiosk` library: uses REST exclusively, no MQTT code found
+
+---
+
+## 2026-05-18 — Fully Kiosk v0.4.1 shipped
+
+**Commit:** 325d44e — `fully-kiosk v0.4.1: bug-fix patch`
+
+Three live-testing fixes from Mads's tablet:
+- BUG: NPE guard in beep() — toneFile preference null on fresh install
+- LOG NOISE: 408 timeout demoted from error→warn at 4 callback sites (transient by nature; tablet briefly unreachable)
+- BREAKING: Removed setScreenBrightness command — dual-scale UX (setLevel 0-100 vs setScreenBrightness 0-255) was confusing. setLevel(0-100) is the only brightness command now.
+
+---
+
+## 2026-05-18 — Fully Kiosk v0.4.2 shipped
+
+**Commit:** 85d6aea — `fully-kiosk v0.4.2: add clearOverlayMessage()`
+
+Mads asked how to dismiss overlay messages after setting them. Added clearOverlayMessage() command calling FKB's setOverlayMessage endpoint with empty text (documented FKB dismissal pattern). Complements setOverlayMessage(text) and deviceNotification(text).
+
+---
+
+## 2026-05-18 — Fully Kiosk v0.4.3 shipped (MQTT event-name fix)
+
+**Commit:** 6bae12f — `fully-kiosk v0.4.3: fix MQTT event-name mismatches`
+
+After v0.4.0 MQTT pivot, Cypher's reality-check uncovered 4 event-name mismatches in handleFkEvent() — driver was listening for the WRONG event names (motionDetected/unpluggedAC/batteryLevel/foregroundApp) instead of what FKB actually publishes (onMotion/unplugged/onBatteryLevelChanged; foregroundApp comes via deviceInfo not as event). Architecture was correct; just the case labels needed renaming.
+
+---
+
+## 2026-05-18 — Fully Kiosk v0.4.4 shipped (leading-slash defensive)
+
+**Commit:** fc10867 — `fully-kiosk v0.4.4: defensive leading-slash handling for MQTT topics`
+
+FKB docs publish topics with leading slash (/fully/event/...). MQTT semantically treats /fully/ and fully/ as different topic spaces. Belt-and-suspenders: subscribe to both `${prefix}/#` and `/${prefix}/#`, strip leading slash in parseMqttMessage before dispatch. Driver now robust to either FKB convention.
+
+---
+
 ## tank-daikin-wifi-v014-roadmap-complete
 
 ---
