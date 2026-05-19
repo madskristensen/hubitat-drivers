@@ -140,3 +140,6 @@ Added ~195 LOC of MQTT support as an additive, preference-gated layer:
 
 - MQTT attempt failed across 4 iterations — Hubitat MQTT client API signatures are fragile, broker compatibility is variable. The polling architecture is the reliable path.
 - Removing MQTT was the right call once it became clear the broker wasn't accepting the handshake.
+- `parseJson()` must never run on blank preference text or empty async HTTP bodies in Hubitat drivers; guard `?.trim()` first, wrap JSON parsing in `try/catch`, and early-return with `log.warn` instead of crashing `refresh()`.
+- Hubitat custom numeric attributes accept the UTF-8 unit string `µg/m³` cleanly; PurpleAir raw PM2.5 can emit as `pm2_5` with that exact unit.
+- PurpleAir v0.3.0 can add `TemperatureMeasurement` + `RelativeHumidityMeasurement` without conflicting with the existing custom `aqi`/`category` attributes.

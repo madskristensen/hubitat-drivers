@@ -2,11 +2,11 @@
   "packageName": "PurpleAir AQI Virtual Sensor",
   "minimumHEVersion": "2.2.0",
   "author": "Mads Kristensen",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "dateReleased": "2026-05-18",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/README.md",
-  "releaseNotes": "v0.2.0: namespace → mads; emitIfChanged eliminates ~35,040 duplicate events/year; descriptionText on sites uses device.displayName; 1-min interval quota warning; sentinel .isNumber() guards on pm2.5 field; logsOff auto-disable; lastActivity (Pattern B); fix IQAir→PurpleAir log prefix.\nv0.1.0: Initial fork from pfmiller0 v1.3.2; 3 Trinity audit fixes: AQ&U string mismatch, LRAPA/Woodsmoke case + wrong PM2.5 field, failCount operator-precedence breaking exponential backoff.",
+  "releaseNotes": "v0.3.0: parseJson guard for blank search_coords + empty API bodies; API key help/docs now point to develop.purpleair.com; add pm2_5, temperature, humidity, and confidence attributes (confidence reports the lowest contributing sensor score in averaging mode).\nv0.2.0: namespace → mads; emitIfChanged eliminates ~35,040 duplicate events/year; descriptionText on sites uses device.displayName; 1-min interval quota warning; sentinel .isNumber() guards on pm2.5 field; logsOff auto-disable; lastActivity (Pattern B); fix IQAir→PurpleAir log prefix.\nv0.1.0: Initial fork from pfmiller0 v1.3.2; 3 Trinity audit fixes: AQ&U string mismatch, LRAPA/Woodsmoke case + wrong PM2.5 field, failCount operator-precedence breaking exponential backoff.",
   "drivers": [
     {
       "id": "71f1eb74-4302-4a96-9c4d-20391936bf94",
@@ -14,7 +14,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/purpleair-aqi.groovy",
       "required": true,
-      "version": "0.2.0"
+      "version": "0.3.0"
     }
   ]
 }

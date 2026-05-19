@@ -1,7 +1,7 @@
 /**
  *  PurpleAir AQI Virtual Sensor
  *  Author:  Mads Kristensen
- *  Version: 0.2.0 — 2026-05-18
+ *  Version: 0.3.0 — 2026-05-18 — parseJson guards, API key portal URL, 4 new attributes
  *  License: MIT
  *
  *  Reads AQI data from the PurpleAir cloud API (api.purpleair.com/v1/sensors).
@@ -15,6 +15,10 @@
  *  permanent driver in this repo, not a staging area.
  *
  *  Changelog:
+ *    0.3.0 — 2026-05-18 — parseJson guard for blank search_coords + empty API
+ *      bodies; API key help now points to develop.purpleair.com; add pm2_5,
+ *      temperature, humidity, and confidence attributes (confidence reports the
+ *      lowest contributing sensor score in averaging mode)
  *    0.2.0 — 2026-05-18 — namespace → mads; emitIfChanged on all poll events
  *      (eliminates ~35,040 duplicate events/year at 1-hr default cadence);
  *      descriptionText on sites event uses device.displayName; 1-min interval
@@ -31,12 +35,12 @@
  *  PurpleAir AQI Virtual Sensor
  *
  *  PurpleAir sensor map: https://map.purpleair.com/
- *  API documentation: https://api.purpleair.com/ 
+ *  API documentation: https://api.purpleair.com/
  */
 
 import groovy.transform.Field
 
-@Field static final String DRIVER_VERSION = "0.2.0"
+@Field static final String DRIVER_VERSION = "0.3.0"
 
 metadata {
 	definition (
@@ -49,18 +53,22 @@ metadata {
 		capability "Sensor"
 		capability "Polling"
 		capability "Initialize"
+		capability "TemperatureMeasurement"
+		capability "RelativeHumidityMeasurement"
 
 		attribute "aqi", "number"
 		attribute "conversion", "string" // Conversion algorithm
 		attribute "category", "string" // Description of current air quality
 		attribute "sites", "string" // List of sensor sites used
+		attribute "pm2_5", "number" // Raw PM2.5 mass concentration
+		attribute "confidence", "number" // PurpleAir sensor confidence score
 		attribute "lastActivity", "string"
 
 		command "refresh"
 	}
 
 	preferences {
-		input "X_API_Key", "text", title: "PurpleAir API key", required: true, description: "Contact contact@purpleair.com to request an API key"
+		input "X_API_Key", "text", title: "PurpleAir API key", required: true, description: "Get a free API key at https://develop.purpleair.com/"
 		input "update_interval", "enum", title: "Update interval", required: true, options: [["1": "1 min"], ["5": "5 min"], ["10": "10 min"], ["15": "15 min"], ["30": "30 min"], ["60": "1 hr"], ["180": "3 hr"], ["0": "disabled"]], defaultValue: "60", description: "⚠️ The '1 min' option generates ~43,800 API requests/month per sensor — close to the free tier's 1M-points/month limit if multiple sensors are queried. Use 60 min (default) for normal operation."
 		input "conversion", "enum", title: "Apply conversion", required: false, description: "See map.purpleair.com for details", options: [["US EPA": "US EPA"], ["Woodsmoke": "Woodsmoke"], ["AQ&U": "AQ&U"], ["CF=1": "CF=1"], ["LRAPA": "LRAPA"]]
 		if (! conversion) {
@@ -103,14 +111,14 @@ def poll() {
 
 def configure() {
 	unschedule()
-	
+
 	if (! conversion) {
 		device.deleteCurrentState('conversion')
 	}
 	if (conversion != "US EPA" || ! hum_history || hum_history == "0") {
 		state.remove('HUMIDITY_HISTORY')
 	}
-	
+
 	if ( update_interval == "1" ) {
 		schedule('0 */1 * ? * *', 'refresh')
 	} else if ( update_interval == "5" ) {
@@ -160,23 +168,23 @@ void sensorCheck() {
 			pm25_count = "pm2.5"
 		}
 	}
-		
-	String query_fields="name,confidence,${pm25_count}"
-	if (conversion == "US EPA") {
-		query_fields+=",humidity"
+
+	String query_fields = "name,confidence,temperature,humidity,${pm25_count}"
+	if (device_search && weighted_avg) {
+		query_fields += ",latitude,longitude,position_rating"
 	}
-	if (weighted_avg) {
-		query_fields+=",latitude,longitude,position_rating"
-	}
-		
+
 	Map httpQuery
 	Float[] coords
-	
+
 	if (device_search) {
-		coords = parseJson(search_coords)
+		coords = parseSearchCoords()
+		if (!coords) {
+			return
+		}
 		Float[] dist2deg = distance2degrees(coords[0])
 		Float[] range = []
-				
+
 		if ( unit == "miles" ) {
 			range = [search_range/dist2deg[0], search_range/dist2deg[1]]
 		} else { // Convert to km
@@ -214,10 +222,10 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 	Map RESPONSE_FIELDS = [:]
 	Integer aqi2_5Value = -1
 	Integer aqi10Value = -1
-	String[][] sensorData
+	List sensorData = []
 	String sites
 	List<Map> sensors = []
-	
+
 	/*****************************
 	if (resp.getStatus() != 200 ) {
 		log.error "HTTP error from PurpleAir: " + resp.getStatus()
@@ -258,49 +266,79 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 		}
 	}
 	/*****************************/
-		
+
+	Map respJson = safeResponseJson(resp)
+	if (!respJson) {
+		return
+	}
+	if (!(respJson.fields instanceof List) || !(respJson.data instanceof List)) {
+		log.warn "[httpResponse] PurpleAir response is missing fields or data"
+		return
+	}
+
 	// Set field lookup map
-	resp.getJson().fields.eachWithIndex{it,index-> RESPONSE_FIELDS[(it)] = index}
-	
-	//logDebug "resp: ${resp.getJson().data}"
-	
-	if ( device_search ) {
+	respJson.fields.eachWithIndex { it, index -> RESPONSE_FIELDS[(it)] = index }
+
+	List rawSensorData = respJson.data as List
+
+	if (device_search) {
 		// Filter out lower quality devices
-		//sensorData = resp.getJson().data.findAll {it[RESPONSE_FIELDS["confidence"]] >= (confidenceThreshold as Integer) }
-		sensorData = resp.getJson().data.findAll {it[RESPONSE_FIELDS["confidence"]] >= 90}
-		if ( logEnable ) {
-			List confidence = sensorData.collect {['name': it[RESPONSE_FIELDS['name']], 'confidence': it[RESPONSE_FIELDS['confidence']].toInteger()]}
-			List dropped = confidence.findAll {it["confidence"] < 90}
-			//List dropped = resp.getJson().data.findAll {it[RESPONSE_FIELDS["confidence"]] < 90}
-			if ( dropped ) {
+		//sensorData = rawSensorData.findAll {it[RESPONSE_FIELDS["confidence"]] >= (confidenceThreshold as Integer) }
+		sensorData = rawSensorData.findAll {
+			String rawConfidence = it[RESPONSE_FIELDS["confidence"]]?.toString()
+			rawConfidence?.isNumber() && rawConfidence.toInteger() >= 90
+		}
+		if (logEnable) {
+			List confidence = rawSensorData.collect { row ->
+				String rawConfidence = row[RESPONSE_FIELDS['confidence']]?.toString()
+				if (!rawConfidence?.isNumber()) {
+					return ['name': row[RESPONSE_FIELDS['name']], 'confidence': null]
+				}
+				['name': row[RESPONSE_FIELDS['name']], 'confidence': rawConfidence.toInteger()]
+			}
+			List dropped = confidence.findAll { it['confidence'] == null || it['confidence'] < 90 }
+			if (dropped) {
 				logDebug "Sensor confidence: ${confidence}"
 				logDebug "Low confidence sensors dropped: ${dropped}"
 			}
 		}
 	} else {
-		sensorData = resp.getJson().data
+		sensorData = rawSensorData
 	}
-		
+
 	// Some sensors don't return humidity, fill in missing data with avg from other devices
 	// Also detect broken humidity sensors by looking for ones that never change
 	// TODO: make function for this?
 	Map humidity_history = [:]
 	Integer avg_humidity = 50
 	if (conversion == "US EPA" && hum_history) {
-		humidity_history = state.HUMIDITY_HISTORY?:[:]
+		humidity_history = state.HUMIDITY_HISTORY ?: [:]
 
-		sensorData.each {humidityHistoryUpdate(humidity_history, it[RESPONSE_FIELDS['name']], Integer.valueOf(it[RESPONSE_FIELDS['humidity']]?:0))}
-		// This mess is collecting the average of only the functional humidity sensors
-		avg_humidity = Math.round(sensorAverage(sensorData.collect {['humidity': humidityDeviceUpdating(humidity_history, it[RESPONSE_FIELDS['name']])?it[RESPONSE_FIELDS['humidity']].toInteger():0]}, 'humidity')?:avg_humidity)
-		
-		if (avg_humidity == null) {
+		sensorData.each { row ->
+			String rawHumidity = row[RESPONSE_FIELDS['humidity']]?.toString()
+			if (rawHumidity?.isNumber()) {
+				humidityHistoryUpdate(humidity_history, row[RESPONSE_FIELDS['name']], rawHumidity.toInteger())
+			}
+		}
+
+		List<Map> humiditySamples = sensorData.collect { row ->
+			String rawHumidity = row[RESPONSE_FIELDS['humidity']]?.toString()
+			if (!rawHumidity?.isNumber()) {
+				return null
+			}
+			[humidity: humidityDeviceUpdating(humidity_history, row[RESPONSE_FIELDS['name']]) ? rawHumidity.toInteger() : null]
+		}.findAll { it?.humidity instanceof Number }
+		Float avgHumidityValue = sensorAverage(humiditySamples, 'humidity')
+		if (avgHumidityValue != null) {
+			avg_humidity = Math.round(avgHumidityValue)
+		} else {
 			log.error 'No valid humidity data returned from sites and "US EPA" conversion selected. US EPA requires humidity data, please choose another option!'
 			return
 		}
 
 		state.HUMIDITY_HISTORY = humidity_history
 	}
-	
+
 	//logDebug "RESPONSE_FIELDS: ${RESPONSE_FIELDS}"
 
 	// initialize sensor maps
@@ -308,30 +346,39 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
     final int HUMIDITY_FUDGE = 4 // PurpleAir states humidity sensors are ~4% below ambiant humidity
 	Float[] sensor_coords = data.coords
 	Float pm25_conv
-	
+
 	//log.debug(sensorData)
-	sensorData.each {
-		Integer this_humidity = (humidityDeviceUpdating(humidity_history, it[RESPONSE_FIELDS['name']])?it[RESPONSE_FIELDS['humidity']].toInteger():avg_humidity) + HUMIDITY_FUDGE
-		if (weighted_avg) {
-			sensor_coords = [it[RESPONSE_FIELDS['latitude']].toFloat(), it[RESPONSE_FIELDS['longitude']].toFloat()]
+	sensorData.each { row ->
+		String rawHumidity = row[RESPONSE_FIELDS['humidity']]?.toString()
+		Integer reportedHumidity = rawHumidity?.isNumber() ? rawHumidity.toInteger() : null
+		Integer humidityForConversion = (reportedHumidity != null && (!hum_history || humidityDeviceUpdating(humidity_history, row[RESPONSE_FIELDS['name']]))) ? reportedHumidity : avg_humidity
+		Integer this_humidity = humidityForConversion + HUMIDITY_FUDGE
+		if (device_search && weighted_avg) {
+			String rawLatitude = row[RESPONSE_FIELDS['latitude']]?.toString()
+			String rawLongitude = row[RESPONSE_FIELDS['longitude']]?.toString()
+			sensor_coords = (rawLatitude?.isNumber() && rawLongitude?.isNumber()) ? [rawLatitude.toFloat(), rawLongitude.toFloat()] as Float[] : data.coords
 		}
 		// Sentinel guard: PurpleAir may return null/non-numeric pm2.5 fields for faulted sensors
-		String rawPm25 = it[RESPONSE_FIELDS[data.pm25_count]]?.toString()
-		//logDebug "${it[RESPONSE_FIELDS['name']]} raw pm25: ${rawPm25}"
+		String rawPm25 = row[RESPONSE_FIELDS[data.pm25_count]]?.toString()
+		//logDebug "${row[RESPONSE_FIELDS['name']]} raw pm25: ${rawPm25}"
 		if (!rawPm25?.isNumber()) {
-			log.error("${it[RESPONSE_FIELDS['name']]} has no valid pm25 data (value: ${rawPm25})")
+			log.error("${row[RESPONSE_FIELDS['name']]} has no valid pm25 data (value: ${rawPm25})")
 		} else {
-			Float pm25Value = rawPm25 as Float
-			pm25_conv = apply_conversion(conversion?:"none", pm25Value, this_humidity)
+			String rawTemperature = row[RESPONSE_FIELDS['temperature']]?.toString()
+			String rawConfidence = row[RESPONSE_FIELDS['confidence']]?.toString()
+			String rawPositionRating = RESPONSE_FIELDS.containsKey('position_rating') ? row[RESPONSE_FIELDS['position_rating']]?.toString() : null
+			Float pm25Value = rawPm25.toFloat()
+			pm25_conv = apply_conversion(conversion ?: "none", pm25Value, this_humidity)
 			sensors << [
-				'site': it[RESPONSE_FIELDS['name']],
+				'site': row[RESPONSE_FIELDS['name']],
 				'pm25': pm25Value,
 				'pm25_conv': pm25_conv,
-				'confidence': it[RESPONSE_FIELDS['confidence']].toInteger(),
+				'temperature': rawTemperature?.isNumber() ? rawTemperature.toFloat() : null,
+				'humidity': reportedHumidity,
+				'confidence': rawConfidence?.isNumber() ? rawConfidence.toInteger() : null,
 				'distance': distance(data.coords, sensor_coords),
 				'coords': sensor_coords,
-				'position_rating': RESPONSE_FIELDS['position_rating']?it[RESPONSE_FIELDS['position_rating']].toInteger():-1,
-				'humidity': this_humidity
+				'position_rating': rawPositionRating?.isNumber() ? rawPositionRating.toInteger() : -1
 			]
 		}
 	}
@@ -353,42 +400,69 @@ void httpResponse(hubitat.scheduling.AsyncResponse resp, Map data) {
 		}
 	}
 
-	if (! conversion) {
-		if ( weighted_avg && device_search) {
-			aqi2_5Value = getPart2_5_AQI(sensorAverageWeighted(sensors, 'pm25', data.coords))
-		} else {
-			aqi2_5Value = getPart2_5_AQI(sensorAverage(sensors, 'pm25'))
-		}
-	} else {
-		if ( weighted_avg && device_search) {
-			aqi2_5Value = getPart2_5_AQI(sensorAverageWeighted(sensors, 'pm25_conv', data.coords))
-		} else {
-			aqi2_5Value = getPart2_5_AQI(sensorAverage(sensors, 'pm25_conv'))
-		}
+	if (sensors.size() == 0) {
+		log.error(device_search ? "No sensors found in search area" : "Selected sensor returned no valid data")
+		return
 	}
-	
-	AQIcategory = getCategory(aqi2_5Value)
-	
+
+	Float aqiSourceValue
+	Float pm25RawValue
+	Float temperatureValue
+	Float humidityValue
+	if (weighted_avg && device_search) {
+		aqiSourceValue = sensorAverageWeighted(sensors, conversion ? 'pm25_conv' : 'pm25', data.coords)
+		pm25RawValue = sensorAverageWeighted(sensors, 'pm25', data.coords)
+		temperatureValue = sensorAverageWeighted(sensors, 'temperature', data.coords)
+		humidityValue = sensorAverageWeighted(sensors, 'humidity', data.coords)
+	} else {
+		aqiSourceValue = sensorAverage(sensors, conversion ? 'pm25_conv' : 'pm25')
+		pm25RawValue = sensorAverage(sensors, 'pm25')
+		temperatureValue = sensorAverage(sensors, 'temperature')
+		humidityValue = sensorAverage(sensors, 'humidity')
+	}
+	if (aqiSourceValue == null) {
+		log.error "No valid PM2.5 data returned from PurpleAir"
+		return
+	}
+
+	aqi2_5Value = getPart2_5_AQI(aqiSourceValue)
+	String AQIcategory = getCategory(aqi2_5Value)
+	BigDecimal pm25Display = roundToScale(pm25RawValue, 1)
+	BigDecimal temperatureDisplay = roundToScale(temperatureValue, 1)
+	Integer humidityDisplay = humidityValue != null ? Math.round(humidityValue) : null
+	Integer confidenceValue = sensors.collect { it['confidence'] }.findAll { it instanceof Number }.collect { it.toInteger() }.min()
+
 	sites = sensors.collect { it['site'] }.sort()
 	//sites = sensorData.collect { it['site' }.sort().join(', ') // Remove brackets around sites?
-	
-	if ( sensors.size() == 0 ) {
-		log.error "No sensors found in search area"
+
+	if (sensors.size() == 1) {
+		emitIfChanged("sites", sites, "${device.displayName} sites is ${sites}")
 	} else {
-		if (sensors.size() == 1) {
-			emitIfChanged("sites", sites, "${device.displayName} sites is ${sites}")
-		} else {
-			emitIfChanged("sites", sites, "${device.displayName} sites averaged from ${sensors.size()} sites: ${sites}")
-		}
-		emitIfChanged("category", AQIcategory, "${device.displayName} category is ${AQIcategory}")
-		if (conversion) {
-			emitIfChanged("conversion", conversion, "${device.displayName} conversion is ${conversion}")
-			emitIfChanged("aqi", aqi2_5Value, "${device.displayName} AQI is ${aqi2_5Value}", "PM 2.5 AQI (${conversion})")
-		} else {
-			emitIfChanged("aqi", aqi2_5Value, "${device.displayName} AQI is ${aqi2_5Value}", "PM 2.5 AQI")
-		}
-		touchActivity()
+		emitIfChanged("sites", sites, "${device.displayName} sites averaged from ${sensors.size()} sites: ${sites}")
 	}
+	if (pm25Display != null) {
+		emitIfChanged("pm2_5", pm25Display, "${device.displayName} pm2_5 is ${pm25Display} µg/m³", "µg/m³")
+	}
+	if (temperatureDisplay != null) {
+		emitIfChanged("temperature", temperatureDisplay, "${device.displayName} temperature is ${temperatureDisplay}°F", "°F")
+	}
+	if (humidityDisplay != null) {
+		emitIfChanged("humidity", humidityDisplay, "${device.displayName} humidity is ${humidityDisplay}%", "%")
+	}
+	if (confidenceValue != null) {
+		String confidenceDesc = (device_search && sensors.size() > 1) ?
+			"${device.displayName} confidence is ${confidenceValue}% (lowest contributing sensor score)" :
+			"${device.displayName} confidence is ${confidenceValue}%"
+		emitIfChanged("confidence", confidenceValue, confidenceDesc, "%")
+	}
+	emitIfChanged("category", AQIcategory, "${device.displayName} category is ${AQIcategory}")
+	if (conversion) {
+		emitIfChanged("conversion", conversion, "${device.displayName} conversion is ${conversion}")
+		emitIfChanged("aqi", aqi2_5Value, "${device.displayName} AQI is ${aqi2_5Value}", "PM 2.5 AQI (${conversion})")
+	} else {
+		emitIfChanged("aqi", aqi2_5Value, "${device.displayName} AQI is ${aqi2_5Value}", "PM 2.5 AQI")
+	}
+	touchActivity()
 }
 
 void humidityHistoryUpdate(Map history, String site, Integer val) {
@@ -404,11 +478,11 @@ void humidityHistoryUpdate(Map history, String site, Integer val) {
 Boolean humidityDeviceUpdating(Map history, String site) {
 	final int MIN_HISTORY = 3
 	Integer hr = (new Date())[Calendar.HOUR]
-	
+
 	if (! history.containsKey(site) ) {
 		return null
 	}
-	
+
 	String last_hr
 	Integer last_val = 0
 	for (int i = 0; i <= 11; i++) {
@@ -420,7 +494,7 @@ Boolean humidityDeviceUpdating(Map history, String site) {
 		}
 	}
 	//logDebug "last_val: ${last_val}"
-	
+
 	if (last_val == 0) {
 		logDebug "${site} hum offline"
 		return false
@@ -428,60 +502,65 @@ Boolean humidityDeviceUpdating(Map history, String site) {
 		logDebug "${site} hum passing. insufficient history"
 		return true
 	}
-	
+
 	if (! history[(site)].any {it.value != last_val} ) {
 		logDebug "${site} hum not updating ${history[(site)]}"
 	}
-	
+
 	return history[(site)].any {it.value != last_val}
 }
 
 Float sensorAverage(List<Map> sensors, String field) {
 	Integer count = 0
-	Float sum = 0
-    
-	sensors.each {
-		if (it[field]) {
-			sum = sum + it[field]
-			count = count + 1
+	Float sum = 0.0
+
+	sensors.each { sensor ->
+		Float value = numericValue(sensor[field])
+		if (value != null) {
+			sum += value
+			count += 1
 		}
 	}
 
-	if (sum > 0) {
+	if (count > 0) {
 		return sum / count
-	} else {
-		log.warn "sensorAverage: Site ${sensors.site} field '${field}' is 0.0"
-		return 0
 	}
+	log.warn "sensorAverage: No numeric '${field}' values available"
+	return null
 }
 
 Float sensorAverageWeighted(List<Map> sensors, String field, Float[] coords) {
+	List<Map> validSensors = sensors.findAll { numericValue(it[field]) != null }
+	if (!validSensors) {
+		log.warn "sensorAverageWeighted: No numeric '${field}' values available"
+		return null
+	}
+
 	Float count = 0.0
 	Float sum = 0.0
 	ArrayList distances = []
 	// ArrayList weights = []
 	Float nearest = 0.0
-	
+
 	// Weighted average. First find nearest sensor. Then divide sensors distances by nearest distance to get weights.
-	sensors.each {
-		distances.add(it['distance'])
+	validSensors.each { sensor ->
+		distances.add(numericValue(sensor['distance']) ?: 0.0)
 	}
 	nearest = distances.min()
-	
-	sensors.eachWithIndex { it, i ->
-		Float val = it[field]
-		Float weight = nearest / Math.sqrt(distances[i]) * (it['position_rating']+1)
+
+	validSensors.eachWithIndex { sensor, i ->
+		Float val = numericValue(sensor[field])
+		Float weight = nearest / Math.sqrt(distances[i]) * ((numericValue(sensor['position_rating']) ?: -1.0) + 1)
 		sum += val * weight
 		count += weight
 	}
 	// logDebug "weights: ${weights}"
 	// logDebug "distances: ${distances}"
-	if (sum > 0) {
+	if (count > 0) {
 		return sum / count
-	} else {
-		log.warn "sensorAverageWeighted: Site ${sensors.site} field '${field}' is 0.0"
-		return 0
 	}
+	log.warn "sensorAverageWeighted: No usable weighted '${field}' values available"
+	return null
 }
 
 // getAQI and AQILinear functions from https://www.airnow.gov/aqi/aqi-calculator
@@ -585,9 +664,9 @@ Float us_epa_conversion(Float PM, Float RH) {
 	//
 	// Source: https://cfpub.epa.gov/si/si_public_record_report.cfm?dirEntryId=353088&Lab=CEMM
 	// PDF, p26
-	
+
 	Float c
-	
+
 	if ( PM < 30 ) {
 		c = 0.524 * PM - 0.0862 * RH + 5.75
 	} else if ( PM < 50 ) {
@@ -602,7 +681,7 @@ Float us_epa_conversion(Float PM, Float RH) {
 	} else {
 		c = 2.966 + 0.69*PM + 8.84*(10**(-4))*(PM**2)
 	}
-	
+
 	return (c >= 0)?c:0
 }
 
@@ -645,11 +724,94 @@ Float distance(Float[] coorda, Float[] coordb) {
 }
 
 // Returns miles per degree for a given latitude
-Float[] distance2degrees(Float latitude) {	
+Float[] distance2degrees(Float latitude) {
 	Float latMilesPerDegree = 69.172 * Math.cos(Math.toRadians(latitude))
 	Float longMilesPerDegree = 68.972
-	
+
 	return [latMilesPerDegree, longMilesPerDegree]
+}
+
+private Float[] parseSearchCoords() {
+	if (!search_coords?.trim()) {
+		log.warn "[refresh] search_coords is empty — geolocation search requires lat/lng input"
+		return null
+	}
+	try {
+		def coords = parseJson(search_coords)
+		if (!(coords instanceof List) || coords.size() < 2) {
+			log.warn "[refresh] search_coords must be JSON [lat, lng]"
+			return null
+		}
+		String lat = coords[0]?.toString()
+		String lng = coords[1]?.toString()
+		if (!lat?.isNumber() || !lng?.isNumber()) {
+			log.warn "[refresh] search_coords must be JSON [lat, lng]"
+			return null
+		}
+		return [lat.toFloat(), lng.toFloat()] as Float[]
+	} catch (Exception e) {
+		log.warn "[refresh] search_coords must be JSON [lat, lng]"
+		return null
+	}
+}
+
+private String safeResponseBody(hubitat.scheduling.AsyncResponse resp) {
+	try {
+		def body = resp?.getData()
+		if (body != null) {
+			return body.toString()
+		}
+	} catch (ignored) {
+	}
+	try {
+		def body = resp?.data
+		return body != null ? body.toString() : ""
+	} catch (ignoredAgain) {
+		return ""
+	}
+}
+
+private Map safeResponseJson(hubitat.scheduling.AsyncResponse resp) {
+	try {
+		if (resp?.json instanceof Map) {
+			return resp.json as Map
+		}
+	} catch (ignored) {
+	}
+	try {
+		def parsed = resp?.getJson()
+		if (parsed instanceof Map) {
+			return parsed as Map
+		}
+	} catch (Exception e) {
+		String body = safeResponseBody(resp)
+		if (!body?.trim()) {
+			log.warn "[httpResponse] PurpleAir returned an empty response body"
+		} else {
+			log.warn "[httpResponse] PurpleAir returned invalid JSON: ${e.message}"
+		}
+		return null
+	}
+	String body = safeResponseBody(resp)
+	if (!body?.trim()) {
+		log.warn "[httpResponse] PurpleAir returned an empty response body"
+	}
+	return null
+}
+
+private Float numericValue(value) {
+	if (value instanceof Number) {
+		return value.toFloat()
+	}
+	String text = value?.toString()
+	return text?.isNumber() ? text.toFloat() : null
+}
+
+private BigDecimal roundToScale(Float value, Integer scale = 1) {
+	if (value == null) {
+		return null
+	}
+	return BigDecimal.valueOf(value.toDouble()).setScale(scale, java.math.RoundingMode.HALF_UP)
 }
 
 void logDebug(String s) {

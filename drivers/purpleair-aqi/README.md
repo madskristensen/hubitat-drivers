@@ -7,16 +7,20 @@ Reads AQI data from the [PurpleAir cloud API](https://api.purpleair.com/) using 
 | Attribute | Details |
 |---|---|
 | `aqi` | Current AQI value (PM 2.5) |
+| `pm2_5` | Raw PM2.5 mass concentration (`µg/m³`) averaged from the contributing sensor set |
+| `temperature` | PurpleAir ambient temperature (`°F`, rounded to 1 decimal) |
+| `humidity` | PurpleAir relative humidity (`%`) |
+| `confidence` | Selected sensor confidence, or the lowest contributing sensor confidence when averaging |
 | `category` | Air quality category (Good / Moderate / Unhealthy / etc.) |
 | `conversion` | Active conversion algorithm name |
 | `sites` | Sensor sites contributing to the reading |
 | `lastActivity` | ISO 8601 timestamp of last successful API response |
 
-Capabilities: `Sensor`, `Polling`, `Initialize`.
+Capabilities: `Sensor`, `Polling`, `Initialize`, `TemperatureMeasurement`, `RelativeHumidityMeasurement`.
 
 ## Setup
 
-1. **Get a PurpleAir API key** — visit [develop.purpleair.com](https://develop.purpleair.com/) (or email contact@purpleair.com).
+1. **Get a PurpleAir API key** — visit [develop.purpleair.com](https://develop.purpleair.com/).
 2. In Hubitat, go to **Devices → Add Device → Virtual** and create a new virtual device using the **PurpleAir AQI Virtual Sensor** driver.
 3. In **Preferences**, enter your API key.
 4. Choose a sensor mode:
@@ -39,7 +43,7 @@ Capabilities: `Sensor`, `Polling`, `Initialize`.
 | 5 min | ~8,760 / sensor | Acceptable for a single sensor |
 | 60 min (default) | ~730 / sensor | Recommended; well within free tier |
 
-The driver uses `asynchttpGet` (Hubitat's async HTTP pattern). `emitIfChanged` suppresses duplicate events when the AQI, category, conversion, and sites are unchanged between polls — at the 1-hour default this eliminates ~35,040 events/year compared to unconditional `sendEvent`.
+The driver uses `asynchttpGet` (Hubitat's async HTTP pattern). `emitIfChanged` suppresses duplicate events when the AQI, category, conversion, sites, pm2_5, temperature, humidity, and confidence are unchanged between polls — at the 1-hour default this eliminates a large amount of duplicate event noise compared to unconditional `sendEvent`.
 
 ## What's Fixed (vs. upstream v1.3.2)
 
@@ -75,5 +79,6 @@ MIT License — fork maintained by Mads Kristensen (2026).
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 0.3.0 | 2026-05-18 | parseJson guard for blank search_coords + empty API bodies; API key docs now point to develop.purpleair.com; add pm2_5, temperature, humidity, and confidence attributes (confidence reports the lowest contributing sensor score in averaging mode) |
 | 0.2.0 | 2026-05-18 | namespace → mads; emitIfChanged on all poll events; descriptionText on sites uses device.displayName; 1-min interval quota warning; UUID in packageManifest; fix IQAir→PurpleAir log prefix; logsOff auto-disable after 30 min; lastActivity (Pattern B); sentinel .isNumber() guards on pm2.5 field |
 | 0.1.0 | 2026-05-18 | Initial fork from pfmiller0 v1.3.2; Trinity audit fixes: AQ&U string mismatch, LRAPA/Woodsmoke case + wrong PM2.5 field, failCount operator-precedence breaking exponential backoff |
