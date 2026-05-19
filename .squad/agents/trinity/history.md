@@ -159,3 +159,17 @@ Your post-fork audit drove the v0.2.0 polish across all 3 drivers. All 15 of you
 - Cloud-poll drivers should treat `lastActivity` as a coarse freshness signal and keep disabled polling truly disabled even on error paths. Manual refresh and retry code are where schedule leaks tend to sneak back in.
 - If a driver caches sensor history in `state`, key it by a stable sensor identifier and prune stale entries. Human-readable site names are not stable enough for long-lived health heuristics.
 - Repo release hygiene still matters at the driver header level: keep each top-of-file `Changelog:` entry as one parsable `version — YYYY-MM-DD — description` line so release-note extraction does not depend on wrapped continuation lines.
+
+## Session Arc 2026-05-19: PurpleAir Production Bug Audit → v0.4.0 Shipping
+
+**Trinity #6 — Post-v0.3.0 Bug Audit:** Identified 5 production bugs for v0.4.0 scope:
+1. String-math retry backoff (Groovy String * Integer trap)
+2. Disabled polling retry storm (error callbacks triggering reschedules)
+3. distance2degrees() pole clamp (missing pole-handling math)
+4. Zero-distance averaging (divide-by-zero on sensor co-location)
+5. Async body guards (empty PurpleAir API response crash risk)
+
+**Outcome:** All 5 bugs shipped fixed in Tank #22 (PurpleAir v0.4.0, commit 2d62b05). Quality audit complete; driver production-ready.
+
+**Deliverables:** Orchestration log created (.squad/orchestration-log/2026-05-19-043500Z-trinity-6.md)
+

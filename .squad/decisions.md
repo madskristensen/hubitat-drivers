@@ -1,6 +1,184 @@
 # Decisions
 
-Generated 2026-05-18T17:59:14Z
+Generated 2026-05-19T04:35:00Z
+
+---
+
+## 2026-05-19 — HPM Registration Complete + Changelog Format Rule Established
+
+**Decision:** Three drivers (Honeywell T6 Pro v0.5.0, Fully Kiosk v0.5.0, PurpleAir AQI v0.4.0) are now registered in root `packageManifest.json` and `README.md`. Release workflow blockers (changelog parsing + HPM discovery) are resolved. Changelog single-line format rule is now team standard.
+
+**Status:** ✅ MERGED (commits 33a2ec7, d7ab4e4, 273f065, 6d2ed6a)
+
+**Drivers Now HPM-Discoverable (Root Registration):**
+- Honeywell T6 Pro Thermostat v0.5.0 (Z-Wave climate control; local network)
+- Fully Kiosk Browser v0.5.0 (tablet/mobile remote; local REST API)
+- PurpleAir AQI Virtual Sensor v0.4.0 (air quality; cloud API)
+
+Plus 4 previously registered:
+- Touchstone / Tuya Fireplace v0.1.30 (fireplace control; local Tuya protocol)
+- Gemstone Lights v0.4.16 (outdoor lighting; cloud API)
+- SunStat Connect Plus (parent) v0.1.11 (floor heating; cloud API)
+- SunStat Connect Plus Thermostat (child) v0.1.11
+
+**Root Bundle Version:** Bumped to 1.1.0 (was 1.0.5)
+
+---
+
+## Changelog Single-Line Format Rule
+
+**ESTABLISHED RULE:** All driver changelog entries must be single-line format inside the `Changelog:` section. This is required for `release.yml`'s Python regex parser (line 136).
+
+### Format Specification
+
+**Header structure:**
+```groovy
+/**
+ *  Driver Name
+ *  ...
+ *
+ *  Changelog:
+ *    X.Y.Z — YYYY-MM-DD — description (all on one line)
+ *    X.Y.Z — YYYY-MM-DD — description (all on one line)
+ */
+```
+
+**Pattern details:**
+1. `Changelog:` label REQUIRED (line-by-line parser gate)
+2. Indentation: 4 spaces after `*` marker for entries
+3. Version format: `X.Y.Z` (three dotted numbers)
+4. Date separators: em-dash or hyphen `[—-]` (Unicode U+2014 or ASCII 45)
+5. Entry format: `X.Y.Z — YYYY-MM-DD — <description>`
+6. Single line only: NO line wrapping (regex anchors to `$` line-end)
+7. Description: Free-form text (joined semicolons separate clauses if needed)
+
+### Regex Used by release.yml
+```python
+r'^(\d+\.\d+\.\d+)\s+[—-]\s+(\d{4}-\d{2}-\d{2})\s+[—-]\s+(.*)$'
+```
+- Group 1: version (X.Y.Z)
+- Group 2: date (YYYY-MM-DD)
+- Group 3: description (free text, captured to end-of-line)
+
+### Reference Examples
+
+**✅ CORRECT (PurpleAir, Honeywell, Touchstone pattern):**
+```groovy
+ *  Changelog:
+ *    0.4.0 — 2026-05-18 — BUG FIXES: failCount string-multiplication, disabled-poll retry storm; POLISH: refresh-on-save, canonical async error handling
+ *    0.3.0 — 2026-05-18 — Added pm2_5, temperature, humidity attributes; parseJson guard for blank search_coords
+ *    0.1.0 — 2026-05-18 — Initial fork; Trinity audit fixes: AQ&U string mismatch, LRAPA case + wrong PM2.5 field
+```
+
+**❌ INCORRECT (Fully Kiosk old pattern — now fixed):**
+```groovy
+ *  Version: 0.5.0 — 2026-05-18 — Removed MQTT support: reverted to local REST polling after
+ *                                broker compatibility issues. Cleaner, simpler,
+ *                                more reliable.
+```
+Problems:
+- `Version: ` prefix (should be version number ONLY)
+- Multi-line continuation (breaks regex line-anchor `$`)
+- Missing `Changelog:` label
+- Wrong indentation (2 vs 4 spaces)
+
+---
+
+## Impact on Future Driver Releases
+
+**Checklist for new/updated driver versions (Item #6 in Mads's HPM directive):**
+
+Before tagging v1.0 or shipping via HPM:
+1. ✅ Driver `.groovy` file — version + SINGLE-LINE changelog entry under `Changelog:` label
+2. ✅ Driver folder `packageManifest.json` — version bump
+3. ✅ Driver folder `README.md` — changelog row
+4. ✅ Root `README.md` — driver listed in inventory table (name + version + description + link)
+5. ✅ Root `packageManifest.json` — driver bundle entry (id, name, namespace, location, version)
+6. ✅ Commit + push (release workflow auto-tags and publishes)
+
+**Violation detection:** If release.yml workflow fails with "No changelog entry found for version X.Y.Z", the changelog format is incorrect. Likely causes:
+1. Missing `Changelog:` label
+2. "Version: " prefix instead of version number directly
+3. Multi-line format (line wraps to next line in comment block)
+4. Wrong indentation
+
+---
+
+## Cross-References
+
+- **release.yml regex:** `.github/workflows/release.yml` line 136
+- **HPM directive:** `.squad/decisions/inbox/copilot-directive-hpm-registration.md` (mandatory registration rule)
+- **Link's work log:** `.squad/agents/link/history.md` (2026-05-19 entry with full technical details)
+- **Drivers registered:** honeywell-t6-pro, fully-kiosk, purpleair-aqi
+- **Tags created:** bundle-v1.1.0, fully-kiosk-v0.5.0, honeywell-t6-pro-v0.5.0, purpleair-aqi-v0.4.0
+
+---
+
+## 2026-05-18 — PurpleAir v0.4.0 shipped
+
+**Author:** Tank
+**Requested by:** Mads Kristensen
+**Status:** completed
+
+### Scope shipped
+- Landed all four Trinity production bugs in `drivers/purpleair-aqi/`: retry/backoff String-math fix, disabled-poll retry guard, corrected `distance2degrees()` lat/lng math with pole clamp, and zero-distance protection in `sensorAverageWeighted()`.
+- Added polish requested for v0.4.0: canonical async HTTP error handling, refresh-on-save, `AirQuality` capability plus `airQualityIndex`, `runEvery*` scheduling, hub temperature-scale conversion, cleaner `sites` output, stable `AQI` units, and 60-second `lastActivity` throttling.
+- Flattened the driver-header changelog to one line per version so `.github/workflows/release.yml` can extract release notes from PurpleAir again.
+- Bumped `packageManifest.json`, README changelog, and driver header to `0.4.0`.
+
+### Architectural choices
+- **Retry math now coerces once, then reuses the integer.** This avoids repeated String parsing and prevents Groovy's `String * Integer` repetition trap from reappearing elsewhere in the backoff path.
+- **Disabled polling stays disabled even on failures.** Error callbacks still log useful diagnostics, but `update_interval == "0"` never schedules a retry.
+- **Exact sensor-coordinate matches prefer the zero-distance set.** When a search point lands on a sensor, averaging only that co-located subset is more correct than letting divide-by-zero poison the weighted average.
+
+---
+
+## 2026-05-18 — PurpleAir v0.3.0 shipped
+
+**Author:** Tank
+**Requested by:** Mads Kristensen
+**Status:** completed
+
+### Scope shipped
+- Added a `parseJson` guard for blank `search_coords` so geolocation refresh exits early with a warning instead of throwing.
+- Added async response JSON/body guards so empty PurpleAir bodies log and bail instead of crashing the callback.
+- Updated API-key onboarding text/docs to point at [develop.purpleair.com](https://develop.purpleair.com/).
+- Added `pm2_5`, `temperature`, `humidity`, and `confidence` attributes; bumped header, README, and manifest to v0.3.0.
+
+### Architectural choices
+- **Blank geolocation input does not fall back to single-sensor mode.** Falling back would silently change the user's data source; v0.3.0 warns and leaves the driver state unchanged.
+- **Averaged `confidence` emits the lowest contributing sensor score.** This is the most conservative, user-visible summary of aggregate quality after the hardcoded `>= 90` filter.
+- **Temperature/humidity averages skip missing sensor values.** AQI averaging still requires valid PM2.5, but the new attributes do not let null temperature/humidity fields poison the aggregate.
+
+---
+
+## 2026-05-18 — User directive — HPM registration is mandatory
+
+**By:** Mads Kristensen (via Copilot)
+
+**What:** Every new driver — and any driver bumping a notable version (e.g., feature add, scope change) — MUST be registered in the root `README.md` AND the root `packageManifest.json` of this repo before being considered "shipped." HPM (Hubitat Package Manager) discovers drivers via the root manifest; an unregistered driver is invisible to HPM users no matter what packageManifest.json sits in the driver folder.
+
+**Per-driver checklist** when shipping/updating:
+1. Driver `.groovy` file — version + changelog entry (single-line format for release.yml regex)
+2. Driver folder `packageManifest.json` — version bump
+3. Driver folder `README.md` — changelog row
+4. **Root `README.md`** — driver listed in the inventory table with current version + short description + install link
+5. **Root `packageManifest.json`** — driver bundle entry updated (location, version, name)
+6. Commit + push (release workflow tags and publishes)
+
+**Why:** User request — without root-level registration, drivers ship to GitHub but never reach end-users through HPM. Captured as a permanent team rule.
+
+**Immediate follow-up:** Verify T6 Pro v0.3.0, Fully Kiosk Browser v0.5.0, and PurpleAir AQI v0.3.0 are all present and current in both root files. Queued for after Trinity's quality audit completes (so any quality fixes get bundled in the same registration pass).
+
+---
+
+## 2026-05-18 — User directive — user's name is Mads
+
+**By:** Mads Kristensen (via Copilot)
+
+**What:** The user is named Mads (Mads Kristensen). Never refer to him as "Brady" — that's an example name baked into the squad.agent.md governance file, not the actual user. All agent spawn prompts, README references, decision entries, and conversational replies must use "Mads" exclusively.
+
+**Why:** User-stated identity correction. Captured for team memory so no agent leaks the example name in future spawns or docs.
 
 ---
 

@@ -160,3 +160,16 @@ Added ~195 LOC of MQTT support as an additive, preference-gated layer:
 - `parseJson()` must never run on blank preference text or empty async HTTP bodies in Hubitat drivers; guard `?.trim()` first, wrap JSON parsing in `try/catch`, and early-return with `log.warn` instead of crashing `refresh()`.
 - Hubitat custom numeric attributes accept the UTF-8 unit string `µg/m³` cleanly; PurpleAir raw PM2.5 can emit as `pm2_5` with that exact unit.
 - PurpleAir v0.3.0 can add `TemperatureMeasurement` + `RelativeHumidityMeasurement` without conflicting with the existing custom `aqi`/`category` attributes.
+
+## Session Arc 2026-05-19: Two Drivers Shipped + Changelog Format Rule
+
+**Tank #20:** Fully Kiosk v0.5.0 shipped with MQTT-to-REST wording clarification. Changelog flattened to single-line format (release.yml regex requirement). Commit: 61644e4.
+
+**Tank #21:** PurpleAir v0.3.0 shipped with parseJson guard for blank search_coords, async response guards, and new attributes (pm2_5, temperature, humidity, confidence). Commit: fd212cc.
+
+**Tank #22:** PurpleAir v0.4.0 shipped with all 5 Trinity production bugs fixed (String-math retry, disabled-poll guard, distance2degrees pole clamp, zero-distance protection, divide-by-zero guards), plus polish: AirQuality capability, airQualityIndex attribute, runEvery* scheduling, hub temp-scale conversion, canonical async error handling, refresh-on-save, cleaner sites output, stable AQI units, 60-second lastActivity throttling. Changelog flattened. Commit: 2d62b05.
+
+**Key Learning:** Changelog single-line format is now enforced across all drivers (required by release.yml line 136 regex).
+
+**Deliverables:** Orchestration logs created (.squad/orchestration-log/2026-05-19-043500Z-tank-*.md)
+
