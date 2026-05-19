@@ -1,0 +1,19 @@
+{
+  "packageName": "Honeywell T6 Pro Thermostat",
+  "author": "Mads Kristensen (fork of djdizzyd/Bryan Copeland)",
+  "minimumHEVersion": "2.3.0",
+  "dateReleased": "2026-05-18",
+  "version": "0.1.0",
+  "communityLink": "",
+  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/honeywell-t6-pro/README.md",
+  "drivers": [
+    {
+      "id": "b4c17e3a-9f82-4d56-a031-7e8c3b0f2d91",
+      "name": "Advanced Honeywell T6 Pro Thermostat",
+      "namespace": "djdizzyd",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/honeywell-t6-pro/honeywell-t6-pro.groovy",
+      "required": true,
+      "version": "0.1.0"
+    }
+  ]
+}
