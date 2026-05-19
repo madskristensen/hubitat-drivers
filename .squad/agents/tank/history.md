@@ -133,3 +133,10 @@ Added ~195 LOC of MQTT support as an additive, preference-gated layer:
 **Scope:** fully-kiosk v0.4.3 (all 3 files)
 
 
+
+---
+
+## Learnings
+
+- MQTT attempt failed across 4 iterations — Hubitat MQTT client API signatures are fragile, broker compatibility is variable. The polling architecture is the reliable path.
+- Removing MQTT was the right call once it became clear the broker wasn't accepting the handshake.
