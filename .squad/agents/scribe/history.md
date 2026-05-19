@@ -66,3 +66,21 @@ Scribe executed full manifest and archive workflow:
 ## Learnings
 
 Initial setup complete.
+
+---
+
+## 2026-05-18T18:10:00-07:00 — Honeywell T6 Pro Z-Wave survey + v0.3.0 shipment
+
+**Topic:** honeywell-t6-pro-v030-release
+
+Single inbox file processed: Cypher's comprehensive Honeywell T6 Pro Z-Wave feature-gap survey (29,421 bytes). Document covered 42 configuration parameters, full Z-Wave command class inventory, and ranked 3 top picks for v0.3.0 (thermostatFanState emit, battery-low notification handling, octal CC version fix).
+
+**Work completed:**
+1. **Inbox merge:** Cypher's survey merged verbatim into decisions.md under dated section with source attribution.
+2. **Shipment log:** Added v0.3.0 release entry capturing commit e38c4d3, the 3 applied picks with line counts, production-safety confirmation, and Tank's verification checklist.
+3. **History sync:** Staged cypher/tank/README.md updates from prior work sessions.
+4. **Commit & push:** Single commit c9905c7 staged all files (decisions.md +29K, history updates) and pushed to origin/main; post-commit verification confirmed clean working tree and empty inbox.
+
+**Decisions.md state:** Pre-merge 221,988 bytes → Post-merge 253,497 bytes (31,509 byte delta; well under 50KB archive threshold, no compaction needed).
+
+**Scribe operational health:** All recursive write/delete cycles completed; no canonical-path violations or parallel-directory writes detected.
