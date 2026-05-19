@@ -9,6 +9,7 @@
  *                  missing descriptionText.
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
+ *  Changelog:
  *  Version: 0.5.0 — 2026-05-18 — Removed MQTT support: reverted to local REST polling after broker compatibility issues; cleaner, simpler, more reliable.
  *  Version: 0.4.2 — 2026-05-18 — Add clearOverlayMessage() command to dismiss an active overlay popup on the tablet (calls FKB's setOverlayMessage with empty text); complements setOverlayMessage(text) and deviceNotification(text) — both show, this one clears.
  *  Version: 0.4.1 — 2026-05-18 — BUG: guard NPE in beep() when toneFile preference is unset (log.warn instead of NPE); demote HTTP 408/5xx callback logging from error to warn (transient tablet unreachable); BREAKING: remove setScreenBrightness command — use setLevel(0-100) instead (SwitchLevel capability primary).
