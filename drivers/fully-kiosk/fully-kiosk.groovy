@@ -9,6 +9,9 @@
  *                  missing descriptionText.
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
+ *  Version: 0.2.0 — 2026-05-18 — v0.2.0 polish: logsOff auto-disable, logEnable default false,
+ *                                descriptionText on checkInterval events, checkInterval 60→120,
+ *                                setLevel event moved to callback, UUID in manifest, Security note in README
  *  Version: 0.1.0 — 2026-05-18 — Initial fork; apply Trinity audit fixes
  *
  *  [original GvnCampbell MIT/Apache copyright block preserved verbatim below]
@@ -122,17 +125,22 @@ metadata {
               description:"Enable this option to force polling of the device to get battery, screen brightness and screen states.",
               defaultValue:false, required:true)
         // FIX #4 (logger): replaced multi-level loggingLevel enum with standard Hubitat logEnable bool
-        input(name:"logEnable",      type:"bool",    title:"Enable Debug Logging",  defaultValue:true,  required:false)
+        // C2: default false — auto-disabled after 30 min when enabled; avoids permanent verbose trace
+        input(name:"logEnable",      type:"bool",    title:"Enable Debug Logging",  defaultValue:false, required:false)
     }
 }
 
 // *** [ Initialization Methods ] *********************************************
 def installed() {
     logger("[installed] ", "trace")
+    // C2: schedule debug-log auto-disable on first install if user has logEnable on
+    if (logEnable) runIn(1800, "logsOff")
     initialize()
 }
 def updated() {
     logger("[updated] ", "trace")
+    // C2: re-arm 30-min auto-disable whenever preferences are saved with logEnable on
+    if (logEnable) runIn(1800, "logsOff")
     initialize()
 }
 def initialize() {
@@ -222,7 +230,9 @@ def parse(description) {
                        descriptionText:"${device.displayName} volume is ${body.value}"])
             break
         default:
-            sendEvent([name:"checkInterval", value:60])
+            // C1+C4: added descriptionText; value 60→120 (2× poll cadence avoids false offline on single missed poll)
+            sendEvent([name:"checkInterval", value:120,
+                       descriptionText:"${device.displayName} checkInterval is 120"])
             logger(logprefix + "Unknown attribute: ${body.attribute}", "error")
             break
     }
@@ -270,10 +280,32 @@ def off() {
     screenOff()
 }
 def setLevel(level) {
-    logger("[setLevel] ", "trace")
-    setScreenBrightness(level)
-    sendEvent([name:"level", value:level,
-               descriptionText:"${device.displayName} level is ${level}"])
+    // C5: event now fires from setLevelCallback AFTER a successful HTTP response,
+    // not optimistically before — prevents the event from lying if the call fails.
+    // Security: URI logged through the same password-masking pattern as sendCommandPost().
+    def logprefix = "[setLevel] "
+    logger(logprefix + "level:${level}", "trace")
+    def postParams = [
+        uri: "http://${serverIP}:${serverPort}/?type=json&password=${serverPassword}&cmd=setStringSetting&key=screenBrightness&value=${level}",
+        requestContentType: 'application/json',
+        contentType: 'application/json'
+    ]
+    Map safeParams = postParams.clone()
+    safeParams.uri = safeParams.uri?.replaceAll(/(?i)password=[^&]+/, 'password=***')
+    logger(logprefix + safeParams)
+    asynchttpPost("setLevelCallback", postParams, [level: level])
+}
+def setLevelCallback(response, data) {
+    def logprefix = "[setLevelCallback] "
+    logger(logprefix + "response.status: ${response.status}", "trace")
+    if (response?.status == 200) {
+        sendEvent([name:"checkInterval", value:120,
+                   descriptionText:"${device.displayName} checkInterval is 120"])
+        sendEvent([name:"level", value:data.level,
+                   descriptionText:"${device.displayName} level is ${data.level}"])
+    } else {
+        logger(logprefix + "Invalid response: ${response.status}", "error")
+    }
 }
 def beep() {
     logger("[beep] ", "trace")
@@ -527,7 +559,9 @@ def updateDeviceDataCallback(response, data) {
         device.updateDataValue("deviceManufacturer", response.json.deviceManufacturer)
         device.updateDataValue("androidVersion",     response.json.androidVersion)
         device.updateDataValue("deviceModel",        response.json.deviceModel)
-        sendEvent([name:"checkInterval", value:60])
+        // C1+C4: added descriptionText; value 60→120
+        sendEvent([name:"checkInterval", value:120,
+                   descriptionText:"${device.displayName} checkInterval is 120"])
     } else {
         logger(logprefix + "Invalid response: ${response.status}", "error")
     }
@@ -554,7 +588,9 @@ def sendCommandCallback(response, data) {
     logger(logprefix + "response.status: ${response.status}", "trace")
     if (response?.status == 200) {
         logger(logprefix + "response.data: ${response.data}", "debug")
-        sendEvent([name:"checkInterval", value:60])
+        // C1+C4: added descriptionText; value 60→120
+        sendEvent([name:"checkInterval", value:120,
+                   descriptionText:"${device.displayName} checkInterval is 120"])
     } else {
         logger(logprefix + "Invalid response: ${response.status}", "error")
     }
@@ -583,6 +619,12 @@ private void emitIfChanged(String name, value, String descTxt, String unit = nul
 }
 
 // *** [ Logger ] *************************************************************
+// C2: auto-disable debug logging after 30 minutes
+def logsOff() {
+    device.updateSetting("logEnable", [value: "false", type: "bool"])
+    log.info "Fully Kiosk Browser Controller: debug logging auto-disabled after 30 minutes"
+}
+
 // FIX #4 (logger): replaced the inverted multi-level logger (where "debug"
 // logged more than "trace") with the Hubitat community-standard logEnable bool.
 // All trace/debug output is gated by logEnable; info/warn/error always emit.

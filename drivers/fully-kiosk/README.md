@@ -75,6 +75,18 @@ Applies to both `sendCommandPost()` and `refresh()`.
 
 ---
 
+## Security note
+
+The Fully Kiosk Browser REST API requires the device password as a plain-text query parameter in every HTTP request (e.g. `?password=yourpassword&cmd=...`). This is **FKB's own protocol design** — the driver cannot change how FKB authenticates requests. The password travels in cleartext on your local LAN.
+
+Practical mitigations:
+- Keep your Fully Kiosk Browser device on a trusted LAN segment (not exposed to the Internet).
+- Use a dedicated, non-reused password for your FKB devices.
+- The `serverPassword` preference is stored as `type:"password"` in Hubitat, so it is masked in the Hubitat UI and not accessible to other drivers.
+- Debug logs never expose the password: every URI is cloned and the password value is replaced with `***` before logging (see Fix 1 in the v0.1.0 changelog below).
+
+---
+
 ## Upstream status
 
 **NOT planned for upstream PR.** GvnCampbell has made no commits to [GvnCampbell/Hubitat](https://github.com/GvnCampbell/Hubitat) since 2021-11-20 (4.5+ years of silence). Issues and PRs go unreviewed. This fork is the active maintenance path.
@@ -97,4 +109,5 @@ Fork maintained by **Mads Kristensen** — https://github.com/madskristensen
 
 | Version | Date       | Notes |
 |---------|------------|-------|
+| 0.2.0   | 2026-05-18 | v0.2.0 polish pass: (C1) descriptionText on all checkInterval sendEvents; (C2) logsOff auto-disable after 30 min, logEnable default → false; (C3) Security note in README documenting LAN password-in-URI as FKB protocol design; (C4) checkInterval value 60 → 120 (2× poll cadence, avoids false offline on single missed poll); (C5) setLevel() level event now fires from setLevelCallback after HTTP success, not optimistically before the call. UUID in packageManifest.json replaced placeholder. |
 | 0.1.0   | 2026-05-18 | Initial fork from GvnCampbell v1.41. Apply Trinity audit fixes: password masking in debug logs (security), emitIfChanged in refreshCallback (event hygiene), descriptionText on all parse-path sendEvent calls, replace inverted logger with standard logEnable bool. |
