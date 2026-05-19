@@ -9,6 +9,11 @@
  *                  missing descriptionText.
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
+ *  Version: 0.4.1 — 2026-05-18 — BUG: guard NPE in beep() when toneFile preference is unset
+ *                                (log.warn instead of NPE); demote HTTP 408/5xx callback
+ *                                logging from error to warn (transient tablet unreachable);
+ *                                BREAKING: remove setScreenBrightness command — use
+ *                                setLevel(0-100) instead (SwitchLevel capability primary).
  *  Version: 0.4.0 — 2026-05-18 — MQTT subscriber (opt-in): when mqttBroker preference is
  *                                set, driver subscribes to FK's MQTT event topics via
  *                                Hubitat interfaces.mqtt and routes pushes to the existing
@@ -40,7 +45,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.4.0"
+@Field static final String VERSION = "0.4.1"
 
 metadata {
     definition (name: "Fully Kiosk Browser", namespace: "mads", author: "Mads Kristensen",
@@ -77,7 +82,6 @@ metadata {
         command "restartApp"
         command "screenOn"
         command "screenOff"
-        command "setScreenBrightness", ["Number"]
         command "startScreensaver"
         command "stopScreensaver"
         command "stopSound"
@@ -346,11 +350,20 @@ def setLevelCallback(response, data) {
         sendEvent([name:"level", value:data.level,
                    descriptionText:"${device.displayName} level is ${data.level}"])
     } else {
-        logger(logprefix + "Invalid response: ${response.status}", "error")
+        Integer status = response?.status as Integer
+        if (status == 408 || (status != null && status >= 500 && status <= 599)) {
+            logger(logprefix + "Transient response: ${status}", "warn")
+        } else {
+            logger(logprefix + "Invalid response: ${status}", "error")
+        }
     }
 }
 def beep() {
     logger("[beep] ", "trace")
+    if (!toneFile?.trim()) {
+        log.warn "[beep] toneFile preference is not configured — set it on the device's Edit page (URL of a hosted sound file)"
+        return
+    }
     sendCommandPost("cmd=playSound&url=${java.net.URLEncoder.encode(toneFile, "UTF-8")}")
 }
 def launchAppPackage(appPackage) {
@@ -372,10 +385,6 @@ def screenOn() {
 def screenOff() {
     logger("[screenOff] ", "trace")
     sendCommandPost("cmd=screenOff")
-}
-def setScreenBrightness(value) {
-    logger("[setScreenBrightness] value:${value}", "trace")
-    sendCommandPost("cmd=setStringSetting&key=screenBrightness&value=${value}")
 }
 def triggerMotion() {
     logger("[triggerMotion] ", "trace")
@@ -559,7 +568,12 @@ def refreshCallback(response, data) {
         emitIfChanged("kioskMode",         kioskVal,
                       "${device.displayName} kioskMode is ${kioskVal}")
     } else {
-        logger(logprefix + "Invalid response: ${response.status}", "error")
+        Integer status = response?.status as Integer
+        if (status == 408 || (status != null && status >= 500 && status <= 599)) {
+            logger(logprefix + "Transient response: ${status}", "warn")
+        } else {
+            logger(logprefix + "Invalid response: ${status}", "error")
+        }
     }
 }
 def ping() {
@@ -693,7 +707,12 @@ def updateDeviceDataCallback(response, data) {
         emitIfChanged("checkInterval", 120,
                       "${device.displayName} checkInterval is 120")
     } else {
-        logger(logprefix + "Invalid response: ${response.status}", "error")
+        Integer status = response?.status as Integer
+        if (status == 408 || (status != null && status >= 500 && status <= 599)) {
+            logger(logprefix + "Transient response: ${status}", "warn")
+        } else {
+            logger(logprefix + "Invalid response: ${status}", "error")
+        }
     }
 }
 
@@ -723,7 +742,12 @@ def sendCommandCallback(response, data) {
         emitIfChanged("checkInterval", 120,
                       "${device.displayName} checkInterval is 120")
     } else {
-        logger(logprefix + "Invalid response: ${response.status}", "error")
+        Integer status = response?.status as Integer
+        if (status == 408 || (status != null && status >= 500 && status <= 599)) {
+            logger(logprefix + "Transient response: ${status}", "warn")
+        } else {
+            logger(logprefix + "Invalid response: ${status}", "error")
+        }
     }
 }
 
