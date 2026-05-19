@@ -169,3 +169,24 @@ Both blockers resolved in coordinated commits.
 - 6d2ed6a (Changelog format rule, bundle v1.1.0)
 
 **Deliverable:** Orchestration log created (.squad/orchestration-log/2026-05-19-043500Z-link.md)
+
+## 2026-05-19 — Cognito Skills Consolidation & Reskilling
+
+**Collaborators:** Link (reskilling), Tank (auth-before-dedup), Cypher (cognito-token-lifecycle)
+
+### Consolidation Work
+
+Two agents independently produced skills on Cognito auth in a single session:
+- **Tank:** `.squad/skills/auth-before-dedup/SKILL.md` (low confidence) — Clean, single-rule skill about not letting cached-state dedup bypass session validity.
+- **Cypher:** `.squad/skills/cognito-token-lifecycle/SKILL.md` (low confidence) — Broad skill covering three failure modes, 401 vs 403 risk, and new-driver checklist.
+
+**Consolidation pattern:** Extracted the UNIQUE content from `cognito-token-lifecycle` (three failure modes, 401/403 anti-pattern, new-driver checklist, detailed token architecture) into the highest-confidence existing skill (`hubitat-cognito-token-refresh`, confidence: medium). Added a cross-reference to `auth-before-dedup` instead of duplicating its "auth gate BEFORE dedup" content. Deleted the `cognito-token-lifecycle` directory via `git rm`.
+
+**Key learning:** When two agents produce skills on the same topic in one session, consolidate by extracting UNIQUE bits into the highest-confidence existing skill and delete the duplicate. Confidence does NOT bump on consolidation — it only bumps on independent re-observation in a future session.
+
+### Cognito Skill Family (Post-Consolidation)
+- **hubitat-cognito-token-refresh** (medium confidence) — Token lifecycle, three failure modes, 401/403 handling, new-driver checklist, async HTTP patterns
+- **cognito-from-hubitat** (low confidence) — Cognito API call conventions and logging patterns
+- **auth-before-dedup** (low confidence) — Core rule about session validity gates before cached-state dedup
+
+Total Cognito-related skills: 3 (was 4)
