@@ -1,0 +1,19 @@
+{
+  "packageName": "Minoston Smart Plug 2-Channel (MP24Z)",
+  "author": "Mads Kristensen",
+  "minimumHEVersion": "2.3.0",
+  "dateReleased": "2026-05-19",
+  "version": "1.0.5",
+  "communityLink": "",
+  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/minoston-mp24z/README.md",
+  "drivers": [
+    {
+      "id": "beccce18-31db-4fc3-8bdd-4fe5958a3b40",
+      "name": "Minoston Smart Plug 2-Channel (MP24Z)",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/minoston-mp24z/minoston-mp24z.groovy",
+      "required": true,
+      "version": "1.0.5"
+    }
+  ]
+}
