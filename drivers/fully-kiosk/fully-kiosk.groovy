@@ -9,6 +9,13 @@
  *                  missing descriptionText.
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
+ *  Version: 0.4.5 — 2026-05-18 — BUG: v0.4.0's mqttConnect passed 5 args with a Map for LWT;
+ *                                Hubitat's interfaces.mqtt.connect() doesn't accept that
+ *                                signature (live error from Mads's tablet test:
+ *                                "No signature of method ... applicable for argument types").
+ *                                Switched to 8-arg form with LWT (brokerUrl, clientId,
+ *                                username, password, lwtTopic, lwtQos, lwtRetained,
+ *                                lwtPayload) per Hubitat's actual API.
  *  Version: 0.4.4 — 2026-05-18 — BUG: defensive leading-slash handling for MQTT topics.
  *                                FKB docs publish to /fully/event/... with leading slash;
  *                                subscribe to both {prefix}/# and /{prefix}/#, then
@@ -65,7 +72,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.4.4"
+@Field static final String VERSION = "0.4.5"
 
 metadata {
     definition (name: "Fully Kiosk Browser", namespace: "mads", author: "Mads Kristensen",
@@ -786,21 +793,23 @@ void mqttConnect() {
     try {
         def clientId = settings.mqttClientID?.trim() ?: "hubitat-fully-kiosk-${device.deviceNetworkId}"
         def prefix   = settings.mqttTopicPrefix?.trim() ?: "fully"
-        def lwtTopic = "${prefix}/hubitat/state"
-        Map options  = [
-            lastWillTopic:   lwtTopic,
-            lastWillMessage: "offline",
-            lastWillQos:     1,
-            lastWillRetain:  true,
-            cleanSession:    false
-        ]
+        String lwtTopic    = "${prefix}/hubitat/state"
+        String lwtPayload  = "offline"
+        Integer lwtQos     = 1
+        Boolean lwtRetained = true
         // Mask any embedded credentials in the broker URL before logging
         def safeBroker = settings.mqttBroker?.replaceAll(/(:\/\/[^:@\/]+:)[^@\/]+(@)/, '$1***$2')
         logger(logprefix + "Connecting to ${safeBroker}, clientId: ${clientId}", "info")
-        interfaces.mqtt.connect(settings.mqttBroker, clientId,
-                                settings.mqttUsername ?: null,
-                                settings.mqttPassword ?: null,
-                                options)
+        interfaces.mqtt.connect(
+            settings.mqttBroker,
+            clientId,
+            settings.mqttUsername ?: null,
+            settings.mqttPassword ?: null,
+            lwtTopic,
+            lwtQos,
+            lwtRetained,
+            lwtPayload
+        )
     } catch (Exception e) {
         logger(logprefix + "Connection failed: ${e.message}", "error")
         mqttReconnect()

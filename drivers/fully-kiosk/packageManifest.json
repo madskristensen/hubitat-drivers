@@ -3,7 +3,7 @@
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
   "dateReleased": "2026-05-18",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/fully-kiosk/README.md",
   "drivers": [
@@ -13,7 +13,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/fully-kiosk/fully-kiosk.groovy",
       "required": true,
-      "version": "0.4.4"
+      "version": "0.4.5"
     }
   ]
 }
