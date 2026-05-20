@@ -2,6 +2,7 @@
  * Away Lights
  *
  * Changelog:
+ *   0.6.0 — 2026-05-20 — Remove occupancy sensor integration; rely on mode change only. Improve scene selector UI with clearer guidance.
  *   0.5.0 — 2026-05-20 — Add occupancy sensor integration: detect real arrival and immediately disable away simulation.
  *   0.4.0 — 2026-05-20 — Add multi-scene rotation; cycle through preset scenes with randomized hold times (backward compatible).
  *   0.3.0 — 2026-05-20 — Add always-on lights feature (never rotated); improve preference descriptions.
@@ -11,7 +12,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.5.0"
+@Field static final String VERSION = "0.6.0"
 @Field static final Integer SCENE_MIN_HOLD_MINUTES = 5
 @Field static final Integer SCENE_MAX_HOLD_MINUTES = 20
 
@@ -45,9 +46,10 @@ def mainPage() {
 
         section("Scene Rotation (optional)") {
             paragraph "🎭 <b>Multi-Scene Mode:</b> Instead of simple on/off, cycle through preset Hubitat scenes to simulate variable activity. Each scene holds for a randomized duration (${SCENE_MIN_HOLD_MINUTES}-${SCENE_MAX_HOLD_MINUTES} min) before rotating to the next. If no scenes are selected, falls back to standard light toggling."
+            paragraph "📚 <b>What are scenes?</b> Scenes are preset light configurations you create in Hubitat. Go to <b>Devices → Rooms & Scenes → Scene Settings</b> to create scenes like 'Movie Time', 'Reading', 'Evening Activity'. Once created, they'll appear here as selectable options. If you don't see any scenes listed below, create them first in the Scene Settings."
             input "sceneRotation", "hub.scene",
                 title: "Scenes to rotate through",
-                description: "Select one or more scenes. They will cycle in the order listed. Leave empty to disable scene rotation.",
+                description: "Select one or more scenes. They will cycle in the order listed. Example: 'Movie Time' → 'Dim Lights' → 'Night Mode'. Leave empty to disable scene rotation.",
                 required: false, multiple: true
         }
 
@@ -92,20 +94,6 @@ def mainPage() {
                 required: false, defaultValue: false
         }
 
-        section("Occupancy Detection (optional)") {
-            paragraph "🚨 <b>Real Arrival Detection:</b> If someone actually arrives home, immediately stop the away simulation. Select motion or presence sensors to trigger this. Leave empty to disable occupancy detection."
-            input "occupancySensors", "capability.motionSensor",
-                title: "Motion / Presence sensors",
-                description: "Select motion or presence sensors. When any sensor detects motion or presence while in Away mode, lights turn off and away simulation stops.",
-                required: false, multiple: true
-            if (occupancySensors) {
-                input "notifyOnOccupancy", "bool",
-                    title: "Notify when occupancy is detected",
-                    description: "✓ Send a notification when the app detects someone arrived home. ✗ Stop away simulation silently.",
-                    required: false, defaultValue: true
-            }
-        }
-
         section("Notifications") {
             input "notifyDevices", "capability.notification",
                 title: "Notification devices (optional)",
@@ -148,10 +136,6 @@ def initialize() {
     unschedule()
     state.sceneIndex = null
     subscribe(location, "mode", modeHandler)
-    if (occupancySensors) {
-        subscribe(occupancySensors, "motion", occupancyHandler)
-        subscribe(occupancySensors, "presence", occupancyHandler)
-    }
     if (useSunset) {
         schedule("0 0 12 * * ?", "scheduleSunsetOn")
         scheduleSunsetOn()
@@ -180,31 +164,6 @@ def modeHandler(evt) {
         state.sceneIndex = null
         lightsOff()
         if (logEnable) log.debug "Away Lights: left Away mode — lights turned off"
-    }
-}
-
-def occupancyHandler(evt) {
-    if (location.mode != awayMode) {
-        return
-    }
-    
-    if (evt.value == "active" || evt.value == "present") {
-        if (logEnable) log.debug "Away Lights: occupancy detected (${evt.device.displayName})"
-        
-        unschedule("checkAndTurnOn")
-        unschedule("doLightsOn")
-        unschedule("doLightsOff")
-        unschedule("rotateScene")
-        state.sceneIndex = null
-        
-        lightsOff()
-        
-        if (notifyOnOccupancy && notifyDevices) {
-            def msg = "${evt.device.displayName} detected — away simulation stopped"
-            for (def dev in notifyDevices) { dev.deviceNotification(msg) }
-        }
-        
-        if (logEnable) log.debug "Away Lights: occupancy handler — all lights turned off, schedules cancelled"
     }
 }
 
