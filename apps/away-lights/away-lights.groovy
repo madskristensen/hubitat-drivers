@@ -92,6 +92,20 @@ def mainPage() {
                 required: false, defaultValue: false
         }
 
+        section("Occupancy Detection (optional)") {
+            paragraph "🚨 <b>Real Arrival Detection:</b> If someone actually arrives home, immediately stop the away simulation. Select motion or presence sensors to trigger this. Leave empty to disable occupancy detection."
+            input "occupancySensors", "capability.motionSensor",
+                title: "Motion / Presence sensors",
+                description: "Select motion or presence sensors. When any sensor detects motion or presence while in Away mode, lights turn off and away simulation stops.",
+                required: false, multiple: true
+            if (occupancySensors) {
+                input "notifyOnOccupancy", "bool",
+                    title: "Notify when occupancy is detected",
+                    description: "✓ Send a notification when the app detects someone arrived home. ✗ Stop away simulation silently.",
+                    required: false, defaultValue: true
+            }
+        }
+
         section("Notifications") {
             input "notifyDevices", "capability.notification",
                 title: "Notification devices (optional)",
@@ -134,6 +148,10 @@ def initialize() {
     unschedule()
     state.sceneIndex = null
     subscribe(location, "mode", modeHandler)
+    if (occupancySensors) {
+        subscribe(occupancySensors, "motion", occupancyHandler)
+        subscribe(occupancySensors, "presence", occupancyHandler)
+    }
     if (useSunset) {
         schedule("0 0 12 * * ?", "scheduleSunsetOn")
         scheduleSunsetOn()
@@ -162,6 +180,31 @@ def modeHandler(evt) {
         state.sceneIndex = null
         lightsOff()
         if (logEnable) log.debug "Away Lights: left Away mode — lights turned off"
+    }
+}
+
+def occupancyHandler(evt) {
+    if (location.mode != awayMode) {
+        return
+    }
+    
+    if (evt.value == "active" || evt.value == "present") {
+        if (logEnable) log.debug "Away Lights: occupancy detected (${evt.device.displayName})"
+        
+        unschedule("checkAndTurnOn")
+        unschedule("doLightsOn")
+        unschedule("doLightsOff")
+        unschedule("rotateScene")
+        state.sceneIndex = null
+        
+        lightsOff()
+        
+        if (notifyOnOccupancy && notifyDevices) {
+            def msg = "${evt.device.displayName} detected — away simulation stopped"
+            for (def dev in notifyDevices) { dev.deviceNotification(msg) }
+        }
+        
+        if (logEnable) log.debug "Away Lights: occupancy handler — all lights turned off, schedules cancelled"
     }
 }
 

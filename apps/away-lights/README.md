@@ -2,6 +2,8 @@
 
 Away Lights is a Hubitat app that simulates occupancy by automatically turning a set of lights on and off during a configurable time window whenever the hub is in Away mode. When you leave home, it waits a short debounce period before checking the clock — if the time is within your window it switches the lights on and can send a push notification. At the end of the window (or when you return home with the option enabled) the lights go back off.
 
+**Version 0.5.0 adds occupancy detection:** When someone actually arrives home during Away mode, the app immediately detects it via motion or presence sensors and turns off all lights. This prevents the fake occupancy lights from continuing to cycle when someone is actually home.
+
 **Version 0.4.0 adds multi-scene rotation:** Instead of simple on/off toggling, you can now cycle through preset Hubitat scenes for more realistic occupancy simulation. Each scene holds for a randomized duration before rotating to the next.
 
 ## Installation
@@ -33,6 +35,8 @@ Away Lights is a Hubitat app that simulates occupancy by automatically turning a
 | **Random time offset (minutes)** | Adds unpredictability to the schedule by randomly delaying each on/off event. Set to 15–30 minutes for believable variation; 0 disables randomization. Higher values look more natural to an observer but may feel less responsive. | 0 |
 | **Away mode name** | The Hubitat location mode that triggers occupancy simulation. Must match your mode name exactly (case-sensitive). | Away |
 | **Turn lights off when leaving Away** | Immediately turns all lights off when you return home (mode leaves Away). Disable if you want lights to stay on until the scheduled off-time. | false |
+| **Motion / Presence sensors** | **(v0.5.0+)** Optional: Select motion or presence sensors to detect real arrivals. When any sensor detects motion or presence **while in Away mode**, the app immediately turns off all lights and stops the simulation. This prevents the fake occupancy lights from staying on when someone actually arrives home. Leave empty to disable real arrival detection. | *(optional)* |
+| **Notify when occupancy is detected** | **(v0.5.0+)** When enabled, sends a notification to your configured notification devices when the app detects real occupancy (someone arriving home). Useful for confirming the away simulation stopped correctly. Only appears if motion/presence sensors are configured. | true |
 | **Notification devices** | Optional devices (phones, tablets) to receive a push alert when the occupancy simulation starts. Useful for confirming Away mode was triggered correctly. | *(optional)* |
 | **Notification message** | Custom text for push notifications. Leave as default or personalize (e.g., "Away mode activated – lights on"). | Away lights on |
 | **Enable debug logging** | Enables verbose logging in the Hubitat app logs for troubleshooting. Disable after setup to reduce log clutter. | false |
@@ -46,3 +50,29 @@ Away Lights is a Hubitat app that simulates occupancy by automatically turning a
 - **Daily at `offTime`:** if the hub is currently in Away mode, turns all lights off (and cancels any pending scene rotations).
 - **Random jitter:** when `randomizeMinutes > 0`, each light on/off trigger (or scene rotation start) is delayed by a random 0–N minute offset, so the schedule never looks exactly the same to an observer. Always-on lights are not affected by jitter—they stay on for the full window.
 - **Mode leaves Away** *(optional)*: cancels any pending debounce and turns all lights off immediately if `turnOffOnHome` is enabled.
+- **Real occupancy detected** *(optional, v0.5.0+)*: if you've configured motion or presence sensors, and any sensor reports activity **while the hub is in Away mode**, the app will immediately turn off all configured lights and stop the away simulation. This lets you return home and have lights turn off instead of continuing to cycle. If enabled, you'll receive a notification showing which sensor triggered the occupancy event. Manual restart is required to resume Away mode simulation.
+
+## Occupancy Sensor Setup (v0.5.0+)
+
+The occupancy sensor feature lets you detect when someone actually arrives home and automatically stop the away lights simulation. This is useful for preventing the "burglar off" scenario where fake occupancy lights are still cycling when someone is actually home.
+
+**Which sensors work?**
+- Any motion sensor (reports `motion: active/inactive`)
+- Any presence sensor (reports `presence: present/not present`)
+- Any device that supports the motion or presence capability
+
+**How to set it up:**
+1. Open Away Lights preferences
+2. Go to **Occupancy Detection (optional)** section
+3. Select one or more motion/presence sensors under "Motion / Presence sensors"
+4. Optionally enable "Notify when occupancy is detected" — this sends a notification showing which sensor triggered the occupancy event
+5. The app will use your existing "Notification devices" to send occupancy alerts (make sure you have notification devices configured under **Notifications**)
+
+**What happens when someone arrives?**
+1. A sensor detects motion or presence **while Away mode is active**
+2. The app immediately turns off all lights (both always-on and rotating)
+3. All scheduled light events are cancelled
+4. A notification is sent showing which sensor detected the arrival (if enabled)
+5. The away simulation stops — manual intervention is required to resume
+
+**Note:** If you return home and the mode is manually changed away from Away before a sensor triggers, the occupancy detection won't fire (the mode change itself might already have turned off lights if you have that option enabled).
