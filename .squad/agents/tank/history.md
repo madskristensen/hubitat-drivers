@@ -1,3 +1,21 @@
+## 2026-05-20 — Away Lights App v0.1.0
+
+**Task:** Convert Mads's webCoRE "Away Lights" piston into a native Hubitat app.
+
+**Shipped:** `apps/away-lights/` — full 3-file package (away-lights.groovy, packageManifest.json, README.md). Root packageManifest.json and README.md updated.
+
+**What it does:** Subscribes to location mode changes and two daily schedules. On Away entry, debounces for a configurable minutes before checking whether the current time falls inside [onTime, offTime). If both checks pass, turns lights on and optionally sends a push notification. At offTime it turns them off. Optional `turnOffOnHome` extinguishes the lights immediately on mode return.
+
+**Key decisions:**
+- Used `schedule(onTime, "onTimeHandler")` and `schedule(offTime, "offTimeHandler")` with Hubitat's time-preference daily-schedule form (no manual cron math needed).
+- `awayDebounceMinutes` coerced to `Integer` before multiplication to avoid Groovy string-repeat bug (same lesson from PurpleAir).
+- `turnOffOnHome` calls `lightsOff()` unconditionally (no `?.any {}` scan) — cheaper than a full state-scan closure; `off()` to an already-off device is a no-op at the device level.
+- `lightsOn()`/`lightsOff()` use `for (def x in list)` loops instead of `.each {}` closures to avoid closure object allocation per call.
+- `unschedule("doLightsOn")` added in the `turnOffOnHome` branch to cancel any pending jitter `runIn`; `doLightsOn` also guards with mode check.
+- "Already in window + sunset" confirmed correct: `isInWindow()` calls `getSunriseAndSunset().sunset` and checks `now >= on`, so Away activating after sunset correctly returns true.
+
+---
+
 ## 2026-05-18 — PurpleAir AQI v0.4.0 quality release
 
 **Task:** Ship Trinity's 4 production bug fixes + top polish set + release-hygiene preempt in one PurpleAir v0.4.0 release.
@@ -132,84 +150,4 @@ Added ~195 LOC of MQTT support as an additive, preference-gated layer:
 **Tank-17 minor bug detected & fixed:** Tank-17's history entry was written to `tank/history.md` at repo root instead of canonical `.squad/agents/tank/history.md` (likely CWD-relative path bug in Tank's MultiEdit tool under certain conditions). Scribe relocated the entry with separator, deleted stray directory, and updated decisions.md with v0.4.5 shipment note.
 
 ---
-
-## Archive: Tank-17, Tank-16, Tank-15 Detailed Spawns (2026-05-18)
-
-### Tank-17: v0.4.5 mqtt.connect() signature fix
-
-**Issue:** Mads reported live MQTT connection failure: `No signature of method: hubitat.helper.interfaces.Mqtt.connect() is applicable for argument types: (java.lang.String, GStringImpl, null, null, java.util.LinkedHashMap)`
-
-**Root cause:** v0.4.0 called 5-arg form `interfaces.mqtt.connect(brokerUrl, clientId, username, password, optionsMap)` with Map for LWT; Hubitat does not support this.
-
-**Fix:** Switched to 8-arg documented form: `interfaces.mqtt.connect(brokerUrl, clientId, username, password, lwtTopic, lwtQos, lwtRetained, lwtPayload)` with explicit LWT parameters. Behavior fully preserved.
-
-**Scope:** fully-kiosk v0.4.5 (all 3 files: driver, manifest, README)
-
-### Tank-16: v0.4.4 defensive leading-slash handling
-
-**Issue:** FKB MQTT topics may have leading slash (FKB docs show `/fully/event/...` and `/fully/deviceInfo/...`); MQTT treats `/fully/` and `fully/` as separate address spaces.
-
-**Fix:** Added second `interfaces.mqtt.subscribe("/${prefix}/#", 0)` subscribe call + leading-slash strip in parser: `if (topic.startsWith("/")) { topic = topic.substring(1) }`. Result: robust to either FKB convention.
-
-**Scope:** fully-kiosk v0.4.4 (all 3 files)
-
-### Tank-15: v0.4.3 MQTT event-name mismatches
-
-**Issue:** Cypher's reality check found 4 event-name mismatches in `handleFkEvent()`:
-- driver listening for `"motionDetected"` → FKB publishes `"onMotion"`
-- driver listening for `"unpluggedAC"` → FKB publishes `"unplugged"`
-- driver listening for `"batteryLevel"` → FKB publishes `"onBatteryLevelChanged"`
-- driver listening for `"foregroundApp"` → FKB does not publish as event (attribute from deviceInfo only)
-
-**Fix:** Renamed case statements + removed dead `foregroundApp` case. Cypher confirmed `"pluggedAC"` is correct; no rename needed.
-
-**Scope:** fully-kiosk v0.4.3 (all 3 files)
-
-
-
----
-
-## Learnings
-
-- MQTT attempt failed across 4 iterations — Hubitat MQTT client API signatures are fragile, broker compatibility is variable. The polling architecture is the reliable path.
-- Removing MQTT was the right call once it became clear the broker wasn't accepting the handshake.
-- `parseJson()` must never run on blank preference text or empty async HTTP bodies in Hubitat drivers; guard `?.trim()` first, wrap JSON parsing in `try/catch`, and early-return with `log.warn` instead of crashing `refresh()`.
-- Hubitat custom numeric attributes accept the UTF-8 unit string `µg/m³` cleanly; PurpleAir raw PM2.5 can emit as `pm2_5` with that exact unit.
-- PurpleAir v0.3.0 can add `TemperatureMeasurement` + `RelativeHumidityMeasurement` without conflicting with the existing custom `aqi`/`category` attributes.
-
-- Gemstone v0.4.17 stale-token fix: add `ensureSession()` before cached-state dedup so commands only early-return when the Cognito session is healthy; edits landed in `drivers/gemstone-lights/gemstone-lights.groovy` lines 206–355 (switch/level/color handlers), 802–826 (`ensureSession()` + queue gate), and 1044–1063 (shared effect activation dedup path).
-- Dedup/auth lesson: in Hubitat cloud drivers, a cache-hit return must never sit above the auth/queue path, or an expired token turns user commands into silent no-ops until a non-deduped path like `refresh()` repairs the session.
-
-## Session Arc 2026-05-19: PST02 Performance Audit (Tank #23)
-
-**Task:** Performance audit of `drivers/philio-pst02/philio-pst02.groovy` v1.1.0 → v1.2.0.
-
-**Changes shipped:**
-- **Implicit globals eliminated:** `resync`, `refresh`, and `value` in `deviceSync()` were bare assignments (no `def`/type), creating script-level Binding entries that persist across method calls. Declared `boolean resync`, `boolean refresh`, `Integer value`, `List cmds`.
-- **Implicit globals in SensorMultilevelReport:** `value` in switch cases 5 and 3 was also undeclared — declared `BigDecimal sensorValue`, `int precision`, `String unit` before the switch.
-- **Typed return types:** `def setBit` → `Integer`, `def isPst02BVariant` → `boolean`, `def resolveConfigParam*` → `Integer`. Groovy can skip dynamic-dispatch overhead when return type is declared.
-- **`isPst02BVariant()` called twice per resolve fn:** Cached in local `boolean isB` at top of each resolve function — avoids redundant settings/`getDataValue` reads.
-- **Redundant Z-Wave roundtrip removed:** The resync block sent `configurationGet(12)` unconditionally, but the diff-check block above it already sends `configurationGet(12)` when resync=true (because `resync ||` is true). Removed the duplicate — saves one battery-expensive Z-Wave roundtrip per full resync.
-- **Map allocations reduced:** `BatteryReport` and `clearTamper` use inline `sendEvent(name:..., value:..., ...)` — eliminates one `HashMap` allocation per event.
-- **`Map map = [:]` typing:** All event handlers type the map variable explicitly.
-- **Redundant `.toString()` in log.trace:** All `${cmd.toString()}` → `${cmd}` (Groovy calls `toString()` implicitly in GString).
-- **`WakeUpIntervalReport` local:** Compute `int minutes` locally instead of `cmd.seconds / 60` inline in `state` write — avoids reading state back for the log line and fixes the "wakup" typo.
-
-## Learnings
-
-- In Hubitat Groovy drivers, any variable assigned without `def` or a type in a `def` method body becomes a script-level `Binding` entry, not a stack-local. This is not sandbox-blocked but wastes a map-lookup on every read/write and can hold stale values across calls.
-- `isPst02BVariant()` is called from 3 resolve functions each of which may run on every wakeup. Cache it in a local `boolean isB` at the top of each function — one read instead of two.
-- On battery-powered Z-Wave devices, every `configurationGet` costs battery life; never duplicate one in a "resync info reads" block if the diff-check block above it already emits the same get unconditionally when `resync == true`.
-- Groovy typed return types (`Integer`, `boolean`, `List`) on frequently-called helper functions reduce dynamic dispatch overhead in the Hubitat sandbox JVM.
-
-
-**Tank #20:** Fully Kiosk v0.5.0 shipped with MQTT-to-REST wording clarification. Changelog flattened to single-line format (release.yml regex requirement). Commit: 61644e4.
-
-**Tank #21:** PurpleAir v0.3.0 shipped with parseJson guard for blank search_coords, async response guards, and new attributes (pm2_5, temperature, humidity, confidence). Commit: fd212cc.
-
-**Tank #22:** PurpleAir v0.4.0 shipped with all 5 Trinity production bugs fixed (String-math retry, disabled-poll guard, distance2degrees pole clamp, zero-distance protection, divide-by-zero guards), plus polish: AirQuality capability, airQualityIndex attribute, runEvery* scheduling, hub temp-scale conversion, canonical async error handling, refresh-on-save, cleaner sites output, stable AQI units, 60-second lastActivity throttling. Changelog flattened. Commit: 2d62b05.
-
-**Key Learning:** Changelog single-line format is now enforced across all drivers (required by release.yml line 136 regex).
-
-**Deliverables:** Orchestration logs created (.squad/orchestration-log/2026-05-19-043500Z-tank-*.md)
 

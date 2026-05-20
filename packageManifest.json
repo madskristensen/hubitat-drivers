@@ -84,6 +84,14 @@
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/presence-confidence-mode-manager/presence-confidence-mode-manager.groovy",
       "required": false,
       "version": "0.11.0"
+    },
+    {
+      "id": "4b72733b-ba01-467b-b90a-918030c9289c",
+      "name": "Away Lights",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/away-lights/away-lights.groovy",
+      "required": false,
+      "version": "0.2.0"
     }
   ]
 }
