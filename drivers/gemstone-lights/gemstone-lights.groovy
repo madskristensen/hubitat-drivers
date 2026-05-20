@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.17
+ * Version: 0.4.19
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,8 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.19 — 2026-05-19 — remove on/off dedup guard so switch commands always send /onState (fixes stale Hubitat state causing first press to no-op)
+ *   0.4.18 — 2026-05-19 — mark switch state as uncertain when /onState writes fail and bypass on/off dedup until a confirmed success/refresh (fixes stale optimistic 'on' state blocking retries)
  *   0.4.17 — 2026-05-18 — ensureSession() check before command dedup guards so an expired Cognito token always triggers re-auth instead of silent no-op (Mads-reported: control lost after inactivity until refresh)
  *   0.4.16 — 2026-05-18 — add Polling capability marker so Hubitat apps discover poll() support
  *   0.4.15 — 2026-05-18 — replace cloneMap JSON round-trips with recursive Map/List copies on hot request/pattern paths
@@ -54,7 +56,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.17"
+@Field static final String DRIVER_VERSION = "0.4.19"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -74,7 +76,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.17"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.19"
 
 metadata {
     definition(
@@ -204,11 +206,7 @@ def logsOff() {
 // ---------------------------------------------------------------------------
 
 def on() {
-    boolean sessionReady = ensureSession()
-    if (sessionReady && device.currentValue("switch") == "on") {
-        debugLog "on(): already on — skipping PUT /onState"
-        return
-    }
+    ensureSession()
     infoLog "${device.displayName} switch → on"
     sendEvent(name: "switch", value: "on", descriptionText: "${device.displayName} was turned on", type: "digital")
     state.lastOnState = true
@@ -216,11 +214,7 @@ def on() {
 }
 
 def off() {
-    boolean sessionReady = ensureSession()
-    if (sessionReady && device.currentValue("switch") == "off") {
-        debugLog "off(): already off — skipping PUT /onState"
-        return
-    }
+    ensureSession()
     infoLog "${device.displayName} switch → off"
     sendEvent(name: "switch", value: "off", descriptionText: "${device.displayName} was turned off", type: "digital")
     state.lastOnState = false
