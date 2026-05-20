@@ -2,13 +2,18 @@
  * Away Lights
  *
  * Changelog:
+ *   0.5.0 — 2026-05-20 — Add occupancy sensor integration: detect real arrival and immediately disable away simulation.
+ *   0.4.0 — 2026-05-20 — Add multi-scene rotation; cycle through preset scenes with randomized hold times (backward compatible).
+ *   0.3.0 — 2026-05-20 — Add always-on lights feature (never rotated); improve preference descriptions.
  *   0.2.0 — 2026-05-20 — Add randomized on/off timing (±N minute jitter) and sunset-relative window start.
  *   0.1.0 — 2026-05-20 — Initial release: simulate occupancy by turning lights on/off during Away mode within a configurable time window.
  */
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.2.0"
+@Field static final String VERSION = "0.5.0"
+@Field static final Integer SCENE_MIN_HOLD_MINUTES = 5
+@Field static final Integer SCENE_MAX_HOLD_MINUTES = 20
 
 definition(
     name: "Away Lights",
@@ -28,51 +33,83 @@ preferences {
 def mainPage() {
     dynamicPage(name: "mainPage") {
         section("Lights") {
-            input "awayLights", "capability.switch", title: "Lights to control", required: true, multiple: true
+            input "awayLights", "capability.switch",
+                title: "Lights to control",
+                description: "Select all lights you want included in the away simulation (both always-on and rotating)",
+                required: true, multiple: true
+            input "alwaysOnLights", "capability.switch",
+                title: "Always-on lights (optional)",
+                description: "Select lights that should stay ON throughout the entire window (except at off-time). These prevent complete darkness and make occupancy more convincing. Lights here are NEVER turned off by random timing—they stay on until the window closes.",
+                required: false, multiple: true
+        }
+
+        section("Scene Rotation (optional)") {
+            paragraph "🎭 <b>Multi-Scene Mode:</b> Instead of simple on/off, cycle through preset Hubitat scenes to simulate variable activity. Each scene holds for a randomized duration (${SCENE_MIN_HOLD_MINUTES}-${SCENE_MAX_HOLD_MINUTES} min) before rotating to the next. If no scenes are selected, falls back to standard light toggling."
+            input "sceneRotation", "hub.scene",
+                title: "Scenes to rotate through",
+                description: "Select one or more scenes. They will cycle in the order listed. Leave empty to disable scene rotation.",
+                required: false, multiple: true
         }
 
         section("Schedule") {
-            input "onTime", "time", title: "Turn on at (start of window)", required: true, defaultValue: "16:00"
+            paragraph "⏰ <b>Time Window:</b> Set when your away simulation should run. Lights will be randomly turned on/off within this window to vary patterns and appear more natural."
+            input "onTime", "time",
+                title: "Turn on at (start of window)",
+                description: "When to start the away simulation. If using sunset, this is ignored.",
+                required: true, defaultValue: "16:00"
             input "useSunset", "bool",
                 title: "Use sunset instead of fixed on-time",
-                description: "When enabled, lights turn on at sunset (± offset) instead of the fixed time above",
+                description: "✓ Sunset varies by season—more realistic occupancy simulation. ✗ Only use if you want on-time to follow sunset. Uncheck for a fixed time.",
                 required: false, defaultValue: false
             if (useSunset) {
                 input "sunsetOffsetMinutes", "number",
-                    title: "Sunset offset (minutes, negative = before sunset)",
-                    description: "e.g. -30 = 30 min before sunset, 15 = 15 min after sunset",
+                    title: "Sunset offset (minutes)",
+                    description: "Adjust the sunset trigger: negative values turn lights on BEFORE sunset (e.g., -30), positive values turn them on AFTER sunset (e.g., 15). Range: -120 to +120 minutes.",
                     required: false, defaultValue: 0, range: "-120..120"
             }
-            input "offTime", "time", title: "Turn off at (end of window)", required: true, defaultValue: "22:00"
+            input "offTime", "time",
+                title: "Turn off at (end of window)",
+                description: "When to end the away simulation and turn off all lights.",
+                required: true, defaultValue: "22:00"
             input "awayDebounceMinutes", "number",
-                title: "Minutes in Away before turning on",
-                description: "Delay after entering Away mode before checking the window (0 = immediate)",
+                title: "Delay after entering Away mode (minutes)",
+                description: "Prevents instant light activation when entering Away mode. Useful to avoid lights turning on by accident during quick mode changes. Set to 0 for immediate response.",
                 required: true, defaultValue: 10, range: "0..60"
             input "randomizeMinutes", "number",
-                title: "Random time offset (minutes)",
-                description: "Randomly delays on/off by 0 to this many minutes (0 = disabled)",
+                title: "Random time jitter (minutes)",
+                description: "Adds unpredictable delays to make the pattern less obvious. On/off times will shift by 0 to this many minutes randomly. Set to 0 to disable randomization (lights will turn on/off at exact times).",
                 required: false, defaultValue: 0, range: "0..60"
         }
 
         section("Mode") {
-            input "awayMode", "mode", title: "Away mode name", required: true, defaultValue: "Away"
+            input "awayMode", "mode",
+                title: "Away mode name",
+                description: "The hub mode that triggers the away lights simulation.",
+                required: true, defaultValue: "Away"
             input "turnOffOnHome", "bool",
-                title: "Turn lights off when leaving Away",
-                description: "Turns lights off immediately when the hub leaves Away mode",
+                title: "Turn lights off when leaving Away mode",
+                description: "✓ Lights turn off immediately if mode changes away from Away. ✗ Lights stay in their current state.",
                 required: false, defaultValue: false
         }
 
         section("Notifications") {
             input "notifyDevices", "capability.notification",
-                title: "Notification devices (optional)", required: false, multiple: true
+                title: "Notification devices (optional)",
+                description: "Send a message to these devices when away lights turn on. Useful for debugging or monitoring.",
+                required: false, multiple: true
             if (notifyDevices) {
                 input "notifyMessage", "string",
-                    title: "Notification message", required: false, defaultValue: "Away lights on"
+                    title: "Notification message",
+                    description: "The message to send. Leave blank to disable notifications.",
+                    required: false, defaultValue: "Away lights on"
             }
         }
 
         section("Logging") {
-            input "logEnable", "bool", title: "Enable debug logging", required: false, defaultValue: false
+            input "logEnable", "bool",
+                title: "Enable debug logging",
+                description: "Write detailed debug messages to the hub's logs. Helpful for troubleshooting but increases log clutter.",
+                required: false, defaultValue: false
         }
     }
 }
@@ -95,6 +132,7 @@ def uninstalled() {
 def initialize() {
     unsubscribe()
     unschedule()
+    state.sceneIndex = null
     subscribe(location, "mode", modeHandler)
     if (useSunset) {
         schedule("0 0 12 * * ?", "scheduleSunsetOn")
@@ -111,6 +149,7 @@ def initialize() {
 def modeHandler(evt) {
     if (evt.value == awayMode) {
         if (logEnable) log.debug "Away Lights: entered Away mode"
+        state.sceneIndex = null
         if ((awayDebounceMinutes as Integer) == 0) {
             checkAndTurnOn()
         } else {
@@ -119,6 +158,8 @@ def modeHandler(evt) {
     } else if (turnOffOnHome) {
         unschedule("checkAndTurnOn")
         unschedule("doLightsOn")
+        unschedule("rotateScene")
+        state.sceneIndex = null
         lightsOff()
         if (logEnable) log.debug "Away Lights: left Away mode — lights turned off"
     }
@@ -129,6 +170,14 @@ def onTimeHandler() {
         if (logEnable) log.debug "Away Lights: onTime reached but not in Away mode — skipping"
         return
     }
+    
+    // Always-on lights turn on immediately (no jitter)
+    if (alwaysOnLights) {
+        for (def light in alwaysOnLights) { light.on() }
+        if (logEnable) log.debug "Away Lights: always-on lights turned ON (no jitter)"
+    }
+    
+    // Regular lights get jitter applied
     Integer jitter = randomizeMinutes ? (int)(Math.random() * (randomizeMinutes as Integer) * 60) : 0
     if (jitter > 0) {
         if (logEnable) log.debug "Away Lights: onTime — delaying ${jitter}s (random jitter)"
@@ -140,7 +189,27 @@ def onTimeHandler() {
 
 def doLightsOn() {
     if (location.mode != awayMode) return
-    lightsOn()
+    
+    // If scene rotation is configured, use it instead of simple on/off
+    if (sceneRotation && sceneRotation.size() > 0) {
+        rotateScene()
+        return
+    }
+    
+    // Fall back to standard light toggling
+    if (awayLights) {
+        for (def light in awayLights) {
+            // Skip lights that are always-on (they're already on from onTimeHandler)
+            if (alwaysOnLights && light in alwaysOnLights) {
+                continue
+            }
+            light.on()
+        }
+    }
+    if (notifyDevices && notifyMessage) {
+        for (def dev in notifyDevices) { dev.deviceNotification(notifyMessage) }
+    }
+    if (logEnable) log.debug "Away Lights: rotating lights on"
 }
 
 def offTimeHandler() {
@@ -171,7 +240,62 @@ def checkAndTurnOn() {
         if (logEnable) log.debug "Away Lights: checkAndTurnOn — outside time window, skipping"
         return
     }
-    lightsOn()
+    
+    // Always-on lights turn on immediately (no jitter)
+    if (alwaysOnLights) {
+        for (def light in alwaysOnLights) { light.on() }
+        if (logEnable) log.debug "Away Lights: always-on lights turned ON (no jitter)"
+    }
+    
+    // Then turn on rotating lights with jitter
+    Integer jitter = randomizeMinutes ? (int)(Math.random() * (randomizeMinutes as Integer) * 60) : 0
+    if (jitter > 0) {
+        if (logEnable) log.debug "Away Lights: checkAndTurnOn — delaying ${jitter}s (random jitter)"
+        runIn(jitter, "doLightsOn")
+    } else {
+        doLightsOn()
+    }
+}
+
+// ── Scene rotation helpers ────────────────────────────────────────────────────
+
+def rotateScene() {
+    if (location.mode != awayMode) return
+    if (!sceneRotation || sceneRotation.size() == 0) return
+    
+    // Initialize or increment scene index
+    if (state.sceneIndex == null) {
+        state.sceneIndex = 0
+    } else {
+        state.sceneIndex = (state.sceneIndex + 1) % sceneRotation.size()
+    }
+    
+    def currentScene = sceneRotation[state.sceneIndex]
+    if (logEnable) log.debug "Away Lights: activating scene [${state.sceneIndex}/${sceneRotation.size()}]: ${currentScene.label ?: currentScene.name}"
+    
+    currentScene.activate()
+    
+    // Send notification
+    if (notifyDevices && notifyMessage) {
+        for (def dev in notifyDevices) { dev.deviceNotification(notifyMessage) }
+    }
+    
+    // Schedule next rotation with random hold time
+    scheduleNextSceneRotation()
+}
+
+def scheduleNextSceneRotation() {
+    if (location.mode != awayMode) return
+    if (!sceneRotation || sceneRotation.size() == 0) return
+    if (!isInWindow()) return
+    
+    // Generate random hold time between SCENE_MIN_HOLD_MINUTES and SCENE_MAX_HOLD_MINUTES
+    Integer holdMinutes = SCENE_MIN_HOLD_MINUTES + (int)(Math.random() * (SCENE_MAX_HOLD_MINUTES - SCENE_MIN_HOLD_MINUTES + 1))
+    Integer holdSeconds = holdMinutes * 60
+    
+    if (logEnable) log.debug "Away Lights: next scene rotation in ${holdMinutes} minutes"
+    
+    runIn(holdSeconds, "rotateScene")
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -199,7 +323,13 @@ private boolean isInWindow() {
 
 private void lightsOn() {
     if (awayLights) {
-        for (def light in awayLights) { light.on() }
+        for (def light in awayLights) {
+            // Skip lights that are always-on (they were already turned on in onTimeHandler)
+            if (alwaysOnLights && light in alwaysOnLights) {
+                continue
+            }
+            light.on()
+        }
     }
     if (notifyDevices && notifyMessage) {
         for (def dev in notifyDevices) { dev.deviceNotification(notifyMessage) }
@@ -208,6 +338,7 @@ private void lightsOn() {
 }
 
 private void lightsOff() {
+    unschedule("rotateScene")
     if (awayLights) {
         for (def light in awayLights) { light.off() }
     }
