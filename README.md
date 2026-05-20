@@ -1,8 +1,8 @@
-# Hubitat Drivers
+# Hubitat Drivers & Apps
 
-Community Hubitat Elevation drivers by Mads Kristensen.
+Community Hubitat Elevation drivers and apps by Mads Kristensen.
 
-**9 production-ready drivers** • 🌐 6 Local LAN • ☁️ 3 Cloud API • 📦 HPM Ready
+**9 production-ready drivers + 1 app** • 🌐 6 Local LAN • ☁️ 3 Cloud API • 📦 HPM Ready
 
 ## Available Drivers
 
@@ -40,6 +40,12 @@ Community Hubitat Elevation drivers by Mads Kristensen.
 | **Minoston Smart Plug 2-Channel (MP24Z)** | Local | Dual-outlet child endpoints • Parent/child sync hardening • Z-Wave associations • Auto-off per channel | [Docs](drivers/minoston-mp24z/README.md)        |
 | **Philio PST02 Enhanced** | Local | Motion/contact/temp/lux sensor • Guided parameter UI (no raw bitmask math) • Variant-aware A/B/C handling | [Docs](drivers/philio-pst02/README.md)        |
 
+## Available Apps
+
+| App | Key Features | Docs |
+| --- | --- | --- |
+| **Occupancy Mode Manager** | Home/Away decisions from selected presence + motion + contact sensors • Simple inactivity thresholds (Home 0 / Away 20 default) • Optional lock/unlock actions on mode changes • Event-driven, debounced evaluation • Presence/motion/contact changes count as activity • Presence not-present has its own timer • Decision explainability | [Docs](apps/presence-confidence-mode-manager/README.md) |
+
 ## Quick Start
 
 ### Option 1: Install All Drivers (Recommended)
@@ -53,7 +59,7 @@ Community Hubitat Elevation drivers by Mads Kristensen.
 
 > **💡 Tip:** Install via the bundle URL **or** per-driver URL — not both. Installing a driver through both paths causes duplicate update prompts.
 
-### Option 2: Install Individual Drivers
+### Option 2: Install Individual Drivers/Apps
 
 **Install specific drivers via HPM:**
 
@@ -68,9 +74,10 @@ Community Hubitat Elevation drivers by Mads Kristensen.
      Minoston MP24Z:   https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/minoston-mp24z/packageManifest.json
     Philio PST02:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/philio-pst02/packageManifest.json
      PurpleAir AQI:    https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/packageManifest.json
-   SunStat Connect:  https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/packageManifest.json
-   Touchstone:       https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/packageManifest.json
-   ```
+    SunStat Connect:  https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/packageManifest.json
+    Touchstone:       https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/packageManifest.json
+    Occupancy App:    https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/presence-confidence-mode-manager/packageManifest.json
+    ```
 
 3. **Follow** the prompts
 

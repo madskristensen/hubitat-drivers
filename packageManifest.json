@@ -2,8 +2,8 @@
   "packageName": "Mads Kristensen — Hubitat Drivers",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
-  "dateReleased": "2026-05-19",
-  "version": "1.2.5",
+  "dateReleased": "2026-05-20",
+  "version": "1.2.14",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/README.md",
   "drivers": [
@@ -74,6 +74,16 @@
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/philio-pst02/philio-pst02.groovy",
       "required": false,
       "version": "1.0.0"
+    }
+  ],
+  "apps": [
+    {
+      "id": "0ac3317a-95ec-4346-b5f6-d2b4f140a7d4",
+      "name": "Occupancy Mode Manager",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/presence-confidence-mode-manager/presence-confidence-mode-manager.groovy",
+      "required": false,
+      "version": "0.8.0"
     }
   ]
 }
