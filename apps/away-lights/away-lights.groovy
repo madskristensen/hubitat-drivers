@@ -47,7 +47,7 @@ def mainPage() {
         section("Scene Rotation (optional)") {
             paragraph "🎭 <b>Multi-Scene Mode:</b> Instead of simple on/off, cycle through preset Hubitat scenes to simulate variable activity. Each scene holds for a randomized duration (${SCENE_MIN_HOLD_MINUTES}-${SCENE_MAX_HOLD_MINUTES} min) before rotating to the next. If no scenes are selected, falls back to standard light toggling."
             paragraph "📚 <b>What are scenes?</b> Scenes are preset light configurations you create in Hubitat. Go to <b>Devices → Rooms & Scenes → Scene Settings</b> to create scenes like 'Movie Time', 'Reading', 'Evening Activity'. Once created, they'll appear here as selectable options. If you don't see any scenes listed below, create them first in the Scene Settings."
-            input "sceneRotation", "capability.scene",
+            input "sceneRotation", "capability.switch",
                 title: "Scenes to rotate through",
                 description: "Select one or more scenes. They will cycle in the order listed. Example: 'Movie Time' → 'Dim Lights' → 'Night Mode'. Leave empty to disable scene rotation.",
                 required: false, multiple: true
