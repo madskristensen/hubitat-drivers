@@ -2,6 +2,9 @@
  * Occupancy Mode Manager
  *
  * Changelog:
+ *   0.11.0 — 2026-05-20 — Fix asymmetric cooldown: Home transitions now bypass the mode-change cooldown so arriving home is never delayed.
+ *   0.10.0 — 2026-05-20 — Add optional Away prerequisite locks: Away is only evaluated when all designated locks are locked; locking them also triggers an immediate re-evaluation.
+ *   0.9.0 — 2026-05-20 — Lock unlock events count as occupancy activity via new activity locks picker.
  *   0.8.0 — 2026-05-20 — Track presence inactivity separately so Not Present does not count as activity; schedule checks from the remaining time on each inactivity window.
  *   0.7.0 — 2026-05-20 — Replace periodic polling with event-driven debounced evaluation and schedule the next check only when needed.
  *   0.6.0 — 2026-05-20 — Remove secondary Away confirmation and treat contact open/close as activity for the inactivity timer.
@@ -15,7 +18,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.8.0"
+@Field static final String VERSION = "0.11.0"
 @Field static final Integer MAX_HISTORY_ITEMS = 12
 @Field static final Integer EVALUATION_DEBOUNCE_SECONDS = 1
 
@@ -40,6 +43,11 @@ def mainPage() {
             input "presenceSensors", "capability.presenceSensor", title: "Presence sensors", required: false, multiple: true
             input "motionSensors", "capability.motionSensor", title: "Motion sensors", required: false, multiple: true
             input "contactSensors", "capability.contactSensor", title: "Contact sensors", required: false, multiple: true
+            input "activityLocks", "capability.lock",
+                title: "Locks (unlock = activity signal)",
+                description: "Unlocking any of these doors counts as occupancy activity",
+                required: false,
+                multiple: true
         }
 
         section("Target modes") {
@@ -55,6 +63,12 @@ def mainPage() {
 
             input "homeUnlockDevices", "capability.lock",
                 title: "Locks to unlock when switching to Home",
+                required: false,
+                multiple: true
+
+            input "awayPrerequisiteLocks", "capability.lock",
+                title: "Away prerequisite locks (optional)",
+                description: "Away mode is only evaluated when all of these are locked. Locking any of them also triggers an immediate evaluation.",
                 required: false,
                 multiple: true
         }
@@ -148,6 +162,12 @@ private void initialize() {
     if (contactSensors) {
         subscribe(contactSensors, "contact", "contactHandler")
     }
+    if (activityLocks) {
+        subscribe(activityLocks, "lock", "lockActivityHandler")
+    }
+    if (awayPrerequisiteLocks) {
+        subscribe(awayPrerequisiteLocks, "lock", "awayPrerequisiteLockHandler")
+    }
     queueEvaluation(EVALUATION_DEBOUNCE_SECONDS)
 }
 
@@ -174,6 +194,20 @@ def contactHandler(evt) {
     if ("open".equalsIgnoreCase("${evt?.value}") || "closed".equalsIgnoreCase("${evt?.value}")) {
         state.lastActivityTs = eventTimestamp(evt)
     }
+    queueEvaluation(EVALUATION_DEBOUNCE_SECONDS)
+}
+
+def lockActivityHandler(evt) {
+    if ("unlocked".equalsIgnoreCase("${evt?.value}")) {
+        state.lastActivityTs = eventTimestamp(evt)
+        queueEvaluation(EVALUATION_DEBOUNCE_SECONDS)
+    }
+}
+
+def awayPrerequisiteLockHandler(evt) {
+    // Re-evaluate whenever a prerequisite lock changes state (locked or unlocked).
+    // On locked: may immediately trigger Away if inactivity already elapsed.
+    // On unlocked: cancels any pending Away path.
     queueEvaluation(EVALUATION_DEBOUNCE_SECONDS)
 }
 
@@ -250,6 +284,16 @@ def evaluateOccupancy(Boolean manualTrigger = false) {
         shouldAway = inactivityMet
     }
 
+    if (shouldAway && awayPrerequisiteLocks) {
+        boolean allPrerequisiteLocked = (awayPrerequisiteLocks as Collection).every {
+            "locked".equalsIgnoreCase("${it.currentValue("lock")}")
+        }
+        if (!allPrerequisiteLocked) {
+            holdReasons << "away prerequisite lock(s) not yet locked"
+            shouldAway = false
+        }
+    }
+
     String decision = "hold"
     String targetMode = null
 
@@ -269,7 +313,7 @@ def evaluateOccupancy(Boolean manualTrigger = false) {
 
     boolean changedMode = false
     if (targetMode && location.mode != targetMode) {
-        if (cooldownElapsed(nowTs)) {
+        if (decision == "home" || cooldownElapsed(nowTs)) {
             setLocationMode(targetMode)
             state.lastModeChangeTs = nowTs
             changedMode = true
@@ -313,7 +357,7 @@ private String recentHistoryText() {
 }
 
 private boolean hasAnyConfiguredSensor() {
-    return (presenceSensors?.size() ?: 0) > 0 || (motionSensors?.size() ?: 0) > 0 || (contactSensors?.size() ?: 0) > 0
+    return (presenceSensors?.size() ?: 0) > 0 || (motionSensors?.size() ?: 0) > 0 || (contactSensors?.size() ?: 0) > 0 || (activityLocks?.size() ?: 0) > 0
 }
 
 private boolean isPausedByCurrentMode() {

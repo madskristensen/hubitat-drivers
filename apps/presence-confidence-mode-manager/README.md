@@ -45,13 +45,18 @@ When rules indicate occupancy or vacancy, it sets your hub Location Mode to your
 - Presence, motion, and contact changes all roll into the same inactivity timer as the away/home thresholds.
 - Contact open and close events both count as activity.
 - Presence not-present time is tracked separately so Away waits for the full window.
+- Lock unlock events (from the "activity locks" picker) count as occupancy activity.
+- Evaluation is event-driven and debounced instead of polling on a fixed timer.
 - Lock and unlock actions are tied to mode changes, using separate lock lists for Away and Home.
+- Optional Away prerequisite locks: Away mode is only evaluated when all designated locks are locked.
 - Evaluation is event-driven and debounced instead of polling on a fixed timer.
 
 ## Changelog
 
 | Version | Date       | Notes |
 |---------|------------|-------|
+| 0.10.0  | 2026-05-20 | Added optional Away prerequisite locks — Away is only evaluated when all designated locks are locked; locking them triggers an immediate re-evaluation. |
+| 0.9.0   | 2026-05-20 | Lock unlock events from a new "activity locks" picker count as occupancy activity. |
 | 0.8.0   | 2026-05-20 | Split presence inactivity from general activity so Not Present has its own timer and Away waits for the full window. |
 | 0.7.0   | 2026-05-20 | Switched to event-driven, debounced evaluation and scheduled the next check only when needed to reduce wakeups. |
 | 0.6.0   | 2026-05-20 | Removed secondary Away confirmation. Contact open/close events now both count as activity for the inactivity timer. |

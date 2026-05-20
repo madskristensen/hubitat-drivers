@@ -3,7 +3,7 @@
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
   "dateReleased": "2026-05-20",
-  "version": "1.2.14",
+  "version": "1.2.16",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/README.md",
   "drivers": [
@@ -83,7 +83,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/presence-confidence-mode-manager/presence-confidence-mode-manager.groovy",
       "required": false,
-      "version": "0.8.0"
+      "version": "0.11.0"
     }
   ]
 }
