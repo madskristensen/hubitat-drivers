@@ -34,6 +34,7 @@ Then assign the device driver type:
 
 | Version | Date       | Notes |
 |---------|------------|-------|
+| 1.4.1   | 2026-05-19 | Fix temperature unit mismatch on some PST02 devices by deriving incoming report unit from SensorMultilevel scale (0=C, 1=F) instead of p5TempScale preference. |
 | 1.4.0   | 2026-05-19 | Add missing `commandClassVersions` map (was null — Z-Wave frames were parsed without version hints); add P21 prefix to temperatureDifferential label; auto-set pendingResync in updated() so preference changes sync on next wakeup without a manual Configure press. |
 | 1.3.0   | 2026-05-19 | Fix temperature conversion bug: P5 bit 3 temperature scale logic was inverted (device ran in Fahrenheit mode even when Celsius was selected), causing readings like 149°F instead of 63°F. Unit detection no longer relies on cmd.scale since PST02 always sends 0 regardless. |
 | 1.2.0   | 2026-05-19 | Performance: eliminate implicit globals, typed returns, cache isPst02BVariant(), remove redundant configurationGet(12), reduce map allocations. |

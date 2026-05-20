@@ -1,7 +1,7 @@
 /**
  *  Philio PST02 Multi-Sensor (PST02-A/B/C) — Hubitat Fork
  *  Author:  Mads Kristensen
- *  Version: 1.4.0 — 2026-05-19
+ *  Version: 1.4.1 — 2026-05-19
  *  License: Apache-2.0
  *
  *  Fork of kunPet/Denny Page "Philio PST02" Hubitat driver.
@@ -11,6 +11,7 @@
  *  Hubitat best-practice hardening.
  *
  *  Changelog:
+ *    1.4.1 — 2026-05-19 — Fix temperature unit mismatch on some PST02 devices by deriving report unit from SensorMultilevel scale (0=C, 1=F) instead of p5TempScale preference.
  *    1.4.0 — 2026-05-19 — Add missing commandClassVersions map (was null, causing Z-Wave parse without version hints); add P21 prefix to temperatureDifferential label; auto-set pendingResync in updated() so preference changes sync on next wakeup without requiring a manual Configure press.
  *    1.3.0 — 2026-05-19 — Fix temperature bug: P5 bit 3 temperature scale logic was inverted (setBit used "== c" should be "== f"), causing device to run in Fahrenheit mode when Celsius was selected. Fix unit detection in SensorMultilevelReport: PST02 always sends cmd.scale=0 regardless of P5 setting, so unit is now derived from p5TempScale preference instead of cmd.scale.
  *    1.2.0 — 2026-05-19 — Performance: fix implicit globals (resync/refresh/value/cmds in deviceSync, value in SensorMultilevelReport cases 5/3); add typed return types on setBit/isPst02BVariant/resolveConfigParam*; cache isPst02BVariant() per resolve call; remove redundant configurationGet(12) in resync block (duplicate of diff-check path); inline map literals in BatteryReport/clearTamper; type Map in event handlers; drop redundant .toString() in log.trace; fix "wakup" typo in WakeUpIntervalReport log.
@@ -602,9 +603,8 @@ def zwaveEvent(hubitat.zwave.commands.sensormultilevelv5.SensorMultilevelReport 
         case 1: // temperature
             sensorValue = cmd.scaledSensorValue
             precision = cmd.precision
-            // The PST02 always sends cmd.scale=0 regardless of P5 bit 3 setting.
-            // Derive the unit from the P5 preference directly.
-            unit = (p5TempScale == "f") ? "F" : "C"
+            // Derive report unit from SensorMultilevel scale (0=C, 1=F).
+            unit = (cmd.scale == 1) ? "F" : "C"
 
             map.name = "temperature"
             map.value = convertTemperatureIfNeeded(sensorValue, unit, precision)

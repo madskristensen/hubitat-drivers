@@ -180,7 +180,28 @@ Added ~195 LOC of MQTT support as an additive, preference-gated layer:
 - Gemstone v0.4.17 stale-token fix: add `ensureSession()` before cached-state dedup so commands only early-return when the Cognito session is healthy; edits landed in `drivers/gemstone-lights/gemstone-lights.groovy` lines 206–355 (switch/level/color handlers), 802–826 (`ensureSession()` + queue gate), and 1044–1063 (shared effect activation dedup path).
 - Dedup/auth lesson: in Hubitat cloud drivers, a cache-hit return must never sit above the auth/queue path, or an expired token turns user commands into silent no-ops until a non-deduped path like `refresh()` repairs the session.
 
-## Session Arc 2026-05-19: Two Drivers Shipped + Changelog Format Rule
+## Session Arc 2026-05-19: PST02 Performance Audit (Tank #23)
+
+**Task:** Performance audit of `drivers/philio-pst02/philio-pst02.groovy` v1.1.0 → v1.2.0.
+
+**Changes shipped:**
+- **Implicit globals eliminated:** `resync`, `refresh`, and `value` in `deviceSync()` were bare assignments (no `def`/type), creating script-level Binding entries that persist across method calls. Declared `boolean resync`, `boolean refresh`, `Integer value`, `List cmds`.
+- **Implicit globals in SensorMultilevelReport:** `value` in switch cases 5 and 3 was also undeclared — declared `BigDecimal sensorValue`, `int precision`, `String unit` before the switch.
+- **Typed return types:** `def setBit` → `Integer`, `def isPst02BVariant` → `boolean`, `def resolveConfigParam*` → `Integer`. Groovy can skip dynamic-dispatch overhead when return type is declared.
+- **`isPst02BVariant()` called twice per resolve fn:** Cached in local `boolean isB` at top of each resolve function — avoids redundant settings/`getDataValue` reads.
+- **Redundant Z-Wave roundtrip removed:** The resync block sent `configurationGet(12)` unconditionally, but the diff-check block above it already sends `configurationGet(12)` when resync=true (because `resync ||` is true). Removed the duplicate — saves one battery-expensive Z-Wave roundtrip per full resync.
+- **Map allocations reduced:** `BatteryReport` and `clearTamper` use inline `sendEvent(name:..., value:..., ...)` — eliminates one `HashMap` allocation per event.
+- **`Map map = [:]` typing:** All event handlers type the map variable explicitly.
+- **Redundant `.toString()` in log.trace:** All `${cmd.toString()}` → `${cmd}` (Groovy calls `toString()` implicitly in GString).
+- **`WakeUpIntervalReport` local:** Compute `int minutes` locally instead of `cmd.seconds / 60` inline in `state` write — avoids reading state back for the log line and fixes the "wakup" typo.
+
+## Learnings
+
+- In Hubitat Groovy drivers, any variable assigned without `def` or a type in a `def` method body becomes a script-level `Binding` entry, not a stack-local. This is not sandbox-blocked but wastes a map-lookup on every read/write and can hold stale values across calls.
+- `isPst02BVariant()` is called from 3 resolve functions each of which may run on every wakeup. Cache it in a local `boolean isB` at the top of each function — one read instead of two.
+- On battery-powered Z-Wave devices, every `configurationGet` costs battery life; never duplicate one in a "resync info reads" block if the diff-check block above it already emits the same get unconditionally when `resync == true`.
+- Groovy typed return types (`Integer`, `boolean`, `List`) on frequently-called helper functions reduce dynamic dispatch overhead in the Hubitat sandbox JVM.
+
 
 **Tank #20:** Fully Kiosk v0.5.0 shipped with MQTT-to-REST wording clarification. Changelog flattened to single-line format (release.yml regex requirement). Commit: 61644e4.
 
