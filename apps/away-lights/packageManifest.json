@@ -3,7 +3,7 @@
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
   "dateReleased": "2026-05-20",
-  "version": "0.2.0",
+  "version": "0.8.1",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/away-lights/README.md",
   "apps": [
@@ -16,7 +16,7 @@
       "iconX2Url": "https://github.githubassets.com/favicons/favicon.png",
       "required": true,
       "oauth": false,
-      "version": "0.2.0"
+      "version": "0.8.1"
     }
   ]
 }

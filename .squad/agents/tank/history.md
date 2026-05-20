@@ -1,3 +1,19 @@
+## 2026-05-20 — Away Lights v0.8.1 Resource Cleanup (revised — aggressive)
+
+**Task:** Implement resource cleanup enhancements; Mads clarified backcompat is not a priority pre-v1.0.0 — make breaking changes if needed.
+
+**Changes made to `apps/away-lights/away-lights.groovy`:**
+
+- **Enhancement 1 (unconditional):** `unschedule("offTimeHandler")` now fires on ANY Away-mode exit, not just when `turnOffOnHome=true`. Previously `turnOffOnHome=false` left the handler scheduled to fire and no-op at end-time — pure waste.
+- **Enhancement 2 (structural fix):** Changed `else if (turnOffOnHome)` → `else` in `modeHandler`. All scheduled task cleanup (`checkAndTurnOn`, `doLightsOn`, `offTimeHandler`) and state reset now run unconditionally on Away exit. Only `lightsOff()` remains gated on `turnOffOnHome`.
+- **Dropped no-op:** The `unsubscribe("modeHandler")` + `subscribe(location, "mode", modeHandler)` from the first attempt was a net no-op and removed. The mode subscription correctly stays permanent — it must be active at all times to detect Away re-entry.
+
+**Breaking behavior change:** When `turnOffOnHome=false`, the app now always cancels pending scheduled tasks on Away exit. Previously those tasks would linger, fire at their scheduled time, and no-op. No user-visible behavior difference (lights were already staying on in both paths) — the break is CPU/memory only.
+
+**Architecture note:** The `subscribe(location, "mode", modeHandler)` in `initialize()` must remain permanent. You cannot subscribe "only during Away mode" for the subscription that detects Away entry — it's circular. Any future value-filtered subscription support in Hubitat would allow a true implementation.
+
+---
+
 ## 2026-05-20 — Away Lights App v0.1.0
 
 **Task:** Convert Mads's webCoRE "Away Lights" piston into a native Hubitat app.
