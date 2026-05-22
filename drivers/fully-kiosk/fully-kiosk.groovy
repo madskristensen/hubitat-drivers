@@ -266,7 +266,18 @@ def setLevel(level) {
     // Now converts 0-100 → 0-255 so setLevel(100) sends 255 (true 100% brightness).
     def logprefix = "[setLevel] "
     logger(logprefix + "level:${level}", "trace")
-    int fkbBrightness = Math.round(level.toBigDecimal() * 2.55).toInteger()
+    if (level == null) {
+        logger(logprefix + "ERROR: level cannot be null", "error")
+        return
+    }
+    BigDecimal levelBD
+    try {
+        levelBD = level.toBigDecimal()
+    } catch (Exception e) {
+        logger(logprefix + "ERROR: level '${level}' is not numeric: ${e.message}", "error")
+        return
+    }
+    int fkbBrightness = Math.round(levelBD * 2.55).toInteger()
     fkbBrightness = Math.min(255, Math.max(0, fkbBrightness))
     def postParams = [
         uri: "http://${serverIP}:${serverPort}/?type=json&password=${serverPassword}&cmd=setStringSetting&key=screenBrightness&value=${fkbBrightness}",
@@ -730,6 +741,7 @@ private void logger(loggingText, String loggingType = "debug") {
         case "error": log.error loggingText; break
         case "warn":  log.warn  loggingText; break
         case "info":  log.info  loggingText; break
+        case "trace": if (logEnable) log.debug loggingText; break
         default:      if (logEnable) log.debug loggingText; break
     }
 }
