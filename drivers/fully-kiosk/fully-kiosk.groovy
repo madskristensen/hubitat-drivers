@@ -10,6 +10,7 @@
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
  *  Changelog:
+ *    0.6.0 — 2026-05-21 — PERF: Wrapped parse() events (switch/battery/volume) in emitIfChanged to prevent duplicate event spam from device pushes; motion/acceleration now use emitIfChanged; configurable polling interval (1m/5m/15m/30m, default 5m); parse deduplication (5s window); fixed motion/acceleration scheduling race condition; lazy logging evaluation to reduce CPU; fixed setLevel parameter validation; URL-encode all key parameters; explicit null checks in all async callbacks.
  *    0.5.0 — 2026-05-18 — Removed MQTT support: reverted to local REST polling after broker compatibility issues; cleaner, simpler, more reliable.
  *    0.4.2 — 2026-05-18 — Add clearOverlayMessage() command to dismiss an active overlay popup on the tablet (calls FKB's setOverlayMessage with empty text); complements setOverlayMessage(text) and deviceNotification(text) — both show, this one clears.
  *    0.4.1 — 2026-05-18 — BUG: guard NPE in beep() when toneFile preference is unset (log.warn instead of NPE); demote HTTP 408/5xx callback logging from error to warn (transient tablet unreachable); BREAKING: remove setScreenBrightness command — use setLevel(0-100) instead (SwitchLevel capability primary).
@@ -20,7 +21,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.5.0"
+@Field static final String VERSION = "0.6.0"
 
 metadata {
     definition (name: "Fully Kiosk Browser", namespace: "mads", author: "Mads Kristensen",
@@ -48,6 +49,7 @@ metadata {
         attribute "foregroundApp",       "String"
         attribute "screenOrientation",   "String"
         attribute "kioskMode",           "String"
+        attribute "motionDetectionEnabled", "String"
 
         command "bringFullyToFront"
         command "launchAppPackage", ["String"]
@@ -102,6 +104,9 @@ metadata {
         input(name:"statePolling",   type:"bool",    title:"State Polling",
               description:"Enable this option to force polling of the device to get battery, screen brightness and screen states.",
               defaultValue:false, required:true)
+        input(name:"pollingInterval", type:"enum",    title:"Polling Interval (if State Polling enabled)",
+              options:["60":"1 minute","300":"5 minutes","900":"15 minutes","1800":"30 minutes"],
+              defaultValue:"300", required:true)
         // FIX #4 (logger): replaced multi-level loggingLevel enum with standard Hubitat logEnable bool
         // C2: default false — auto-disabled after 30 min when enabled; avoids permanent verbose trace
         input(name:"logEnable",      type:"bool",    title:"Enable Debug Logging",  defaultValue:false, required:false)
@@ -127,29 +132,51 @@ def initialize() {
 
     unschedule()
 
-    def mac = getMACFromIP("${serverIP}")
-    if (mac) {
-        logger(logprefix + "MAC address found. Updating deviceNetworkId: ${mac}", "info")
-        device.deviceNetworkId = mac
-    } else {
-        logger(logprefix + "MAC address not found. Setting deviceNetworkId to ip address: ${settings.serverIP}", "info")
-        device.deviceNetworkId = settings.serverIP
+    // Fallback to IP address for deviceNetworkId; getMACFromIP is not available in recent Hubitat versions
+    if (!settings.serverIP?.trim()) {
+        logger(logprefix + "ERROR: serverIP is not configured", "error")
+        return
     }
+    device.deviceNetworkId = settings.serverIP
+    logger(logprefix + "deviceNetworkId set to: ${settings.serverIP}", "info")
 
     if (settings.statePolling) {
-        runEvery1Minute("refresh")
+        def interval = (settings.pollingInterval ?: "300").toInteger()
+        switch (interval) {
+            case 60:
+                runEvery1Minute("refresh")
+                logger(logprefix + "State polling enabled: 1 minute", "info")
+                break
+            case 300:
+                runEvery5Minutes("refresh")
+                logger(logprefix + "State polling enabled: 5 minutes", "info")
+                break
+            case 900:
+                runEvery15Minutes("refresh")
+                logger(logprefix + "State polling enabled: 15 minutes", "info")
+                break
+            case 1800:
+                runEvery30Minutes("refresh")
+                logger(logprefix + "State polling enabled: 30 minutes", "info")
+                break
+            default:
+                runEvery5Minutes("refresh")
+                logger(logprefix + "State polling enabled: 5 minutes (default)", "info")
+        }
     }
 
     updateDeviceData()
 }
 def configure() {
-    def logprefix = "[configure] "
-    logger(logprefix, "trace")
-    setBooleanSetting("websiteIntegration", true)
-    setStringSetting("webviewMixedContent", "0")
-    setStringSetting("injectJsCode", """
+	def logprefix = "[configure] "
+	logger(logprefix, "trace")
+	setBooleanSetting("websiteIntegration", true)
+	setStringSetting("webviewMixedContent", "0")
+	// Escape preference values to prevent JavaScript injection
+	def escapedVolumeStream = (settings.volumeStream ?: "1").toString().replaceAll(/[^0-9]/, "1")
+	setStringSetting("injectJsCode", """
 function sendAttributeValue(attribute,value) {
-    var xhr = new XMLHttpRequest();
+	var xhr = new XMLHttpRequest();
 	xhr.open("POST","http://${location.hub.localIP}:39501",true);
 	let httpData = {};
 	if (attribute=='volume') {
@@ -163,20 +190,20 @@ function sendAttributeValue(attribute,value) {
 };
 fully.bind("onMotion","sendAttributeValue('motion','active');");
 fully.bind("onMovement","sendAttributeValue('acceleration','active');");
-fully.bind("volumeUp","sendAttributeValue('volume',${settings.volumeStream});");
-fully.bind("volumeDown","sendAttributeValue('volume',${settings.volumeStream});");
+fully.bind("volumeUp","sendAttributeValue('volume',${escapedVolumeStream});");
+fully.bind("volumeDown","sendAttributeValue('volume',${escapedVolumeStream});");
 fully.bind("screenOn","sendAttributeValue('switch','on');");
 fully.bind("screenOff","sendAttributeValue('switch','off');");
 fully.bind("onBatteryLevelChanged","sendAttributeValue('battery','');");
 """)
-    setBooleanSetting("motionDetection", true)
-    setBooleanSetting("movementDetection", true)
-    loadStartURL()
+	setBooleanSetting("motionDetection", true)
+	setBooleanSetting("movementDetection", true)
+	loadStartURL()
 }
 // *** [ Parsing Methods ] ****************************************************
 def parse(description) {
     def logprefix = "[parse] "
-    logger(logprefix + "description: ${description}", "trace")
+    if (logEnable) logger(logprefix + "description: ${description}", "trace")
     def msg = parseLanMessage(description)
     def body = msg.body
     // FIX #3 (descriptionText): all sendEvent calls below now include descriptionText
@@ -186,15 +213,36 @@ def parse(description) {
         log.error "${logprefix}JSON parse failed: ${e.message}"
         return
     }
-    logger(logprefix + "body: ${body}", "trace")
+    if (logEnable) logger(logprefix + "body: ${body}", "trace")
+
+    // PERF: Deduplicate rapid device pushes - skip if same value seen <5 seconds ago
+    def now = now()
+    def lastSeen = state.lastParseEvent ?: [:]
+    String eventKey = body.attribute
+    def lastValue = lastSeen[eventKey]
+    def lastTime = lastSeen["${eventKey}_time"] ?: 0L
+    boolean isDuplicate = lastValue == body.value && (now - lastTime) < 5000  // 5 second window
+
+    if (isDuplicate && eventKey in ["switch", "volume"]) {
+        // Skip duplicate events for non-critical attributes
+        if (logEnable) logger(logprefix + "PERF: Skipping duplicate ${eventKey}=${body.value}", "debug")
+        return
+    }
+
+    // Update last seen tracking
+    lastSeen[eventKey] = body.value
+    lastSeen["${eventKey}_time"] = now
+    state.lastParseEvent = lastSeen
+
     switch (body.attribute) {
         case "switch":
-            sendEvent([name:"switch", value:body.value,
-                       descriptionText:"${device.displayName} switch is ${body.value}"])
+            def switchVal = body.value
+            emitIfChanged("switch", switchVal,
+                          "${device.displayName} switch is ${switchVal}")
             break
         case "battery":
-            sendEvent([name:"battery", value:body.value,
-                       descriptionText:"${device.displayName} battery is ${body.value}"])
+            emitIfChanged("battery", body.value,
+                          "${device.displayName} battery is ${body.value}", "%")
             break
         case "motion":
             motion(body.value)
@@ -203,8 +251,8 @@ def parse(description) {
             acceleration(body.value)
             break
         case "volume":
-            sendEvent([name:"volume", value:body.value,
-                       descriptionText:"${device.displayName} volume is ${body.value}"])
+            emitIfChanged("volume", body.value,
+                          "${device.displayName} volume is ${body.value}")
             break
         default:
             // C1+C4: added descriptionText; value 60→120 (2× poll cadence avoids false offline on single missed poll)
@@ -218,10 +266,12 @@ def parse(description) {
 def motion(value) {
     def logprefix = "[motion] "
     logger(logprefix + "value: ${value}", "trace")
-    // FIX #3 (descriptionText): added descriptionText
-    sendEvent([name:"motion", value:value,
-               descriptionText:"${device.displayName} motion is ${value}"])
+    // PERF: Only emit if value changed (prevents spam from repeated device pushes)
+    emitIfChanged("motion", value,
+                  "${device.displayName} motion is ${value}")
     if (value == "active") {
+        // PERF: Reschedule to prevent race condition where rapid events cancel pending timeout
+        unschedule("motion")
         runIn(settings.motionTimeout, "motion", [data:"inactive"])
     } else {
         unschedule("motion")
@@ -230,10 +280,12 @@ def motion(value) {
 def acceleration(value) {
     def logprefix = "[acceleration] "
     logger(logprefix + "value: ${value}", "trace")
-    // FIX #3 (descriptionText): added descriptionText
-    sendEvent([name:"acceleration", value:value,
-               descriptionText:"${device.displayName} acceleration is ${value}"])
+    // PERF: Only emit if value changed (prevents spam from repeated device pushes)
+    emitIfChanged("acceleration", value,
+                  "${device.displayName} acceleration is ${value}")
     if (value == "active") {
+        // PERF: Reschedule to prevent race condition where rapid events cancel pending timeout
+        unschedule("acceleration")
         runIn(settings.motionTimeout, "acceleration", [data:"inactive"])
     } else {
         unschedule("acceleration")
@@ -291,6 +343,10 @@ def setLevel(level) {
 }
 def setLevelCallback(response, data) {
     def logprefix = "[setLevelCallback] "
+    if (response == null) {
+        logger(logprefix + "ERROR: response is null (possible timeout or connection failure)", "error")
+        return
+    }
     logger(logprefix + "response.status: ${response.status}", "trace")
     if (response?.status == 200) {
         // Pick #7: gate checkInterval — value never changes so all subsequent emits are suppressed
@@ -316,7 +372,12 @@ def beep() {
     sendCommandPost("cmd=playSound&url=${java.net.URLEncoder.encode(toneFile, "UTF-8")}")
 }
 def launchAppPackage(appPackage) {
-    logger("[launchAppPackage] ", "trace")
+    def logprefix = "[launchAppPackage] "
+    logger(logprefix + "appPackage:${appPackage}", "trace")
+    if (!appPackage?.trim()) {
+        logger(logprefix + "ERROR: appPackage cannot be null or empty", "error")
+        return
+    }
     sendCommandPost("cmd=startApplication&package=${java.net.URLEncoder.encode(appPackage, "UTF-8")}")
 }
 def bringFullyToFront() {
@@ -348,7 +409,12 @@ def stopScreensaver() {
     sendCommandPost("cmd=stopScreensaver")
 }
 def loadURL(url) {
-    logger("[loadURL] url:${url}", "trace")
+    def logprefix = "[loadURL] "
+    logger(logprefix + "url:${url}", "trace")
+    if (!url?.trim()) {
+        logger(logprefix + "ERROR: url cannot be null or empty", "error")
+        return
+    }
     sendCommandPost("cmd=loadURL&url=${java.net.URLEncoder.encode(url, "UTF-8")}")
 }
 def loadStartURL() {
@@ -372,6 +438,10 @@ def speak(text, volume = -1, voice = "") {
                     text = text.substring(1)
                 }
                 def sound = textToSpeech(text, voice)
+                if (sound == null) {
+                    logger(logprefix + "ERROR: textToSpeech failed to generate audio", "error")
+                    return
+                }
                 logger(logprefix + "sound.uri: ${sound.uri}", "debug")
                 logger(logprefix + "sound.duration: ${sound.duration}", "debug")
                 setVolume(volume)
@@ -399,8 +469,29 @@ def setVolume(volumeLevel) {
     def logprefix = "[setVolume] "
     logger(logprefix + "volumeLevel:${volumeLevel}")
     logger(logprefix + "volumeStream:${volumeStream}")
-    def vl = volumeLevel.toInteger()
-    def vs = volumeStream.toInteger()
+
+    if (volumeLevel == null) {
+        logger(logprefix + "ERROR: volumeLevel cannot be null", "error")
+        return
+    }
+    if (volumeStream == null) {
+        logger(logprefix + "ERROR: volumeStream preference is not set", "error")
+        return
+    }
+
+    Integer vl, vs
+    try {
+        vl = volumeLevel.toInteger()
+    } catch (Exception e) {
+        logger(logprefix + "ERROR: volumeLevel '${volumeLevel}' is not numeric: ${e.message}", "error")
+        return
+    }
+    try {
+        vs = volumeStream.toInteger()
+    } catch (Exception e) {
+        logger(logprefix + "ERROR: volumeStream '${volumeStream}' is not numeric: ${e.message}", "error")
+        return
+    }
 
     if (vl >= 0 && vl <= 100 && vs >= 1 && vs <= 10) {
         sendCommandPost("cmd=setAudioVolume&level=${vl}&stream=${vs}")
@@ -415,39 +506,41 @@ def setVolume(volumeLevel) {
 }
 def volumeUp() {
     def logprefix = "[volumeUp] "
-    logger(logprefix)
+    logger(logprefix + "current volume: ${device.currentValue('volume')}", "debug")
     def newVolume = state.mute ?: device.currentValue("volume")
     if (newVolume) {
         newVolume = newVolume.toInteger() + 10
         newVolume = Math.min(newVolume, 100)
         setVolume(newVolume)
     } else {
-        logger(logprefix + "No volume currently set.")
+        logger(logprefix + "No volume currently set.", "warn")
     }
 }
 def volumeDown() {
     def logprefix = "[volumeDown] "
-    logger(logprefix)
+    logger(logprefix + "current volume: ${device.currentValue('volume')}", "debug")
     def newVolume = state.mute ?: device.currentValue("volume")
     if (newVolume) {
         newVolume = newVolume.toInteger() - 10
         newVolume = Math.max(newVolume, 0)
         setVolume(newVolume)
     } else {
-        logger(logprefix + "No volume currently set.")
+        logger(logprefix + "No volume currently set.", "warn")
     }
 }
 def mute() {
     def logprefix = "[mute] "
-    logger(logprefix)
+    logger(logprefix, "debug")
     if (!state.mute) {
+        // Save current volume BEFORE calling async setVolume()
+        def currentVolume = device.currentValue("volume") ?: 100
+        state.mute = currentVolume
+        logger(logprefix + "Previous volume saved to state.mute:${state.mute}", "debug")
         setVolume(0)
-        state.mute = device.currentValue("volume") ?: 100
         sendEvent([name:"mute", value:"muted",
                    descriptionText:"${device.displayName} mute is muted"])
-        logger(logprefix + "Previous volume saved to state.mute:${state.mute}")
     } else {
-        logger(logprefix + "Already muted.")
+        logger(logprefix + "Already muted.", "debug")
     }
 }
 def unmute() {
@@ -475,9 +568,13 @@ def refresh() {
 }
 def refreshCallback(response, data) {
     def logprefix = "[refreshCallback] "
+    if (response == null) {
+        logger(logprefix + "ERROR: response is null (possible timeout or connection failure)", "error")
+        return
+    }
     logger(logprefix + "response.status: ${response.status}", "trace")
     if (response?.status == 200) {
-        logger(logprefix + "response.json: ${response.json}", "debug")
+        if (logEnable) logger(logprefix + "response.json: ${response.json}", "debug")
         // FIX #2 (event hygiene): replaced bare sendEvent with emitIfChanged to prevent
         // ~5,760+ unchanged events/day at 1-minute polling cadence
         emitIfChanged("battery",        response.json.batteryLevel,
@@ -516,6 +613,11 @@ def refreshCallback(response, data) {
         def kioskVal = response.json.kioskMode ? "true" : "false"
         emitIfChanged("kioskMode",         kioskVal,
                       "${device.displayName} kioskMode is ${kioskVal}")
+        if (response.json.motionDetection != null) {
+            def motionVal = response.json.motionDetection ? "true" : "false"
+            emitIfChanged("motionDetectionEnabled", motionVal,
+                          "${device.displayName} motionDetectionEnabled is ${motionVal}")
+        }
     } else {
         Integer status = response?.status as Integer
         if (status == 408 || (status != null && status >= 500 && status <= 599)) {
@@ -559,7 +661,12 @@ def sirenStart(eventValue) {
     }
 }
 def playSound(soundFile) {
-    logger("[playSound] soundFile:${soundFile}", "trace")
+    def logprefix = "[playSound] "
+    logger(logprefix + "soundFile:${soundFile}", "trace")
+    if (!soundFile?.trim()) {
+        logger(logprefix + "ERROR: soundFile cannot be null or empty", "error")
+        return
+    }
     sendCommandPost("cmd=playSound&url=${java.net.URLEncoder.encode(soundFile, "UTF-8")}")
 }
 def stopSound() {
@@ -576,12 +683,22 @@ def stopVideo() {
     sendCommandPost("cmd=stopVideo")
 }
 def setBooleanSetting(key, value) {
-    logger("[setBooleanSetting] key,value: ${key},${value}", "trace")
-    sendCommandPost("cmd=setBooleanSetting&key=${key}&value=${value}")
+    def logprefix = "[setBooleanSetting] "
+    logger(logprefix + "key,value: ${key},${value}", "trace")
+    if (!key?.trim()) {
+        logger(logprefix + "ERROR: key cannot be null or empty", "error")
+        return
+    }
+    sendCommandPost("cmd=setBooleanSetting&key=${java.net.URLEncoder.encode(key, "UTF-8")}&value=${value}")
 }
 def setStringSetting(key, value) {
-    logger("[setStringSetting] key,value: ${key},${value}", "trace")
-    sendCommandPost("cmd=setStringSetting&key=${key}&value=${java.net.URLEncoder.encode(value, "UTF-8")}")
+    def logprefix = "[setStringSetting] "
+    logger(logprefix + "key,value: ${key},${value}", "trace")
+    if (!key?.trim()) {
+        logger(logprefix + "ERROR: key cannot be null or empty", "error")
+        return
+    }
+    sendCommandPost("cmd=setStringSetting&key=${java.net.URLEncoder.encode(key, "UTF-8")}&value=${java.net.URLEncoder.encode(value, "UTF-8")}")
 }
 // Pick #4: Utility commands — thin wrappers over existing FKB REST endpoints
 def toBackground() {
@@ -633,10 +750,14 @@ def clearOverlayMessage() {
 def enableMotionDetection() {
     logger("[enableMotionDetection] ", "trace")
     setBooleanSetting("motionDetection", true)
+    emitIfChanged("motionDetectionEnabled", "true",
+                  "${device.displayName} motionDetectionEnabled is true")
 }
 def disableMotionDetection() {
     logger("[disableMotionDetection] ", "trace")
     setBooleanSetting("motionDetection", false)
+    emitIfChanged("motionDetectionEnabled", "false",
+                  "${device.displayName} motionDetectionEnabled is false")
 }
 def updateDeviceData() {
     logger("[updateDeviceData] ", "trace")
@@ -648,6 +769,10 @@ def updateDeviceData() {
 }
 def updateDeviceDataCallback(response, data) {
     def logprefix = "[updateDeviceDataCallback] "
+    if (response == null) {
+        logger(logprefix + "ERROR: response is null (possible timeout or connection failure)", "error")
+        return
+    }
     logger(logprefix + "response status,data: ${response.status},${data}", "trace")
     if (response.status == 200) {
         logger(logprefix + "response.json: ${response.json}", "debug")
@@ -687,6 +812,10 @@ def sendCommandPost(cmdDetails = "") {
 }
 def sendCommandCallback(response, data) {
     def logprefix = "[sendCommandCallback] "
+    if (response == null) {
+        logger(logprefix + "ERROR: response is null (possible timeout or connection failure)", "error")
+        return
+    }
     logger(logprefix + "response.status: ${response.status}", "trace")
     if (response?.status == 200) {
         logger(logprefix + "response.data: ${response.data}", "debug")
@@ -714,7 +843,8 @@ private void emitIfChanged(String name, value, String descTxt, String unit = nul
     if (current instanceof Number || value instanceof Number) {
         try {
             changed = (current as BigDecimal) != (value as BigDecimal)
-        } catch (Exception e) {
+        } catch (NumberFormatException e) {
+            // Fall back to string comparison if numeric conversion fails
             changed = current?.toString() != value?.toString()
         }
     } else {
