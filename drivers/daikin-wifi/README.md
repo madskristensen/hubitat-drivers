@@ -21,9 +21,9 @@ Local LAN control for Daikin WiFi adapters (BRP069B series and similar) via the 
 | Switch | `on` / `off` shortcut over thermostat power |
 | HealthCheck + `ping()` | LAN reachability probe; marks device offline after 5s timeout |
 
-Custom commands: `setFanRate` (Daikin speed codes A/B/3-7), `setSwingMode` (off/vertical/horizontal/3d), `setSpecialMode` (off/econo/powerful), `tempUp`, `tempDown`.
+Custom commands: `setFanRate` (Daikin speed codes A/B/3-7), `setSwingMode` (off/vertical/horizontal/3d), `setSpecialMode` (off/econo/powerful), `setAutoSetpoint`, `dehumidify`, `tempUp`, `tempDown`.
 
-Custom attributes: `outsideTemp` (outdoor sensor), `fanRate` (Daikin fan speed code), `swingMode` (off/vertical/horizontal/3d), `specialMode` (off/econo/powerful), `energyYesterday`, `energyThisYear`, `energyLastYear`, `healthStatus`, `lastActivity`.
+Custom attributes: `outsideTemp` (outdoor sensor), `fanRate` (Daikin fan speed code), `swingMode` (off/vertical/horizontal/3d), `specialMode` (off/econo/powerful), `autoSetpoint`, `energyYesterday`, `energyThisYear`, `energyLastYear`, `healthStatus`, `lastActivity`.
 
 ## Setup
 
@@ -45,10 +45,10 @@ The three *Default … on power-on* preferences let you choose a mode, setpoint,
 
 Both schedules are registered in `initialize()` and survive hub reboots.
 
-## Known Limitations (v0.1.7)
+## Known Limitations (v0.1.8)
 
 - **No on-device timer** — `get_program` / `set_program` not implemented (use Hubitat rules instead).
-- **Setpoint unity** — Daikin's local API exposes a single setpoint register (`stemp`) shared across modes. The driver writes it to both `heatingSetpoint` and `coolingSetpoint` on refresh. You can set them independently via Hubitat commands; the driver uses the mode-appropriate value on each write.
+- **Per-mode setpoints depend on firmware fields** — When firmware exposes `dt1/dt3/dt4/dt7`, the driver keeps auto/cool/heat targets separate. On units that omit these fields, the driver falls back to active-mode `stemp` behavior.
 - **`get_model_info` field names are firmware-dependent** — `state.modelInfo` is cached for diagnostics on each `initialize()`. Field mapping (model name, firmware, humidity/swing flags) follows community-documented BRP069B4x names; exact values require hardware confirmation.
 - **`setSpecialMode` graceful 404 fallback** — Some BRP069B firmware versions do not expose the special-mode endpoint. The driver gracefully handles a 404 response without throwing an error; the command completes silently if unsupported on your adapter.
 

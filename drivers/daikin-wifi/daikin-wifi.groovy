@@ -1,7 +1,7 @@
 ﻿/**
  * Daikin WiFi Thermostat
  * Author:  Mads Kristensen
- * Version: 0.1.7
+ * Version: 0.1.9
  * License: MIT
  *
  * Local LAN control for Daikin WiFi adapters (BRP069B series, BRP15B61, and similar
@@ -14,6 +14,8 @@
  *   original. Credit and thanks to @eriktack for the foundational research.
  *
  * Changelog:
+ *   0.1.9 — 2026-05-21 — fix: auto setpoint persistence by applying auto target via stemp only in auto mode and queuing requested auto target until next auto-mode activation
+ *   0.1.8 — 2026-05-21 — feat: per-mode setpoints via Daikin dt* fields (auto/cool/heat); feat: fanCirculate now uses Daikin fan-only circulation mode; feat: add explicit dehumidify() + autoSetpoint attribute/command
  *   0.1.7 — 2026-05-18 — feat: tempUp/tempDown ±0.5° commands, energyYesterday + energyThisYear/LastYear attrs; fix: graceful 404 on get_special_mode (some BRP069B firmware doesn't support it), drying→fan only operatingState spec compliance; cleanup: remove dead state.pingRequestedAt write
  *   0.1.6 — 2026-05-18 — feat: setpointDisplay attribute (peer-driver UX); fix: null/range guards on setpoint setters; cleanup: skip energy poll when off, remove dead yearTotal computation, fix log typo
  *   0.1.5 — 2026-05-18 — hotfix: close unclosed triple-quote string literal in parseSpecialMode (driver wouldn't load); fix empty log interpolation
@@ -33,7 +35,7 @@ import groovy.json.JsonOutput
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String  DRIVER_VERSION            = "0.1.7"
+@Field static final String  DRIVER_VERSION            = "0.1.9"
 @Field static final Integer DAIKIN_PORT               = 80
 @Field static final Integer LAST_ACTIVITY_THROTTLE_MS = 60000
 @Field static final Integer ENERGY_POLL_MINUTES       = 30
@@ -60,7 +62,7 @@ import groovy.json.JsonOutput
 ]
 
 @Field static final List<String> SUPPORTED_MODES     = ["auto", "cool", "heat", "dry", "fan", "off"]
-@Field static final List<String> SUPPORTED_FAN_MODES = ["auto", "on"]
+@Field static final List<String> SUPPORTED_FAN_MODES = ["auto", "on", "circulate"]
 
 // Daikin BRP069B swing direction codes (f_dir field in control_info).
 @Field static final List<String> SWING_MODE_OPTIONS = ["off", "vertical", "horizontal", "3d"]
@@ -101,6 +103,9 @@ metadata {
         capability "Polling"
         capability "HealthCheck"
 
+        // Re-declare with explicit enum constraints so Hubitat's command UI
+        // surfaces Daikin-specific modes (dry/fan) in the selector.
+        command "setThermostatMode", [[name: "Mode*", type: "ENUM", constraints: ["auto", "cool", "heat", "dry", "fan", "off"]]]
         command "refreshEnergy"
         command "setFanRate", [[name: "rate*", type: "ENUM", constraints: FAN_RATE_OPTIONS,
             description: "Daikin fan speed code (A=Auto, B=Silent, 3–7=speed levels)"]]
@@ -108,6 +113,8 @@ metadata {
             description: "Swing direction: off=fixed, vertical=up/down, horizontal=left/right, 3d=both"]]
         command "setSpecialMode", [[name: "Mode", type: "ENUM", constraints: ["off", "econo", "powerful"],
             description: "Special mode: off=normal, econo=energy-saving, powerful=boost"]]
+        command "setAutoSetpoint", [[name: "temperature*", type: "NUMBER", description: "Auto-mode setpoint in hub scale (°F/°C)"]]
+        command "dehumidify"
         command "tempUp"
         command "tempDown"
 
@@ -115,6 +122,7 @@ metadata {
         attribute "fanRate",         "enum",   FAN_RATE_OPTIONS
         attribute "swingMode",       "enum",   ["off", "vertical", "horizontal", "3d"]
         attribute "specialMode",     "enum",   ["off", "econo", "powerful"]
+        attribute "autoSetpoint",    "number"
         attribute "energyYesterday", "number"
         attribute "energyThisYear",  "number"
         attribute "energyLastYear",  "number"
@@ -284,8 +292,9 @@ def emergencyHeat() {
 }
 
 def fanAuto()      { setThermostatFanMode("auto") }
-def fanCirculate() { setThermostatFanMode("auto") }   // closest Daikin analogue
+def fanCirculate() { setThermostatFanMode("circulate") }
 def fanOn()        { setThermostatFanMode("on") }
+def dehumidify()   { setThermostatMode("dry") }
 
 def setThermostatMode(String mode) {
     String lmode = mode?.toLowerCase()
@@ -293,25 +302,45 @@ def setThermostatMode(String mode) {
     String daikinCode = HUBITAT_MODE_TO_DAIKIN[lmode]
     if (!daikinCode) { log.warn "[Daikin] Unsupported thermostat mode: ${mode}"; return }
     String opState = operatingStateForMode(lmode)
+    Map writes = [pow: "1", mode: daikinCode]
+    if (lmode == "auto" && state.pendingAutoSetpointC != null) {
+        writes.stemp = state.pendingAutoSetpointC.toString()
+        state.pendingAutoSetpointC = null
+        debugLog "Applying queued auto setpoint during mode change to auto"
+    }
     log.info "[Daikin] ${device.displayName} thermostat mode → ${lmode}"
     emitIfChanged("thermostatMode",           lmode,   null, "${device.displayName} thermostat mode → ${lmode}")
     emitIfChanged("switch",                   "on",    null, "${device.displayName} turned on")
     emitIfChanged("thermostatOperatingState", opState, null, "${device.displayName} operating state → ${opState}")
-    sendControlWrite([pow: "1", mode: daikinCode])
+    sendControlWrite(writes)
     emitIfChanged("setpointDisplay", composeSetpointDisplay(), null, "${device.displayName} setpoint display updated")
 }
 
 def setThermostatFanMode(String fanMode) {
     String lmode = fanMode?.toLowerCase()
-    String daikinRate
-    if (lmode == "auto") {
-        daikinRate = "A"
-    } else {
-        // "on" or "circulate" → preserve current speed if set, else fall back to Speed 3
-        String current = device.currentValue("fanRate") ?: "A"
-        daikinRate = (current == "A") ? "3" : current
+    if (!(lmode in ["auto", "on", "circulate"])) {
+        log.warn "[Daikin] Unsupported thermostat fan mode: ${fanMode}"
+        return
     }
-    String hubitatFanMode = (daikinRate == "A") ? "auto" : "on"
+
+    String current = device.currentValue("fanRate") ?: "A"
+    String daikinRate = (lmode == "auto") ? "A" : ((current == "A") ? "3" : current)
+
+    if (lmode == "circulate") {
+        // Daikin circulation is fan-only mode (mode=6), not periodic fan in auto/cool/heat.
+        log.info "[Daikin] ${device.displayName} fan circulate → fan-only mode (f_rate=${daikinRate})"
+        emitIfChanged("switch",                   "on",                         null, "${device.displayName} turned on")
+        emitIfChanged("thermostatMode",           "fan",                        null, "${device.displayName} thermostat mode → fan")
+        emitIfChanged("thermostatOperatingState", operatingStateForMode("fan"), null, "${device.displayName} operating state → fan only")
+        emitIfChanged("thermostatFanMode",        "circulate",                  null, "${device.displayName} fan mode → circulate")
+        emitIfChanged("fanRate",                  daikinRate,                    null, "${device.displayName} fan rate → ${daikinRate}")
+        sendControlWrite([pow: "1", mode: HUBITAT_MODE_TO_DAIKIN["fan"], f_rate: daikinRate])
+        emitIfChanged("setpointDisplay", composeSetpointDisplay(), null, "${device.displayName} setpoint display updated")
+        return
+    }
+
+    String currentTMode = device.currentValue("thermostatMode") ?: "off"
+    String hubitatFanMode = hubitatFanModeForState(currentTMode, daikinRate)
     log.info "[Daikin] ${device.displayName} fan mode → ${lmode} (Daikin f_rate=${daikinRate})"
     emitIfChanged("thermostatFanMode", hubitatFanMode, null, "${device.displayName} fan mode → ${hubitatFanMode}")
     emitIfChanged("fanRate",           daikinRate,     null, "${device.displayName} fan rate → ${daikinRate}")
@@ -320,7 +349,8 @@ def setThermostatFanMode(String fanMode) {
 
 def setFanRate(String rate) {
     if (!FAN_RATE_OPTIONS.contains(rate)) { log.warn "[Daikin] Unknown fan rate: ${rate}"; return }
-    String hubitatFanMode = (rate == "A") ? "auto" : "on"
+    String mode = device.currentValue("thermostatMode") ?: "off"
+    String hubitatFanMode = hubitatFanModeForState(mode, rate)
     log.info "[Daikin] ${device.displayName} fan rate → ${rate} (${FAN_RATE_LABEL[rate]})"
     emitIfChanged("fanRate",           rate,           null, "${device.displayName} fan rate → ${rate}")
     emitIfChanged("thermostatFanMode", hubitatFanMode, null, "${device.displayName} fan mode → ${hubitatFanMode}")
@@ -368,11 +398,18 @@ def setHeatingSetpoint(temp) {
         return
     }
     BigDecimal clamped = clampSetpoint(tempBd)
+    String mode = device.currentValue("thermostatMode") ?: "off"
     String unitStr = "°${location.temperatureScale}"
+    String clampedC = "${temperatureToC(clamped)}"
+    Map writes = [dt4: clampedC]
+    if (mode == "heat") { writes.stemp = clampedC }
+
     log.info "[Daikin] ${device.displayName} heating setpoint → ${clamped}${unitStr}"
     emitIfChanged("heatingSetpoint", clamped, unitStr, "${device.displayName} heating setpoint → ${clamped}${unitStr}")
-    emitIfChanged("thermostatSetpoint", clamped, unitStr, "${device.displayName} setpoint → ${clamped}${unitStr}")
-    sendControlWrite([stemp: "${temperatureToC(clamped)}"])
+    if (mode == "heat") {
+        emitIfChanged("thermostatSetpoint", clamped, unitStr, "${device.displayName} setpoint → ${clamped}${unitStr}")
+    }
+    sendControlWrite(writes)
     emitIfChanged("setpointDisplay", composeSetpointDisplay(), null, "${device.displayName} setpoint display updated")
 }
 
@@ -394,11 +431,53 @@ def setCoolingSetpoint(temp) {
         return
     }
     BigDecimal clamped = clampSetpoint(tempBd)
+    String mode = device.currentValue("thermostatMode") ?: "off"
     String unitStr = "°${location.temperatureScale}"
+    String clampedC = "${temperatureToC(clamped)}"
+    Map writes = [dt3: clampedC]
+    if (mode == "cool") { writes.stemp = clampedC }
+
     log.info "[Daikin] ${device.displayName} cooling setpoint → ${clamped}${unitStr}"
-    emitIfChanged("coolingSetpoint",    clamped, unitStr, "${device.displayName} cooling setpoint → ${clamped}${unitStr}")
-    emitIfChanged("thermostatSetpoint", clamped, unitStr, "${device.displayName} setpoint → ${clamped}${unitStr}")
-    sendControlWrite([stemp: "${temperatureToC(clamped)}"])
+    emitIfChanged("coolingSetpoint", clamped, unitStr, "${device.displayName} cooling setpoint → ${clamped}${unitStr}")
+    if (mode == "cool") {
+        emitIfChanged("thermostatSetpoint", clamped, unitStr, "${device.displayName} setpoint → ${clamped}${unitStr}")
+    }
+    sendControlWrite(writes)
+    emitIfChanged("setpointDisplay", composeSetpointDisplay(), null, "${device.displayName} setpoint display updated")
+}
+
+def setAutoSetpoint(temp) {
+    if (temp == null) {
+        log.warn "[Daikin] setAutoSetpoint called with null — ignoring"
+        return
+    }
+    Double tDouble = temp.doubleValue()
+    if (tDouble.isNaN()) {
+        log.warn "[Daikin] setAutoSetpoint(${temp}) is NaN — ignoring"
+        return
+    }
+    BigDecimal tempBd = new BigDecimal(temp.toString())
+    BigDecimal tC     = temperatureToC(tempBd)
+    if (tC < 5.0G || tC > 40.0G) {
+        log.warn "[Daikin] setAutoSetpoint(${temp}) out of BRP069B range (5–40 °C) — ignoring"
+        return
+    }
+    BigDecimal clamped = clampSetpoint(tempBd)
+    String mode = device.currentValue("thermostatMode") ?: "off"
+    String unitStr = "°${location.temperatureScale}"
+    String clampedC = "${temperatureToC(clamped)}"
+
+    log.info "[Daikin] ${device.displayName} auto setpoint → ${clamped}${unitStr}"
+    emitIfChanged("autoSetpoint", clamped, unitStr, "${device.displayName} auto setpoint → ${clamped}${unitStr}")
+    if (mode == "auto") {
+        emitIfChanged("thermostatSetpoint", clamped, unitStr, "${device.displayName} setpoint → ${clamped}${unitStr}")
+        sendControlWrite([stemp: clampedC])
+    } else {
+        // Daikin does not reliably accept direct writes to dt* mode-memory fields.
+        // Queue the requested auto setpoint and apply it via stemp when mode enters auto.
+        state.pendingAutoSetpointC = clampedC
+        log.info "[Daikin] Auto setpoint queued (${clamped}${unitStr}); it will apply when switching to auto mode"
+    }
     emitIfChanged("setpointDisplay", composeSetpointDisplay(), null, "${device.displayName} setpoint display updated")
 }
 
@@ -417,13 +496,20 @@ private void adjustSetpoint(boolean up) {
     }
     // Step is 0.5°C; in °F the nearest whole-degree step is 1°F.
     BigDecimal delta = (location.temperatureScale == "F") ? (up ? 1.0G : -1.0G) : (up ? 0.5G : -0.5G)
-    if (mode == "heat" || mode == "auto") {
+    if (mode == "heat") {
         BigDecimal current = device.currentValue("heatingSetpoint") as BigDecimal
         if (current != null) { setHeatingSetpoint(current + delta) }
+        return
     }
-    if (mode == "cool" || mode == "auto") {
+    if (mode == "cool") {
         BigDecimal current = device.currentValue("coolingSetpoint") as BigDecimal
         if (current != null) { setCoolingSetpoint(current + delta) }
+        return
+    }
+    if (mode == "auto") {
+        BigDecimal current = device.currentValue("autoSetpoint") as BigDecimal
+        if (current == null) { current = device.currentValue("thermostatSetpoint") as BigDecimal }
+        if (current != null) { setAutoSetpoint(current + delta) }
     }
 }
 
@@ -590,7 +676,7 @@ def parseModelInfo(hubitat.scheduling.AsyncResponse response, Map data) {
 
 private void sendControlWrite(Map overrides) {
     // All 6 parameters are required by the adapter on every set_control_info call.
-    // Read current device state for any parameter the caller did not override.
+    // Read current device state for any required parameter the caller did not override.
     String currentMode = device.currentValue("thermostatMode") ?: "cool"
     boolean isPowered  = (device.currentValue("switch") == "on")
 
@@ -601,7 +687,21 @@ private void sendControlWrite(Map overrides) {
     String fDir  = overrides.containsKey("f_dir")  ? overrides.f_dir  : (SWING_TO_DAIKIN_F_DIR[device.currentValue("swingMode")] ?: "0")
     String shum  = overrides.containsKey("shum")   ? overrides.shum   : "0"
 
-    String path = "/aircon/set_control_info?pow=${pow}&mode=${mCode}&stemp=${stemp}&f_rate=${fRate}&f_dir=${fDir}&shum=${shum}"
+    List<String> query = [
+        "pow=${pow}",
+        "mode=${mCode}",
+        "stemp=${stemp}",
+        "f_rate=${fRate}",
+        "f_dir=${fDir}",
+        "shum=${shum}"
+    ]
+    ["dt1", "dt3", "dt4", "dt7"].each { String key ->
+        if (overrides.containsKey(key) && overrides[key] != null) {
+            query << "${key}=${overrides[key]}"
+        }
+    }
+
+    String path = "/aircon/set_control_info?${query.join('&')}"
     debugLog "sendControlWrite: ${path}"
     sendGet(path, "handleSetControlInfo")
 }
@@ -625,9 +725,15 @@ def handleControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
     String fRate = kv.f_rate
     String fDir  = kv.f_dir
 
+    // Per-mode Daikin setpoints (if present on this firmware): dt1/dt7=auto, dt3=cool, dt4=heat.
+    String dt1 = kv.dt1
+    String dt3 = kv.dt3
+    String dt4 = kv.dt4
+    String dt7 = kv.dt7
+
     // pow=0 → "off"; otherwise map mode code to Hubitat string
     String tMode    = (pow == "0") ? "off" : (DAIKIN_MODE_TO_HUBITAT[mode] ?: "auto")
-    String fanMode  = (fRate == "A") ? "auto" : "on"
+    String fanMode  = hubitatFanModeForState(tMode, fRate)
     String opState  = operatingStateForMode(tMode)
     String switchSt = (pow == "0") ? "off" : "on"
 
@@ -645,17 +751,33 @@ def handleControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
         emitIfChanged("swingMode", swingMode, null, "${device.displayName} swing mode → ${swingMode}")
     }
 
-    // stemp can be "-" in fan/dry modes; guard before parsing
-    if (stemp?.isNumber()) {
-        BigDecimal setpointC       = stemp.toBigDecimal()
-        BigDecimal setpointInScale = temperatureFromC(setpointC)
-        String unitStr             = "°${location.temperatureScale}"
-        emitIfChanged("heatingSetpoint",    setpointInScale, unitStr, "${device.displayName} heating setpoint → ${setpointInScale}${unitStr}")
-        emitIfChanged("coolingSetpoint",    setpointInScale, unitStr, "${device.displayName} cooling setpoint → ${setpointInScale}${unitStr}")
-        emitIfChanged("thermostatSetpoint", setpointInScale, unitStr, "${device.displayName} setpoint → ${setpointInScale}${unitStr}")
+    String unitStr = "°${location.temperatureScale}"
+    BigDecimal activeSp = stemp?.isNumber() ? temperatureFromC(stemp.toBigDecimal()) : null
+    BigDecimal heatSp   = dt4?.isNumber() ? temperatureFromC(dt4.toBigDecimal()) : null
+    BigDecimal coolSp   = dt3?.isNumber() ? temperatureFromC(dt3.toBigDecimal()) : null
+    BigDecimal autoSp   = dt1?.isNumber() ? temperatureFromC(dt1.toBigDecimal()) : (dt7?.isNumber() ? temperatureFromC(dt7.toBigDecimal()) : null)
+
+    // Fallback for firmware that omits dt* fields.
+    if (heatSp == null && activeSp != null && tMode == "heat") { heatSp = activeSp }
+    if (coolSp == null && activeSp != null && tMode == "cool") { coolSp = activeSp }
+    if (autoSp == null && activeSp != null && tMode == "auto") { autoSp = activeSp }
+
+    if (heatSp != null) {
+        emitIfChanged("heatingSetpoint", heatSp, unitStr, "${device.displayName} heating setpoint → ${heatSp}${unitStr}")
+    }
+    if (coolSp != null) {
+        emitIfChanged("coolingSetpoint", coolSp, unitStr, "${device.displayName} cooling setpoint → ${coolSp}${unitStr}")
+    }
+    if (autoSp != null) {
+        emitIfChanged("autoSetpoint", autoSp, unitStr, "${device.displayName} auto setpoint → ${autoSp}${unitStr}")
     }
 
-    emitIfChanged("setpointDisplay", composeSetpointDisplay(), null, "${device.displayName} setpoint display updated")
+    BigDecimal thermostatSp = thermostatSetpointForMode(tMode, heatSp, coolSp, autoSp, activeSp)
+    if (thermostatSp != null) {
+        emitIfChanged("thermostatSetpoint", thermostatSp, unitStr, "${device.displayName} setpoint → ${thermostatSp}${unitStr}")
+    }
+
+    emitIfChanged("setpointDisplay", composeSetpointDisplayForMode(tMode, heatSp, coolSp, autoSp), null, "${device.displayName} setpoint display updated")
     emitLastActivity()
 }
 
@@ -876,20 +998,28 @@ private void emitLastActivity() {
 }
 
 private String composeSetpointDisplay() {
-    String mode  = device.currentValue("thermostatMode") ?: "off"
+    String mode = device.currentValue("thermostatMode") ?: "off"
+    return composeSetpointDisplayForMode(
+        mode,
+        device.currentValue("heatingSetpoint") as BigDecimal,
+        device.currentValue("coolingSetpoint") as BigDecimal,
+        device.currentValue("autoSetpoint") as BigDecimal
+    )
+}
+
+private String composeSetpointDisplayForMode(String mode, BigDecimal heatingSetpoint, BigDecimal coolingSetpoint, BigDecimal autoSetpoint) {
     String scale = location?.temperatureScale ?: "F"
-    BigDecimal h = device.currentValue("heatingSetpoint") as BigDecimal
-    BigDecimal c = device.currentValue("coolingSetpoint") as BigDecimal
-    String hStr  = h != null ? "${h}" : "--"
-    String cStr  = c != null ? "${c}" : "--"
+    String hStr  = heatingSetpoint != null ? "${heatingSetpoint}" : "--"
+    String cStr  = coolingSetpoint != null ? "${coolingSetpoint}" : "--"
+    String aStr  = autoSetpoint != null ? "${autoSetpoint}" : "--"
     switch (mode) {
         case "off":  return "Off"
         case "heat": return "Heat: ${hStr}°${scale}"
         case "cool": return "Cool: ${cStr}°${scale}"
-        case "auto": return "Auto: ${hStr}°${scale} / ${cStr}°${scale}"
-        case "dry":  return "Dry"
-        case "fan":  return "Fan"
-        default:     return "${mode.capitalize()}: ${hStr}°${scale}"
+        case "auto": return "Auto: ${aStr}°${scale} (H:${hStr} / C:${cStr})"
+        case "dry":  return "Dehumidify"
+        case "fan":  return "Circulate"
+        default:       return "${mode?.capitalize() ?: 'Off'}: ${hStr}°${scale}"
     }
 }
 
@@ -923,11 +1053,18 @@ private BigDecimal clampSetpoint(BigDecimal temp) {
 private BigDecimal currentSetpointC() {
     String mode = device.currentValue("thermostatMode") ?: "cool"
     BigDecimal sp
-    if (mode == "heat") {
-        sp = device.currentValue("heatingSetpoint") as BigDecimal
-    } else {
-        sp = device.currentValue("coolingSetpoint") as BigDecimal
+    switch (mode) {
+        case "heat":
+            sp = device.currentValue("heatingSetpoint") as BigDecimal
+            break
+        case "auto":
+            sp = device.currentValue("autoSetpoint") as BigDecimal
+            break
+        default:
+            sp = device.currentValue("coolingSetpoint") as BigDecimal
+            break
     }
+    if (sp == null) { sp = device.currentValue("thermostatSetpoint") as BigDecimal }
     if (sp == null) { sp = (location.temperatureScale == "F") ? 72.0G : 22.0G }
     return temperatureToC(sp)
 }
@@ -978,7 +1115,21 @@ private String operatingStateForMode(String mode) {
         case "fan":  return "fan only"
         case "dry":  return "fan only"
         case "off":  return "idle"
-        default:     return "auto"   // "auto" mode — device decides heating/cooling demand
+        default:      return "auto"   // "auto" mode — device decides heating/cooling demand
+    }
+}
+
+private String hubitatFanModeForState(String thermostatMode, String daikinRate) {
+    if (thermostatMode == "fan") { return "circulate" }
+    return (daikinRate == "A") ? "auto" : "on"
+}
+
+private BigDecimal thermostatSetpointForMode(String mode, BigDecimal heatSp, BigDecimal coolSp, BigDecimal autoSp, BigDecimal activeSp) {
+    switch (mode) {
+        case "heat": return heatSp ?: activeSp
+        case "cool": return coolSp ?: activeSp
+        case "auto": return autoSp ?: activeSp
+        default:      return activeSp
     }
 }
 
