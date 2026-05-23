@@ -26,6 +26,57 @@
 
 ---
 
+---
+
+## Session Arc 2026-05-23: Climate Advisor v0.1.0 Comprehensive Audit
+
+**Task:** Full code/sandbox/performance/quality/logic audit of Climate Advisor v0.1.0 across 30 dimensions to drive v0.2.1.
+
+**Methodology:**
+- Line-by-line read of all 5 files (~35KB total)
+- Cross-referenced SKILL.md pattern claims against actual implementation
+- Applied zwave-thermostat audit checklist methodology (sandbox, logging, scheduling, state hygiene)
+- Verified tuya-local-groovy sandbox blocklist against imports and API calls
+
+**Key Findings (30 total — 3 critical, 6 high, 13 medium, 8 low):**
+
+1. **🔴 Missing `ContactSensor` capability** — The entire HomeKit integration designed in the prior research session is non-functional. `capability "ContactSensor"` was never added to `climate-advisor-device.groovy`. The `contact` attribute is never emitted. One metadata line + one sendEvent call in `evaluateAll` fixes it.
+
+2. **🔴 `null` sendEvent on NUMBER attributes** — When `computeTrend()` returns `slope10min: null` (< 2 samples or < 5min span), callers pass `null` to `sendEventIfChanged(child, "outdoorTempSlope10min", null)`. The comparison logic doesn't skip null-value events when current differs from null — it fires `d.sendEvent([name: "outdoorTempSlope10min", value: null])` which is undefined behavior on NUMBER attributes. Guard: skip if value is null.
+
+3. **🟠 `appendIndoorSample` called on every evaluation** — Indoor samples are appended on every `evaluateAll()` pass (triggered by ANY event: contact, outdoor temp, thermostat). Should only append on indoor temperature events. Causes: (a) state bloat in high-event homes, (b) slope deflation — the buffer fills with identical readings extending the apparent time span and artificially flattening the slope.
+
+4. **🟠 "info" severity declared but never emitted** — ENUM has "info", severityText() never returns "info", UI label says "0=info" but code guard `if (sev < 1)` prevents severity-0 notifications. Three surfaces disagree.
+
+5. **🟠 Window gate inconsistency** — Pre-alerts gate on `windowGatePasses` (open or no sensors). Breach alerts don't gate at all — they fire even when all contacts are closed, producing "close windows" messages when windows are already closed.
+
+6. **🟠 `indoorTrendResult` reuses outdoor thresholds** — Indoor temp changes ~10x slower than outdoor. Using 0.2°F/10min (outdoor threshold) for indoor trend means `indoorTrend` almost always reads "steady". Needs separate indoor threshold settings.
+
+7. **Child devices created unconditionally** — Known issue, confirmed in code (Finding 1 in report). Fix: `createDashboardDevices` boolean gate.
+
+**Architectural soundness:**
+- Sandbox: clean — no reflection, no System.*, only `groovy.json.JsonOutput` import (allowlisted)
+- Trend buffer pattern: correct — append with `+`, trim on read, first/last slope, `< 2` guard all match SKILL.md
+- Debounce: correct — `runIn(1, "evaluateAll", [overwrite: true])` used consistently
+- Change-only sendEvent: correct — applied at all ~24 sites
+- unsubscribe/unschedule before re-init: correct
+- logsOff scheduled in updated(): correct
+
+8. **🔴 Finding 31 (mid-flight directive):** One child device per house, not per zone. Zone children are wrong — all zone data goes as enumerated attributes (`zone1Status`, `zone1LatestMessage`, etc.) or JSON `zoneStatuses` on the single aggregate child. `reconcileChildren`, `buildChildDniMap`, `pushZoneChild`, `lookupChild` all rewrite in v0.2.1. This is the largest single change.
+
+**SKILL.md accuracy gap discovered:**
+- `hubitat-state-backed-trend-buffer/SKILL.md` shows `outdoorTempHandler` calling `evaluateAll()` directly. Production code uses debounced `runIn(1, ...)`. SKILL needs update to show the debounced pattern with explanation.
+
+9. **🔴 Finding 32 (mid-flight directive):** Wrong namespace. All drivers/apps in this repo use `namespace: "mads"` — Climate Advisor used `"madskristensen"` in 9 locations. The `CHILD_NS` constant in the app and the `namespace:` field in the driver are a matched pair — both must equal `"mads"` or `addChildDevice` fails at runtime with "No driver found." `importUrl` fields use `madskristensen` (GitHub username) and must NOT change.
+
+**Pattern extracted (architecture):** For one-per-house Hubitat apps, the mental model should be: ONE virtual device, configuration-only zones, zone data surfaced as attributes on the single device. Never create per-zone child devices — this creates reconciliation complexity and SharpTools tile sprawl. Per-zone information can be enumerated attributes (`zone1X`, `zone2X`) or a JSON blob.
+
+**Pattern extracted (trend buffer anti-pattern):** When building predictive alert systems on Hubitat, separate the "sample collection" event handlers (one per sensor type) from the "evaluation" orchestrator. Don't append trend samples from within the evaluation pass — this creates a feedback loop where evaluation frequency determines trend accuracy.
+
+**Deliverable:** `.squad/decisions/inbox/cypher-climate-advisor-v0.2.1-audit.md` (30 findings)
+
+---
+
 ## Prior Audit Cycles Summary
 
 **Five-Verdict Summary (2026-05-16 to 2026-05-18):**
@@ -40,6 +91,49 @@
 ---
 
 ## Learnings
+
+### 2026-05-23 — House Status / Climate Advisor Capability Research
+
+**Task:** Mads wants a "house status / climate advisor" virtual device exposing severity, latestMessage, and messages[], rendering on SharpTools tablets AND Apple HomeKit.
+
+**Key Findings:**
+
+1. **HomeKit bridge landscape (2026):** Hubitat's own first-party HomeKit Bridge is now dominant — no Homebridge server needed. homebridge-hubitat-tonesto7 (tonesto7) still maintained for edge cases.
+
+2. **HomeKit capability mapping:**
+   - `ContactSensor` → HomeKit Contact Sensor (standard notifications, full automation support)
+   - `SmokeDetector` → HomeKit Smoke Sensor (Critical Alert — bypasses DND — for life-safety only)
+   - `CarbonMonoxideDetector` → same Critical Alert tier as Smoke
+   - `WaterSensor` → Leak Sensor (standard)
+   - `TamperAlert`, `Notification`, `AudioNotification` → do NOT cross bridge
+
+3. **String attributes over HomeKit: Impossible.** HomeKit's HAP protocol has no arbitrary-text characteristic. Custom string attributes (`latestMessage`, `messages`, etc.) stay on Hubitat. HomeKit gets ONE BIT only.
+
+4. **Recommendation:**
+   - **HomeKit capability: `ContactSensor`** (`open` = alert, `closed` = clear) — honest semantics, no critical-alert abuse.
+   - **DO NOT use `SmokeDetector`** for general house status — Critical Alerts are for life-safety emergencies; misuse causes alert fatigue.
+   - **Custom attributes for SharpTools:** `severity` (ENUM: info/warning/critical), `latestMessage` (string), `messages` (JSON_OBJECT), `houseStatus` (string).
+
+5. **SharpTools rendering:**
+   - Hero Attribute tile → `latestMessage` as large central text
+   - Super Tile → multi-attribute: severity (color-coded) + message
+   - Custom HTML tile (stio library) → scrollable `messages` history array
+
+6. **Community drivers:** No HPM driver matches this exact use case. Pattern is new. Tank builds from scratch.
+
+**Deliverable:** `.squad/decisions/inbox/cypher-climate-advisor-capabilities.md`
+
+**Pattern extracted:** HomeKit is a one-bit signal channel; SharpTools is the rich data channel. Design all "house status" virtual devices with this split in mind.
+
+**Addendum (same session)** — after Mads provided device inventory:
+- `homekit: false` flag on devices confirms Mads uses **homebridge-hubitat-tonesto7**, NOT the built-in bridge. tonesto7 maps `SmokeDetector` → HomeKit SmokeSensor (Critical Alert). Recommendation still: ContactSensor for main advisor, separate SmokeDetector only for genuine emergency escalation.
+- PurpleAir driver (`purpleair-aqi.groovy`) confirmed implements `capability "AirQuality"` (line 49) AND emits `airQualityIndex` (line 439) — standard attribute. `input "capability.airQuality"` in preferences will accept PurpleAir + any future AQ device generically. No driver special-casing needed.
+- OpenWeatherMap `weather` attribute is custom (not capability-typed). Use `capability.sensor` input + duck-typed `currentValue("weather")` — returns null gracefully if missing.
+- Sonos: use `capability.speechSynthesis` + `speak()` command for severity announcements. Do NOT use `AudioNotification`.
+- All three thermostats (T6 Pro ×2 + Daikin) captured via single `input "capability.thermostat", multiple: true`.
+
+---
+
 
 ### 2026-05-18 — Gemstone Stale-Token Diagnostic (v0.4.16)
 

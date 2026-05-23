@@ -2,7 +2,7 @@
 
 ## Status Summary (2026-05-23)
 
-**Current focus:** Climate Advisor architecture v2 — generic preferences, HomeKit dropped, dynamic zone config. Proposal filed at `.squad/decisions/inbox/trinity-climate-advisor-v2-architecture.md`. Awaiting Mads sign-off before Tank implementation.
+**Current focus:** Climate Advisor v0.1.0 shipped. Design audit for v0.2.1 filed at `.squad/decisions/inbox/trinity-climate-advisor-v0.2.1-design-audit.md`. 22 findings (4 critical, 4 high, 8 medium, 6 low). Top 3 arch changes: (1) single-child architecture rework — PERMANENT, (2) restore 4-level severity, (3) clearMessages/acknowledge + open-windows comfort family. v0.2.1 is a 4–5 day release. Namespace fix (`"madskristensen"` → `"mads"`) noted as F-21, Cypher owns it.
 
 **Recent work:** 3 community driver audits completed (PurpleAir v0.4.0 shipped, T6 Pro forked, Fully Kiosk forked). 5 reusable skills extracted to .squad/skills/. Gemstone OAuth pattern documented.
 
@@ -21,7 +21,35 @@
 
 ---
 
-## 2026-05-23 — Climate Advisor Architecture (PROPOSAL v2)
+## 2026-05-23 — Climate Advisor v0.1.0 Post-Ship Audit
+
+**Scope:** Architecture & feature-design audit of Tank's shipped implementation vs. Trinity's v2 spec.  
+**Output:** `.squad/decisions/inbox/trinity-climate-advisor-v0.2.1-design-audit.md` (20 findings)
+
+### Key audit learnings
+
+#### Always spec the severity model as an integer constant set, not just a count
+The v2 spec named severity levels 0–3 but Tank found the spec named "danger" as level 3 while all real alert logic was written as if max was 2. The 4-level model collapsed to 3 in implementation. In future, spec should include a concrete `@Field static final Map SEVERITY = [clear:0, info:1, warning:2, danger:3]` reference so Tank cannot independently remap them.
+
+#### "Optional" vs "required" for inputs must be explicit in spec pseudocode
+`zone${i}IndoorTempSensors` landed as `required: true` because Tank saw "required" in the subscription logic but not in the preferences. Spec should annotate each preference with `required: true/false` explicitly.
+
+#### Spec commands on child devices must be tested against "can user invoke this?" not just "does the app need this?"
+`clearMessages()` and `acknowledge()` were in the spec but not implemented. Post-audit learning: any command listed in the spec that the USER (not the app) invokes must be called out as "user-invocable" to ensure Tank treats it as a public device command, not an internal app method.
+
+#### One child device per app instance — PERMANENT for advisory apps
+Mads directive 2026-05-23: Climate Advisor spawns exactly ONE child device (house aggregate). Per-zone children are wrong. Zones are configuration, not devices. Per-zone data surfaces as indexed flat attributes (`zone1Severity`, `zone1Message`, etc.) plus a `zoneStatuses` JSON attribute on the single child. This is permanent — never re-introduce zone-scoped child devices. The `createDashboardDevices` toggle (default off) gates whether even this one child is created. Pattern is reusable for any advisory app: one app instance = one child device maximum.
+
+
+
+#### AQI two-tier threshold is always better than one
+Whenever an air quality (or any physical) threshold drives alerts, always expose both a warn and a danger threshold as configurable preferences. Single hard-coded thresholds frustrate users with atypical sensitivity or use cases.
+
+**Last updated:** 2026-05-23 (Climate Advisor v0.1.0 audit)
+
+---
+
+
 
 **Scope:** House Status / Climate Advisor virtual device on Hubitat for SharpTools dashboards + HomeKit. Full spec in .squad/decisions/decisions.md.
 

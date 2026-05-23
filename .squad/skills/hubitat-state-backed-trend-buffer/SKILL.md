@@ -15,15 +15,24 @@ Use when a Hubitat app or driver needs to track a time-series of sensor values (
 ### Sample buffer append + trim
 
 ```groovy
-void outdoorTempHandler(evt) {
-    BigDecimal t = evt.value as BigDecimal
-    Long ts = now()
-    List samples = (state.outdoorSamples ?: []) + [[now: ts, t: t]]
-    Long cutoff = ts - (((settings.trendWindowMinutes ?: 30) as Integer) + 5) * 60 * 1000L
-    state.outdoorSamples = samples.findAll { it.now >= cutoff }
-    evaluateAll()
+def outdoorTempHandler(evt) {
+    try {
+        BigDecimal t = evt.value as BigDecimal
+        Long ts = now()
+        List samples = (state.outdoorSamples ?: []) + [[now: ts, t: t]]
+        Long cutoff = ts - (((settings.trendWindowMinutes ?: 30) as Integer) + 5) * 60 * 1000L
+        state.outdoorSamples = samples.findAll { it.now >= cutoff }
+    } catch (Exception e) {
+        log.warn "outdoorTempHandler sample error: ${e.message}"
+    }
+    // Debounce: coalesces rapid events (e.g., outdoor temp + contact event firing together)
+    runIn(1, "evaluateAll", [overwrite: true])
 }
 ```
+
+> **Critical:** Call `runIn(1, "evaluateAll", [overwrite: true])` rather than `evaluateAll()` directly.
+> The debounce ensures that when multiple events arrive within the same second (outdoor temp change + contact sensor + thermostat setpoint), only one evaluation pass runs instead of N simultaneous passes.
+> Do **not** call `evaluateAll()` synchronously from an event handler — it bypasses the coalescing and can cause redundant state writes and child-device event storms.
 
 Key points:
 - Each sample: `[now: epochMs, t: BigDecimal]`
@@ -102,6 +111,8 @@ attribute "indoorTempSlope10min",  "NUMBER"
 - Missing `as BigDecimal` coercion on temperature values — Integer division will silently truncate slope calculation.
 - Forgetting the `+ 5` buffer in the trim cutoff — the evaluation window and the trim window must not be identical or the oldest in-window sample will be trimmed before being read.
 - Not guarding on `trend == "unknown"` before acting on slope in predictive logic.
+- Calling `evaluateAll()` synchronously from an event handler — always use `runIn(1, "evaluateAll", [overwrite: true])` to coalesce rapid multi-source events.
+- Calling `appendSample()` from inside the evaluation pass — only append samples from the relevant sensor's dedicated event handler, not from the orchestrator. Appending from the evaluator causes state bloat and slope deflation (identical readings extend the apparent time span, artificially flattening the computed slope).
 
 ## Examples
 

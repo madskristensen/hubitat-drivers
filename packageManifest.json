@@ -78,10 +78,10 @@
     {
       "id": "fe46d32a-174f-426a-88d1-0aee91b1df1b",
       "name": "Climate Advisor Device",
-      "namespace": "madskristensen",
+      "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/climate-advisor/climate-advisor-device.groovy",
       "required": true,
-      "version": "0.1.0"
+      "version": "0.2.1"
     }
   ],
   "apps": [
@@ -104,11 +104,11 @@
     {
       "id": "1cb7c904-a569-4cfa-88c0-7dfefb499dec",
       "name": "Climate Advisor",
-      "namespace": "madskristensen",
+      "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/climate-advisor/climate-advisor-app.groovy",
       "required": true,
       "oauth": false,
-      "version": "0.1.0"
+      "version": "0.2.1"
     }
   ]
 }
