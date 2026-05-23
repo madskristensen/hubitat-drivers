@@ -1,4 +1,4 @@
-# Occupancy Mode Manager
+# Auto Away Mode
 
 A Hubitat app that decides whether someone is home by combining selected:
 
@@ -16,7 +16,7 @@ When rules indicate occupancy or vacancy, it sets your hub Location Mode to your
 2. Paste:
 
    ```text
-   https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/presence-confidence-mode-manager/packageManifest.json
+   https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/auto-away-mode/packageManifest.json
    ```
 
 3. Follow the prompts.
@@ -24,7 +24,7 @@ When rules indicate occupancy or vacancy, it sets your hub Location Mode to your
 ### Manual
 
 1. Open **Apps Code** in Hubitat → **New App**
-2. Paste [`presence-confidence-mode-manager.groovy`](presence-confidence-mode-manager.groovy)
+2. Paste [`auto-away-mode.groovy`](auto-away-mode.groovy)
 3. Save, then install the app from **Apps**
 
 ## Configuration

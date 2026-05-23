@@ -79,9 +79,9 @@
   "apps": [
     {
       "id": "0ac3317a-95ec-4346-b5f6-d2b4f140a7d4",
-      "name": "Occupancy Mode Manager",
+      "name": "Auto Away Mode",
       "namespace": "mads",
-      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/presence-confidence-mode-manager/presence-confidence-mode-manager.groovy",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/auto-away-mode/auto-away-mode.groovy",
       "required": false,
       "version": "0.11.0"
     },

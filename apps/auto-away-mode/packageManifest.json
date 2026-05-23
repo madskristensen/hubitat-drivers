@@ -1,17 +1,17 @@
 {
-  "packageName": "Occupancy Mode Manager",
+  "packageName": "Auto Away Mode",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
   "dateReleased": "2026-05-22",
   "version": "0.12.0",
   "communityLink": "",
-  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/presence-confidence-mode-manager/README.md",
+  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/auto-away-mode/README.md",
   "apps": [
     {
       "id": "0ac3317a-95ec-4346-b5f6-d2b4f140a7d4",
-      "name": "Occupancy Mode Manager",
+      "name": "Auto Away Mode",
       "namespace": "mads",
-      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/presence-confidence-mode-manager/presence-confidence-mode-manager.groovy",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/auto-away-mode/auto-away-mode.groovy",
       "iconUrl": "https://github.githubassets.com/favicons/favicon.png",
       "iconX2Url": "https://github.githubassets.com/favicons/favicon.png",
       "required": true,

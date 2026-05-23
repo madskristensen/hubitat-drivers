@@ -44,7 +44,7 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
 
 | App | Key Features | Docs |
 | --- | --- | --- |
-| **Occupancy Mode Manager** | Home/Away decisions from selected presence + motion + contact sensors • Simple inactivity thresholds (Home 0 / Away 20 default) • Optional lock/unlock actions on mode changes • Event-driven, debounced evaluation • Presence/motion/contact changes count as activity • Presence not-present has its own timer • Decision explainability | [Docs](apps/presence-confidence-mode-manager/README.md) |
+| **Auto Away Mode** | Home/Away decisions from selected presence + motion + contact sensors • Simple inactivity thresholds (Home 0 / Away 20 default) • Optional lock/unlock actions on mode changes • Event-driven, debounced evaluation • Presence/motion/contact changes count as activity • Presence not-present has its own timer • Decision explainability | [Docs](apps/auto-away-mode/README.md) |
 | **Away Lights** | Simulates occupancy in Away mode • Configurable on/off time window • Debounced mode-change trigger • Optional push notification • Optional auto-off on return home | [Docs](apps/away-lights/README.md) |
 
 ## Quick Start
@@ -77,7 +77,7 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
      PurpleAir AQI:    https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/packageManifest.json
     SunStat Connect:  https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/packageManifest.json
     Touchstone:       https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/packageManifest.json
-    Occupancy App:    https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/presence-confidence-mode-manager/packageManifest.json
+    Auto Away Mode:   https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/auto-away-mode/packageManifest.json
     Away Lights:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/away-lights/packageManifest.json
     ```
 

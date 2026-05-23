@@ -1,5 +1,5 @@
 /**
- * Occupancy Mode Manager
+ * Auto Away Mode
  *
  * Changelog:
  *   0.12.0 — 2026-05-22 — Skip full evaluation on activity events that can't change the current mode and only log.info on real mode changes to drastically reduce hub load and log noise.
@@ -24,18 +24,18 @@ import groovy.transform.Field
 @Field static final Integer EVALUATION_DEBOUNCE_SECONDS = 1
 
 definition(
-    name: "Occupancy Mode Manager",
+    name: "Auto Away Mode",
     namespace: "mads",
     author: "Mads Kristensen",
     description: "Sets Home/Away mode from selected presence, motion, and contact sensors using inactivity thresholds.",
     category: "Convenience",
     iconUrl: "https://github.githubassets.com/favicons/favicon.png",
     iconX2Url: "https://github.githubassets.com/favicons/favicon.png",
-    importUrl: "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/presence-confidence-mode-manager/presence-confidence-mode-manager.groovy"
+    importUrl: "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/auto-away-mode/auto-away-mode.groovy"
 )
 
 preferences {
-    page(name: "mainPage", title: "Occupancy Mode Manager", install: true, uninstall: true)
+    page(name: "mainPage", title: "Auto Away Mode", install: true, uninstall: true)
 }
 
 def mainPage() {
@@ -143,7 +143,7 @@ def appButtonHandler(String buttonName) {
 
 private void initialize() {
     if (!hasAnyConfiguredSensor()) {
-        log.warn "Occupancy Mode Manager: No sensors selected. Configure at least one sensor."
+        log.warn "Auto Away Mode: No sensors selected. Configure at least one sensor."
         state.lastEvaluationSummary = "No sensors selected."
         return
     }
@@ -378,9 +378,9 @@ private void recordSummary(String summary, Boolean manualTrigger = false, Boolea
     state.lastEvaluationSummary = summary
     appendHistory(summary)
     if (manualTrigger || importantEvent) {
-        log.info "Occupancy Mode Manager: ${summary}"
+        log.info "Auto Away Mode: ${summary}"
     } else if (logEnable) {
-        log.debug "Occupancy Mode Manager: ${summary}"
+        log.debug "Auto Away Mode: ${summary}"
     }
 }
 
