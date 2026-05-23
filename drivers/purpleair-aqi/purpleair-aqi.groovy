@@ -1,7 +1,7 @@
 /**
  *  PurpleAir AQI Virtual Sensor
  *  Author:  Mads Kristensen
- *  Version: 0.4.0 — 2026-05-18 — BUG FIXES: failCount string-multiplication, disabled-poll retry storm, lat/lng degree math, weighted-avg NaN at distance=0; POLISH: refresh-on-save, canonical async error handling, AirQuality capability, runEvery schedules, hub temp scale, cleaner sites/AQI units
+ *  Version: 0.4.1 — 2026-05-22 — BUG FIXES: weighted-avg silently dropped sensors with missing position_rating; humidity history bucketed by 12-hour clock (AM/PM collisions); stray double-plus typo in geo-search bbox; one-time HUMIDITY_HISTORY migration to clear stale 12-hour buckets
  *  License: MIT
  *
  *  Reads AQI data from the PurpleAir cloud API (api.purpleair.com/v1/sensors).
@@ -15,6 +15,7 @@
  *  permanent driver in this repo, not a staging area.
  *
  *  Changelog:
+ *    0.4.1 — 2026-05-22 — BUG FIXES: weighted-avg silently dropped sensors with missing position_rating; humidity history bucketed by 12-hour clock (AM/PM collisions); stray double-plus typo in geo-search bbox; one-time HUMIDITY_HISTORY migration to clear stale 12-hour buckets
  *    0.4.0 — 2026-05-18 — BUG FIXES: failCount string-multiplication, disabled-poll retry storm, lat/lng degree math, weighted-avg NaN at distance=0; POLISH: refresh-on-save, canonical async error handling, AirQuality capability, runEvery schedules, hub temp scale, cleaner sites/AQI units
  *    0.3.0 — 2026-05-18 — Added pm2_5, temperature, humidity, and confidence attributes; parseJson guard for blank search_coords + empty API bodies; API key help now points to develop.purpleair.com
  *    0.2.0 — 2026-05-18 — Namespace → mads; emitIfChanged on all poll events (eliminates ~35,040 duplicate events/year at 1-hr default cadence); descriptionText on sites event uses device.displayName; 1-min interval quota warning added; UUID in packageManifest; fix IQAir→PurpleAir log prefix; logsOff auto-disable after 30 min; lastActivity (Pattern B); sentinel .isNumber() guards on pm2.5 field before .toFloat() parse
@@ -32,7 +33,7 @@
 
 import groovy.transform.Field
 
-@Field static final String DRIVER_VERSION = "0.4.0"
+@Field static final String DRIVER_VERSION = "0.4.1"
 
 metadata {
 	definition (
@@ -126,6 +127,7 @@ def initialize() {
 
 def updated() {
 	unschedule()
+	migrateHumidityHistoryBuckets()
 	if (logEnable) {
 		runIn(1800, "logsOff")
 	}
@@ -171,7 +173,7 @@ void sensorCheck() {
 		} else { // Convert to km
 			range = [(search_range/1.609)/dist2deg[0], (search_range/1.609)/dist2deg[1]]
 		}
-		httpQuery = [fields: query_fields, location_type: "0", max_age: 3600, nwlat: coords[0] + range[0], nwlng: coords[1] - range[1], selat: coords[0] - range[0], selng: coords[1] + + range[1]]
+		httpQuery = [fields: query_fields, location_type: "0", max_age: 3600, nwlat: coords[0] + range[0], nwlng: coords[1] - range[1], selat: coords[0] - range[0], selng: coords[1] + range[1]]
 	} else {
 		if ( Read_Key ) {
 			httpQuery = [fields: query_fields, read_key: Read_Key, show_only: "$sensor_index"]
@@ -439,7 +441,9 @@ void httpResponse(hubitat.scheduling.AsyncResponse response, Map data) {
 }
 
 void humidityHistoryUpdate(Map history, String site, Integer val) {
-	String hr = (new Date())[Calendar.HOUR].toString()
+	// FIX (0.4.1): Calendar.HOUR returns 0-11 (12-hour clock) so AM and PM samples collided in
+	// the same bucket. Use HOUR_OF_DAY (0-23) for distinct hourly buckets across the full day.
+	String hr = (new Date())[Calendar.HOUR_OF_DAY].toString()
 
 	if ( history.containsKey(site) ) {
 		history[(site)][(hr)] = val
@@ -450,7 +454,7 @@ void humidityHistoryUpdate(Map history, String site, Integer val) {
 
 Boolean humidityDeviceUpdating(Map history, String site) {
 	final int MIN_HISTORY = 3
-	Integer hr = (new Date())[Calendar.HOUR]
+	Integer hr = (new Date())[Calendar.HOUR_OF_DAY]
 
 	if (! history.containsKey(site) ) {
 		return null
@@ -458,8 +462,8 @@ Boolean humidityDeviceUpdating(Map history, String site) {
 
 	String last_hr
 	Integer last_val = 0
-	for (int i = 0; i <= 11; i++) {
-		last_hr = ((hr + 12 - i) % 12).toString()
+	for (int i = 0; i <= 23; i++) {
+		last_hr = ((hr + 24 - i) % 24).toString()
 		//history[(site)].each { logDebug "${it.key}"; q(it.key)}
 		if ( history[(site)][(last_hr)] ) {
 			last_val = history[(site)][(last_hr)]
@@ -530,7 +534,12 @@ Float sensorAverageWeighted(List<Map> sensors, String field, Float[] coords) {
 
 	validSensors.eachWithIndex { sensor, i ->
 		Float val = numericValue(sensor[field])
-		Float weight = nearest / Math.sqrt(distances[i]) * ((numericValue(sensor['position_rating']) ?: -1.0) + 1)
+		Float positionRating = numericValue(sensor['position_rating'])
+		// FIX (0.4.1): A missing position_rating was previously coerced to -1, making (rating+1)=0
+		// and silently excluding the sensor from the weighted average. Treat missing as neutral (0)
+		// so the sensor contributes baseline distance-based weight without a position-rating boost.
+		Float ratingBoost = (positionRating != null && positionRating >= 0) ? positionRating + 1 : 1
+		Float weight = nearest / Math.sqrt(distances[i]) * ratingBoost
 		sum += val * weight
 		count += weight
 	}
@@ -906,4 +915,18 @@ private void touchActivity() {
 void logsOff() {
 	log.info "PurpleAir AQI: debug logging disabled"
 	device.updateSetting("logEnable", [value: false, type: "bool"])
+}
+
+// One-time migration: 0.4.0 and earlier bucketed HUMIDITY_HISTORY by Calendar.HOUR (0–11, 12-hour
+// clock) which collided AM/PM samples. 0.4.1 switched to HOUR_OF_DAY (0–23). Clear stale buckets
+// so the new logic doesn't read 12-hour keys as 24-hour keys. Runs once per device.
+private void migrateHumidityHistoryBuckets() {
+	if (state.humidityHistorySchema == 24) {
+		return
+	}
+	if (state.HUMIDITY_HISTORY) {
+		log.info "PurpleAir AQI: clearing legacy 12-hour HUMIDITY_HISTORY buckets (0.4.1 migration)"
+		state.remove('HUMIDITY_HISTORY')
+	}
+	state.humidityHistorySchema = 24
 }

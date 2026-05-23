@@ -2,8 +2,8 @@
   "packageName": "Mads Kristensen — Hubitat Drivers",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
-  "dateReleased": "2026-05-20",
-  "version": "1.2.16",
+  "dateReleased": "2026-05-22",
+  "version": "1.2.17",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/README.md",
   "drivers": [
@@ -65,7 +65,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/purpleair-aqi.groovy",
       "required": false,
-      "version": "0.4.0"
+      "version": "0.4.1"
     },
     {
       "id": "edcb2f24-7a68-42c2-8f25-58a7f01c815c",
