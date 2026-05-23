@@ -2,8 +2,8 @@
   "packageName": "Occupancy Mode Manager",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
-  "dateReleased": "2026-05-20",
-  "version": "0.11.0",
+  "dateReleased": "2026-05-22",
+  "version": "0.12.0",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/presence-confidence-mode-manager/README.md",
   "apps": [
@@ -16,7 +16,7 @@
       "iconX2Url": "https://github.githubassets.com/favicons/favicon.png",
       "required": true,
       "oauth": false,
-      "version": "0.11.0"
+      "version": "0.12.0"
     }
   ]
 }

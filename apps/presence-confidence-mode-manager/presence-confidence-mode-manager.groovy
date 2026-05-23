@@ -2,6 +2,7 @@
  * Occupancy Mode Manager
  *
  * Changelog:
+ *   0.12.0 — 2026-05-22 — Skip full evaluation on activity events that can't change the current mode and only log.info on real mode changes to drastically reduce hub load and log noise.
  *   0.11.0 — 2026-05-20 — Fix asymmetric cooldown: Home transitions now bypass the mode-change cooldown so arriving home is never delayed.
  *   0.10.0 — 2026-05-20 — Add optional Away prerequisite locks: Away is only evaluated when all designated locks are locked; locking them also triggers an immediate re-evaluation.
  *   0.9.0 — 2026-05-20 — Lock unlock events count as occupancy activity via new activity locks picker.
@@ -18,7 +19,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.11.0"
+@Field static final String VERSION = "0.12.0"
 @Field static final Integer MAX_HISTORY_ITEMS = 12
 @Field static final Integer EVALUATION_DEBOUNCE_SECONDS = 1
 
@@ -175,6 +176,10 @@ def presenceHandler(evt) {
     if ("present".equalsIgnoreCase("${evt?.value}")) {
         state.lastActivityTs = eventTimestamp(evt)
         state.presenceInactiveSinceTs = null
+        if (canSkipReinforcement()) {
+            rescheduleAwayCheck()
+            return
+        }
     } else if (presenceSensors?.every { "not present".equalsIgnoreCase("${it.currentValue("presence")}") }) {
         if (!state.presenceInactiveSinceTs) {
             state.presenceInactiveSinceTs = eventTimestamp(evt)
@@ -184,15 +189,30 @@ def presenceHandler(evt) {
 }
 
 def motionHandler(evt) {
-    if ("active".equalsIgnoreCase("${evt?.value}")) {
+    boolean active = "active".equalsIgnoreCase("${evt?.value}")
+    if (active) {
         state.lastActivityTs = eventTimestamp(evt)
+    }
+    if (canSkipReinforcement()) {
+        if (active) {
+            rescheduleAwayCheck()
+        }
+        return
     }
     queueEvaluation(EVALUATION_DEBOUNCE_SECONDS)
 }
 
 def contactHandler(evt) {
-    if ("open".equalsIgnoreCase("${evt?.value}") || "closed".equalsIgnoreCase("${evt?.value}")) {
+    String val = "${evt?.value}".toLowerCase()
+    boolean activity = (val == "open" || val == "closed")
+    if (activity) {
         state.lastActivityTs = eventTimestamp(evt)
+    }
+    if (canSkipReinforcement()) {
+        if (activity) {
+            rescheduleAwayCheck()
+        }
+        return
     }
     queueEvaluation(EVALUATION_DEBOUNCE_SECONDS)
 }
@@ -200,8 +220,26 @@ def contactHandler(evt) {
 def lockActivityHandler(evt) {
     if ("unlocked".equalsIgnoreCase("${evt?.value}")) {
         state.lastActivityTs = eventTimestamp(evt)
+        if (canSkipReinforcement()) {
+            rescheduleAwayCheck()
+            return
+        }
         queueEvaluation(EVALUATION_DEBOUNCE_SECONDS)
     }
+}
+
+private boolean canSkipReinforcement() {
+    // An activity event can never push us out of Home mode, and we do nothing
+    // while paused. Skip the full evaluation in those cases to save resources.
+    if (isPausedByCurrentMode()) {
+        return true
+    }
+    return homeMode && location.mode == homeMode
+}
+
+private void rescheduleAwayCheck() {
+    Integer awayThresholdMinutes = (awayInactiveMinutes as Integer) ?: 20
+    scheduleNextEvaluation(now(), awayThresholdMinutes, null)
 }
 
 def awayPrerequisiteLockHandler(evt) {
@@ -332,15 +370,17 @@ def evaluateOccupancy(Boolean manualTrigger = false) {
         "Hold reason: ${holdReasons ? holdReasons.join(', ') : 'none'} | " +
         "Current mode: ${location.mode}${changedMode ? ' (updated)' : ''}"
 
-    recordSummary(summary, manualTrigger)
+    recordSummary(summary, manualTrigger, changedMode)
     scheduleNextEvaluation(nowTs, awayThresholdMinutes, targetMode)
 }
 
-private void recordSummary(String summary, Boolean manualTrigger = false) {
+private void recordSummary(String summary, Boolean manualTrigger = false, Boolean importantEvent = false) {
     state.lastEvaluationSummary = summary
     appendHistory(summary)
-    if (manualTrigger || logEnable) {
+    if (manualTrigger || importantEvent) {
         log.info "Occupancy Mode Manager: ${summary}"
+    } else if (logEnable) {
+        log.debug "Occupancy Mode Manager: ${summary}"
     }
 }
 
