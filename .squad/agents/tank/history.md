@@ -1,3 +1,20 @@
+## 2026-05-23 — Climate Advisor Architecture Design (Trinity + Cypher) — AWAITING MADS SIGN-OFF
+
+**Context:** Trinity and Cypher completed full design phase for "House Status / Climate Advisor" virtual device. Architecture is finalized and decision-locked in `.squad/decisions/decisions.md`. Awaiting Mads approval before Tank implementation begins.
+
+**Key decisions:**
+- Parent App + Child Virtual Device (app subscribes to multi-device events; child is HomeKit/SharpTools visible)
+- HomeKit: `ContactSensor` via homebridge-hubitat-tonesto7 (contact: open=alert, closed=clear)
+- Rich data: `Sensor` + custom attributes (severity, latestMessage, messages, houseStatus, tempTrend)
+- 3-zone model: Upstairs (8 windows), Downstairs (2 windows + 2 doors), Sunroom (3 doors)
+- Outdoor data: Backyard sensor (temp/trend), Weather device (rain), Air quality sensor (AQI)
+- Announcements: Direct Sonos `capability.speechSynthesis`
+- Migration: Parallel webCoRE piston with new app/device until validation complete
+
+**Next action:** Implement after Mads approval.
+
+---
+
 ## 2026-05-20 — Away Lights v0.8.1 Resource Cleanup (revised — aggressive)
 
 **Task:** Implement resource cleanup enhancements; Mads clarified backcompat is not a priority pre-v1.0.0 — make breaking changes if needed.
