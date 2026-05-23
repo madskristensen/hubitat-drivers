@@ -1,15 +1,452 @@
 # Squad Decisions Log
 
-Generated: 2026-05-23T14:58:40-07:00
+Generated: 2026-05-23T15:47:33-07:00
 Merged from inbox/
 
 ---
 
-# Architecture Proposal: Climate Advisor — Parent App + Child Virtual Device
+# Architecture Proposal: Climate Advisor — v2 (Generic, SharpTools-first) — SUPERSEDES v1
 
 **Date:** 2026-05-23  
 **Author:** Trinity (Lead / Architect)  
-**Status:** PROPOSAL v2 — grounded in real device inventory (2026-05-23 revision)  
+**Status:** PROPOSAL v2 — revised per Mads feedback  
+**Supersedes:** Architecture Proposal: Climate Advisor — v1 (below) — see "What Changed and Why"
+
+---
+
+## What Changed and Why
+
+Two explicit pushbacks from Mads drove this revision:
+
+1. **Make it generic.** The v1 proposal hard-coded three zone names (Upstairs/Downstairs/Sunroom), specific device names from Mads's inventory, and specific AQI attribute names. Any user installing via HPM would need to fork and re-hard-code everything. That's not a community app — it's a personal script. This proposal replaces all fixed references with user-configurable preferences.
+
+2. **Drop HomeKit.** Cypher confirmed that custom string attributes do not cross any HomeKit bridge (neither the built-in Hubitat integration nor homebridge-hubitat-tonesto7). The `ContactSensor` capability was chosen purely as a HomeKit proxy — a binary open/closed signal piggybacking on a wrong semantic. Since HomeKit is not a requirement, `ContactSensor` adds complexity and misleads the device's purpose with no payoff. Removed.
+
+Mads's device inventory (T6 Pro Upstairs/Downstairs, Daikin Sunroom, Backyard sensor, PurpleAir, OpenWeatherMap) remains **reference architecture** — it informs the design and example configurations, but nothing is assumed or hard-coded.
+
+---
+
+## 1. Architecture: Still Parent App + Child Virtual Device
+
+No change here. This remains the right pattern and the reasoning from v1 stands:
+
+- Drivers can't subscribe to multiple external devices; apps can.
+- The child device is the **platform-visible face** — SharpTools, RM, dashboards see it.
+- The app is the **brain** — subscribes to all zone sensors, runs logic, writes to the child.
+- Community precedent: Presence Plus, Combined Presence, HomeKit Integration Mode.
+
+**Folder layout (unchanged from v1):**
+```
+apps/climate-advisor/climate-advisor-app.groovy
+drivers/climate-advisor/climate-advisor-device.groovy
+```
+
+Both files registered in root `README.md` and root `packageManifest.json` for HPM discovery.
+
+**Release metadata:**
+```
+0.1.0 — 2026-05-23 — Initial release
+```
+
+---
+
+## 2. Capability Surface: Drop ContactSensor, Keep the Useful Ones
+
+### Child device capabilities (v2)
+
+```groovy
+capability "Sensor"             // marker — no attributes, harmless, expected for virtual sensor devices
+capability "Refresh"            // user-visible "recalculate now" button in device UI
+capability "Notification"       // optional: deviceNotification(text) command for push consumers
+capability "SpeechSynthesis"    // optional: speak(text) command if child is wired as a speech target
+```
+
+`ContactSensor` is **removed**. There is no remaining justification for it.
+
+> **Future note:** If a user wants HomeKit visibility as a fork, they can add `capability "ContactSensor"` themselves and map `severity > 0` to `contact: "open"`. That is explicitly out of scope for v1.
+
+### Custom attributes
+
+```groovy
+attribute "severity"         , "NUMBER"                                     // 0=clear 1=info 2=warning 3=danger
+attribute "severityText"     , "ENUM"   , ["clear","info","warning","danger"] // human label
+attribute "latestMessage"    , "STRING"                                     // single-line summary (SharpTools Hero tile)
+attribute "messages"         , "STRING"                                     // JSON array — see schema below
+attribute "houseStatus"      , "STRING"                                     // back-compat mirror of latestMessage
+attribute "tempTrend"        , "ENUM"   , ["rising","falling","stable","unknown"]
+attribute "activeAlertCount" , "NUMBER"                                     // count of active messages (severity >= 1)
+```
+
+Note: `severityText` uses `"danger"` (not `"critical"`) to match plain English. SharpTools tile templates can display any of these directly. No RM intermediate switch needed — SharpTools Rules can read `severityText` or `severity` directly and apply color profiles or triggers.
+
+### messages JSON schema (unchanged from v1)
+
+```json
+{
+  "id"      : "zone-upstairs-hot-1716485814",
+  "ts"      : 1716485814000,
+  "severity": 2,
+  "source"  : "Upstairs",
+  "text"    : "Getting warm — 83°F outside, setpoint 75°F. Close windows."
+}
+```
+
+Array is ordered: highest severity first, then newest-first. Max 20 entries; prune oldest of same source when adding.
+
+### Child device commands
+
+```groovy
+command "refresh"         // re-evaluate all zones immediately
+command "clearMessages"   // reset to all-clear (user action)
+command "acknowledge"     // clear info-only messages (severity=1); leave warnings/danger
+```
+
+`addMessage(text, severity, source)` and `clearMessage(id)` remain **private app-side methods**, never exposed as device commands. The app owns the write path.
+
+---
+
+## 3. Generic App Preferences — Dynamic Zone Configuration
+
+This is the core change. Replace hard-coded zone blocks with a user-configurable zone count using Hubitat's **dynamic pages** pattern.
+
+### Design principle
+
+Hubitat's preference system does not support true runtime-dynamic input names (you can't do `input "zone${i}Thermostat"`). The standard community pattern for N-zone configurations is:
+
+1. Define a **fixed maximum** number of zones (recommend 8 — enough for any household, small enough not to clutter the UI).
+2. Let the user configure how many zones they want (e.g., `input "zoneCount", "number", range: "1..8"`).
+3. Show zone pages only up to `zoneCount` using dynamic page `nextPage` chaining or a single scrolling page with all 8 zones and guidance to leave unused ones blank.
+
+**Recommended implementation:** Single scrolling "Zones" page with 8 zone blocks. Each block has a zone-name input first. Zones where the user leaves the name blank (or leaves all devices blank) are skipped at runtime. This is simpler than dynamic page chaining and works reliably on C-7/C-8.
+
+### Page 1 — Global: Outdoor Conditions
+
+```groovy
+input "outdoorTempSensor",
+    "capability.temperatureMeasurement",
+    title: "Outdoor Temperature Sensor",
+    required: true
+
+// Rain source — no standard capability.rain exists on Hubitat.
+// Accept any device and let user specify the attribute name + keyword.
+input "rainDevice",
+    "capability.sensor",
+    title: "Rain / Weather Device (optional)",
+    required: false
+input "rainAttribute",
+    "string",
+    title: "Attribute name on rain device that contains weather condition",
+    defaultValue: "weather",
+    required: false
+input "rainKeyword",
+    "string",
+    title: "Keyword in that attribute indicating rain (e.g. 'rain', 'drizzle')",
+    defaultValue: "rain",
+    required: false
+
+// AQI — accept capability.airQuality (standard Hubitat, attribute: airQualityIndex)
+// or any sensor with a custom attribute. Expose the attribute name as a preference.
+input "airQualityDevice",
+    "capability.airQuality",
+    title: "Air Quality / AQI Device (optional)",
+    required: false
+input "aqiAttributeName",
+    "string",
+    title: "AQI attribute name on that device",
+    defaultValue: "airQualityIndex",   // Hubitat standard; user changes to "aqi" for PurpleAir
+    required: false
+```
+
+> **AQI attribute note:** Hubitat's standard `capability.airQuality` attribute is `airQualityIndex`. The PurpleAir community driver (pfmiller0 / Mads's fork) uses the non-standard `aqi` instead. The `aqiAttributeName` preference lets any user configure this. Default is the standard name; PurpleAir users set it to `aqi`.
+
+### Page 2 — Zones (repeating blocks, max 8)
+
+Each zone block is identical in structure. Tank should implement this as a helper method `zoneSection(int n)` called in the zones page:
+
+```groovy
+// Zone N block — repeated for N = 1..8
+section("Zone ${n}") {
+    input "zone${n}Name",
+        "string",
+        title: "Zone name (leave blank to disable this zone)",
+        required: false
+
+    input "zone${n}Thermostat",
+        "capability.thermostat",
+        title: "Thermostat (optional — omit if zone has no HVAC)",
+        required: false
+
+    input "zone${n}Contacts",
+        "capability.contactSensor",
+        title: "Window / Door contacts (multi-select)",
+        multiple: true,
+        required: false
+
+    input "zone${n}TempSensors",
+        "capability.temperatureMeasurement",
+        title: "Additional temperature sensors in this zone (optional)",
+        multiple: true,
+        required: false
+
+    input "zone${n}Speakers",
+        "capability.speechSynthesis",
+        title: "Speakers for announcements in this zone (optional)",
+        multiple: true,
+        required: false
+}
+```
+
+At runtime, build the zone list dynamically:
+
+```groovy
+List zones = (1..8).collect { n ->
+    def name = settings["zone${n}Name"]
+    if (!name?.trim()) return null
+    [
+        name       : name.trim(),
+        thermostat : settings["zone${n}Thermostat"],
+        contacts   : settings["zone${n}Contacts"]   ?: [],
+        tempSensors: settings["zone${n}TempSensors"] ?: [],
+        speakers   : settings["zone${n}Speakers"]    ?: [],
+    ]
+}.findAll { it != null }
+```
+
+App validates at least one zone has a name + at least one contact before enabling.
+
+### Page 3 — Notifications & Announcements
+
+```groovy
+input "notificationDevices",
+    "capability.notification",
+    title: "Push notification devices",
+    multiple: true,
+    required: false
+
+input "announceSpeakers",
+    "capability.speechSynthesis",
+    title: "Global announcement speakers (in addition to per-zone speakers)",
+    multiple: true,
+    required: false
+
+input "announceSeverityThreshold",
+    "number",
+    title: "Minimum severity to trigger announcements (1=info, 2=warning, 3=danger)",
+    defaultValue: 2,
+    range: "1..3"
+
+input "throttleMinutes",
+    "number",
+    title: "Minimum minutes between repeated notifications for the same zone",
+    defaultValue: 60
+```
+
+### Page 4 — Thresholds & Advanced
+
+```groovy
+input "comfortBuffer",
+    "number",
+    title: "Comfort buffer beyond setpoint (°F) before alerting",
+    defaultValue: 3
+
+input "trendWindowMinutes",
+    "number",
+    title: "Outdoor temperature trend window (minutes)",
+    defaultValue: 30
+
+input "trendSamples",
+    "number",
+    title: "Trend ring buffer size (samples)",
+    defaultValue: 12
+
+input "aqiWarnThreshold",
+    "number",
+    title: "AQI threshold for warning (EPA Moderate = 51)",
+    defaultValue: 51
+
+input "aqiDangerThreshold",
+    "number",
+    title: "AQI threshold for danger (EPA Unhealthy for Sensitive Groups = 101)",
+    defaultValue: 101
+
+input "logEnable",
+    "bool",
+    title: "Enable debug logging",
+    defaultValue: false
+
+input "txtEnable",
+    "bool",
+    title: "Enable description text logging",
+    defaultValue: true
+```
+
+---
+
+## 4. Core Logic (Unchanged from v1, Adapted for Generic Zones)
+
+### Temperature trend (ring buffer in app state)
+
+Unchanged from v1. App subscribes to `outdoorTempSensor` temperature events. On each event:
+1. Append `[ts: now(), temp: event.value as BigDecimal]` to ring buffer.
+2. Drop entries older than `trendWindowMinutes * 60 * 1000` ms.
+3. If fewer than 3 entries → `tempTrend = "unknown"`.
+4. Otherwise: compute slope (°F/min). `> +0.15` → rising, `< -0.15` → falling, else stable.
+
+State size: 12 entries × ~45 bytes ≈ 540 bytes. Well within Hubitat's per-app state limit.
+
+### Mode-aware thermostat logic (from v1)
+
+| thermostatMode | Setpoint evaluation |
+|---|---|
+| `"off"` | Skip hot/cold setpoint alerts. Rain/AQI still apply if contacts open. |
+| `"heat"` | Only compare outdoor vs `heatingSetpoint`. |
+| `"cool"` | Only compare outdoor vs `coolingSetpoint`. |
+| `"auto"` | Compare both setpoints. |
+| `"fan"` | Same as `"off"` — no heating/cooling active. |
+| thermostat absent | Treat as "off" — no setpoint alerts, still check rain/AQI. |
+
+### BigDecimal coercion
+
+All setpoint reads must be coerced: `zone.thermostat.currentValue("coolingSetpoint") as BigDecimal`. Daikin returns decimals (64.4, 75.2); T6 Pro returns integers (69, 75). BigDecimal handles both. Do NOT use integer comparison or string comparison.
+
+### Per-zone evaluation pseudologic
+
+```
+for each zone in zones:
+    skip zone if zone.contacts is empty
+    
+    thermoMode   = zone.thermostat?.currentValue("thermostatMode") ?: "off"
+    coolSetpoint = zone.thermostat?.currentValue("coolingSetpoint") as BigDecimal
+    heatSetpoint = zone.thermostat?.currentValue("heatingSetpoint") as BigDecimal
+    openContacts = zone.contacts.findAll { it.currentValue("contact") == "open" }
+    outdoorTemp  = outdoorTempSensor.currentValue("temperature") as BigDecimal
+    isRaining    = rainDevice ? rainDevice.currentValue(rainAttribute)?.toLowerCase()?.contains(rainKeyword) : false
+    aqi          = airQualityDevice ? airQualityDevice.currentValue(aqiAttributeName) as Integer : 0
+
+    if openContacts not empty:
+        if thermoMode in ["heat","auto"] and outdoorTemp < heatSetpoint - comfortBuffer:
+            addMessage(zone.name, "Getting cold — ${outdoorTemp}°F outside, setpoint ${heatSetpoint}°F. Close ${zone.name} openings.", severity=2)
+        if thermoMode in ["cool","auto"] and outdoorTemp > coolSetpoint + comfortBuffer:
+            addMessage(zone.name, "Getting warm — ${outdoorTemp}°F outside, setpoint ${coolSetpoint}°F. Close ${zone.name} openings.", severity=2)
+        if isRaining:
+            addMessage(zone.name, "Rain — close ${zone.name} openings.", severity=3)
+        if aqi >= aqiDangerThreshold:
+            addMessage(zone.name, "Poor air quality (AQI ${aqi}) — close ${zone.name} openings now.", severity=3)
+        elif aqi >= aqiWarnThreshold:
+            addMessage(zone.name, "Moderate air quality (AQI ${aqi}) — consider closing ${zone.name} openings.", severity=2)
+
+    if openContacts.isEmpty() and thermoMode != "off":
+        // Suggest opening windows if outdoor temp is comfortable
+        if outdoorTemp > heatSetpoint + comfortBuffer and outdoorTemp < coolSetpoint - comfortBuffer:
+            if !isRaining and aqi < aqiWarnThreshold and tempTrend != "rising":
+                addMessage(zone.name, "Comfortable outside (${outdoorTemp}°F) — consider opening ${zone.name} openings.", severity=1)
+```
+
+### Severity aggregation and all-clear
+
+After all zones evaluated:
+- `severity` = max severity across all messages (0 if no messages).
+- `severityText` = `["clear","info","warning","danger"][severity]`.
+- `activeAlertCount` = messages.count { it.severity >= 1 }.
+- `latestMessage` = first message in ordered array, or `"All clear — no climate issues detected"`.
+- `houseStatus` = mirror of `latestMessage` (kept permanently for SharpTools back-compat).
+
+---
+
+## 5. Subscription Model
+
+The app subscribes to:
+- `outdoorTempSensor`, `"temperature"` → `outdoorTempHandler` (updates ring buffer, triggers evaluation)
+- All zone contacts (collected from all zones), `"contact"` → `contactHandler` → `evaluateAll()`
+- All zone thermostats (deduplicated), `"thermostatMode"`, `"coolingSetpoint"`, `"heatingSetpoint"` → `thermostatHandler` → `evaluateAll()`
+- `rainDevice` (if configured), `rainAttribute` → `rainHandler` → `evaluateAll()`
+- `airQualityDevice` (if configured), `aqiAttributeName` → `aqiHandler` → `evaluateAll()`
+
+`evaluateAll()` is the single evaluation entry point. All event handlers call it (with debounce: if called within 2s of last run, skip). The child device's `refresh` command also calls `evaluateAll()` via the parent.
+
+Subscriptions must be rebuilt in `updated()` (unsubscribe all, re-subscribe from current settings).
+
+---
+
+## 6. HPM Registration
+
+Both files must be registered in:
+- `README.md` — under "Apps" section with one-line description
+- `packageManifest.json` — each file as a separate entry with `type: "app"` or `type: "driver"`
+
+HPM discovery requires both `id` (stable UUID) and `name` fields per entry. Tank generates the UUIDs at implementation time and stamps them permanently — they must not change after first HPM listing.
+
+---
+
+## 7. SharpTools Rendering (Unchanged from v1)
+
+Three patterns, still valid:
+- **Hero Attribute tile:** point at `latestMessage` — zero config, works today.
+- **Severity color:** SharpTools Rules read `severityText` directly; no intermediate RM virtual switch needed.
+- **Multi-message Custom Tile:** reads `messages` JSON attribute, renders colored severity badges.
+
+---
+
+## 8. Open Questions for Mads to Confirm
+
+### Q1 — Zone starter template vs free-form naming
+
+The generic zone preferences let users name zones freely (type anything into "Zone 1 Name"). The UX is clean but blank-slate — new users may not know where to start.
+
+**Suggestion:** Show placeholder text in the zone name input: `title: "Zone name (e.g. Upstairs, Sunroom, Workshop)"`. No forced template — just hints. This is simpler than a starter template flow and avoids a pre-fill that the user might leave as-is without reading.
+
+**Alternative:** Provide a "Load starter template" button that pre-fills 3 zone names ("Upstairs", "Downstairs", "Outbuilding"). Requires a custom command or a separate page with a trigger input — more complexity, marginal UX gain.
+
+**Trinity recommends:** Placeholder text approach. Less code, no unexpected pre-fills.
+
+### Q2 — Rain check: per-zone or house-wide?
+
+The current design has one `rainDevice` globally. All zones share the same rain status.
+
+**Arguments for house-wide (v1 recommendation):** Rain affects the whole house. A single Z-Wave/cloud weather device is typically whole-property anyway. Simpler. Fewer preferences. No zone-level rain sensitivity makes practical sense since rain falls everywhere.
+
+**Arguments for per-zone:** A greenhouse or outbuilding might have different drainage or be sheltered — user might want to suppress rain alerts for certain zones.
+
+**Trinity recommends:** House-wide rain check for v1. Add per-zone rain override as a future enhancement if users request it. Consistent with how the weather device physically works.
+
+---
+
+## 9. Summary Decision Table (v2)
+
+| Question | Decision |
+|---|---|
+| Architecture | Parent App + Child Virtual Device |
+| HomeKit capability | **Dropped.** No `ContactSensor`. No HomeKit requirement. |
+| Rich data | `Sensor` + custom attributes (severity, severityText, latestMessage, messages, houseStatus, tempTrend, activeAlertCount) |
+| Zone configuration | User-configurable, up to 8 zones, each named by user. Blank name = zone disabled. |
+| Zone preferences | Per zone: name, thermostat (optional), contacts (multi), tempSensors (multi, optional), speakers (multi, optional) |
+| Outdoor temp source | User picks via `capability.temperatureMeasurement` preference |
+| Rain source | User picks any device; user configures attribute name + keyword |
+| AQI source | User picks `capability.airQuality` device; user configures attribute name (default: `airQualityIndex`) |
+| Thresholds | All user-configurable (comfortBuffer, AQI warn/danger, trend window, throttle) |
+| App location | `apps/climate-advisor/climate-advisor-app.groovy` |
+| Driver location | `drivers/climate-advisor/climate-advisor-device.groovy` |
+| Temp trend | Ring buffer in app state, slope over configurable window (default 30 min) |
+| All-clear message | "All clear — no climate issues detected" when no active messages |
+| houseStatus attribute | Kept permanently (SharpTools back-compat) |
+| HPM discovery | Root README + packageManifest.json both updated |
+| Release line | `0.1.0 — 2026-05-23 — Initial release` |
+
+---
+
+*No Groovy code in this document — Tank implements after Mads approves.*
+
+---
+
+## NOTE: Architecture Proposal v1 (SUPERSEDED BY v2 ABOVE)
+
+**This entry has been superseded by the v2 proposal directly above.** The v1 proposal contained hardcoded zone names and device assumptions that do not support generic distribution via HPM. The v2 proposal removes all hardcoding and makes all device and zone configuration user-selectable. Kept below for historical reference.
+
+# Architecture Proposal: Climate Advisor — Parent App + Child Virtual Device (v1 — SUPERSEDED)
+
+**Date:** 2026-05-23  
+**Author:** Trinity (Lead / Architect)  
+**Status:** SUPERSEDED by v2 — see "Architecture Proposal: Climate Advisor — v2 (Generic, SharpTools-first)" above  
 
 ---
 
@@ -965,6 +1402,39 @@ If Hubitat ever adds value-filtered subscriptions (`subscribe(location, "mode.Aw
 
 **Breaking:** When `turnOffOnHome=false`, scheduled tasks now cancel on Away exit (previously lingered). No user-visible difference in light behavior — the break is resource-use only.
 
+
+---
+
+## Directive: Climate Advisor — Generic & Shareable, No HomeKit Required
+
+**Date:** 2026-05-23T15:44:28-07:00  
+**By:** Mads (via Copilot)  
+**Action:** Coordinator captured
+**Directive ID:** copilot-directive-20260523T154428
+
+**What:** Climate Advisor app must be GENERIC — all devices (thermostats, contact sensors, weather, AQI, speakers) selectable via app preferences so other Hubitat users can install it. No hardcoded device IDs from Mads's home. HomeKit support is NOT a requirement — drop the ContactSensor capability if it adds no value; expose rich data via custom attributes for SharpTools.
+
+**Why:** Shareable/HPM-distributable app. User explicitly questioned the HomeKit framing.
+
+**Implication:** Trinity revised the architecture to v2 with all user-configurable preferences.
+
+---
+
+## Directive: Climate Advisor — UX Pattern (Main Page + Sub-Pages)
+
+**Date:** 2026-05-23T15:48:08-07:00  
+**By:** Mads (via Copilot, autopilot decision)  
+**Action:** Coordinator captured
+**Directive ID:** copilot-directive-zone-ux-20260523T154808
+
+**What:** Use main page (zone count + global devices + thresholds) with href-linked per-zone sub-pages for device configuration. NOT single-page dynamic sections.
+
+**Why:** Scales cleanly past 3 zones; cleaner SharpTools UX; matches the Combined Presence / HomeKit Integration Mode app patterns. Single-page would require ~20 inputs in one scroll for Mads's 3-zone case.
+
+**Implementation hint for Tank:**
+- mainPage: `input "zoneCount", "number", submitOnChange: true` + global outdoor/AQI/rain device pickers + threshold inputs + repeated `href "zonePage", params: [zoneIdx: i], title: settings."zone\Name" ?: "Zone \"`
+- zonePage(params): dynamic `page(name:"zonePage")` reads `params.zoneIdx`, renders that zone's inputs (name, thermostat, contacts, temp sensors, speakers)
+- Settings stored as `zone1Name`, `zone1Thermostat`, `zone1Contacts` etc. — installed/updated handler iterates 1..zoneCount
 
 ---
 
