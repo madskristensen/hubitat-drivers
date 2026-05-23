@@ -10,6 +10,7 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
 
 | Driver                     | Type  | Key Features                                                                 | Docs                                         |
 | -------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------- |
+| **Climate Advisor** | App | Predictive "close the windows" alerts • Per-zone monitoring • Weather/AQI aware | [Docs](apps/climate-advisor/README.md) |
 | **Daikin WiFi Thermostat** | Local | No cloud required • Indoor/outdoor temp • Humidity • Energy meter • HTTP API | [Docs](drivers/daikin-wifi/README.md)        |
 | **Honeywell T6 Pro** | Local | Z-Wave thermostat • Multi-point climate control • Battery-powered • Fan mode | [Docs](drivers/honeywell-t6-pro/README.md)        |
 | **SunStat Connect Plus**   | Cloud | Floor heating • Auto-discovery • Parent/child • Watts® Home API              | [Docs](drivers/sunstat-thermostat/README.md) |
@@ -46,6 +47,7 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
 | --- | --- | --- |
 | **Auto Away Mode** | Home/Away decisions from selected presence + motion + contact sensors • Simple inactivity thresholds (Home 0 / Away 20 default) • Optional lock/unlock actions on mode changes • Event-driven, debounced evaluation • Presence/motion/contact changes count as activity • Presence not-present has its own timer • Decision explainability | [Docs](apps/auto-away-mode/README.md) |
 | **Away Lights** | Simulates occupancy in Away mode • Configurable on/off time window • Debounced mode-change trigger • Optional push notification • Optional auto-off on return home | [Docs](apps/away-lights/README.md) |
+| **Climate Advisor** | Predictive "close the windows" alerts • Monitors indoor/outdoor temperature trends • Window/door and air quality integration • SharpTools-ready per-zone alerts | [Docs](apps/climate-advisor/README.md) |
 
 ## Quick Start
 

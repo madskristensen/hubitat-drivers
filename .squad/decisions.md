@@ -3388,3 +3388,837 @@ Apply to any new Hubitat driver or driver audit:
 4. Review `def map = [:]` patterns; inline if the event has no conditional branching
 5. Verify all `log.trace`/`log.debug` string args use `${cmd}` not `${cmd.toString()}`
 
+
+
+
+---
+
+### 2026-05-23: User directive — Climate Advisor must be CPU/memory optimized
+**By:** Mads Kristensen (via Copilot)
+**What:** Climate Advisor app + child driver must minimize CPU and memory footprint on the Hubitat hub. Treat performance as a first-class non-functional requirement. Concrete implications:
+- Coalesce evaluation: don't run `evaluateAll()` on every individual event — debounce/coalesce via `runIn(1, "evaluateAll", [overwrite: true])` so a burst of events (e.g., temp + setpoint + contact in the same second) costs one evaluation pass.
+- Subscribe surgically: only subscribe to attributes actually used (e.g., `temperature`, `thermostatMode`, `coolingSetpoint`, `heatingSetpoint`, `contact`, configured AQ attribute, configured weather attribute). No wildcard subscriptions.
+- State hygiene: cap `state.outdoorSamples` and `state.indoorSamples[zoneId]` aggressively. Trim on every append. Don't keep historical samples beyond `(window + 5)` minutes. Don't keep raw event objects in state — just `[now, t]` Maps.
+- Messages cap stays tight (≤20 in aggregate, ≤10 per zone child).
+- Avoid expensive ops in handlers: no JSON parsing of large blobs, no string formatting in hot paths beyond what's needed for the actual outgoing event. Compute trend values lazily — only when evaluating, not on every sample append.
+- Logging: keep `logEnable` debug logs gated; `txtEnable` info logs default ON but cheap; auto-disable debug after 30 min via `runIn(1800, logsOff)`.
+- Throttle notifications via `state.lastNotificationAt[messageId]`; don't dispatch when severity unchanged.
+- No polling timers unless absolutely needed. The whole app should be event-driven; the only `runIn` should be the debounce + the log auto-disable.
+- Per-zone child writes: only `sendEvent` if value actually changed (compare to `device.currentValue(attr)`); the platform deduplicates but the cheapest sendEvent is the one not made.
+
+**Why:** Hubitat hubs (C-7/C-8) are resource-constrained ARM appliances; many community apps degrade hub performance by being chatty or holding large state objects. Mads wants Climate Advisor to be a good citizen.
+
+---
+
+### 2026-05-23T16:06:57-07:00: Climate Advisor — coexist with existing webCoRE pistons (v0.1.0); revisit for v0.2.0+
+
+**By:** Mads (via Copilot)
+**Scope:** Climate Advisor app + driver — architectural boundary with existing automation
+
+---
+
+## Context
+
+Mads has two existing webCoRE pistons doing HVAC-on-window-open management that overlaps with the auto-pause feature considered for Climate Advisor v0.1.0:
+
+### Piston 1: "Thermostat management" (Build 36, last modified 2025-09-01)
+
+- **Zones:** downstairs (Front door, Living room window left/right), upstairs (Bedroom L/R, Claire's, Lincoln's east/north, Wesley's north/west)
+- **Restore mechanism:** Fires named Rule Machine rules per (zone × mode):
+  - `Downstairs thermostat presets (away|home|night)`
+  - `Upstairs thermostat presets (away|home|night)`
+  - Each rule scoped via `with action Run (only while Away|Home|Night)`
+- **Off trigger:** Any sensor open continuously for 60 seconds while Location mode is Home or Night → `<thermostat>.off()`
+- **Restore trigger:** All sensors closed → re-fires the mode-appropriate preset rule (which sets thermostatMode + setpoints from RM-defined values)
+- **Key design property:** Climate Advisor's earlier "snapshot setpoints" worry is moot here — restoration goes through mode-named RM rules, so location-mode crossings between open and close events are naturally correct (whatever rule fires uses the *current* mode's setpoints, not stale snapshots).
+
+### Piston 2: "Sunroom climate" (Build 14, last modified 2026-01-21)
+
+- **Zone:** Sunroom (Sunroom left/right/side doors)
+- **Triggers:** Location mode → Home, Sunroom motion temp change, sensors closed 30s
+- **Cool mode:** Sunroom mini-split → Cool when Sunroom motion temp > 77°F and mode is Home
+- **Heat mode:** Sunroom mini-split → Heat when temp < 67°F + Night (gated by `{false}` — currently disabled) OR temp < 69°F + Home
+- **Off trigger:** Any sensor open 1 min OR mode → Night/Away
+- **Note:** Functions as a full mini-split manager, not just an open-window pause.
+
+---
+
+## Decision for v0.1.0
+
+**Climate Advisor v0.1.0 is advisor-only.** Do NOT add `pauseHvacOnOpen` / `setThermostatOff` behavior to the app. Pistons retain ownership of HVAC actions.
+
+### Clean separation of concerns
+
+| System | Owns | Trigger style |
+|---|---|---|
+| Existing pistons | HVAC actions: off-on-open, restore via mode preset rules | Reactive (60s after open) |
+| Climate Advisor (new) | Alerts, status text, severity, message ring buffer, predictive warnings, AQ, weather rise/fall trends | Proactive (warn before setpoint breach) |
+
+### Why this split is correct
+
+1. **Pistons work.** They've been running ~6 months stable. Don't port working code into new code — that's where regressions live.
+2. **The "mode preset rules" restoration pattern is cleaner than snapshotting** that we were considering. Mads already solved the location-mode-crossing problem with named per-mode rules. Climate Advisor would only be reinventing this less elegantly.
+3. **No dual-write conflict:** Climate Advisor never calls `thermostat.off()` or `setThermostatMode()`. Pistons never touch SharpTools status attributes.
+4. **Failure isolation:** If RM rules ever break (Hubitat platform deprecations), Climate Advisor alerts still work — Mads gets the warning even while HVAC automation is being repaired.
+5. **Complementary timing:** Climate Advisor warns *before* setpoint breach ("close downstairs windows — outside 78°F and rising, indoor approaching 75°F cool setpoint"). Piston catches *after* — 60s after open → off. Together: warning first, fallback action if user doesn't comply.
+
+### Action on Tank
+
+Tank is mid-flight implementing v0.1.0 (Trinity v2 architecture). The earlier coordinator consideration to fold in auto-pause is **withdrawn**. Tank's current spec is correct as-is — no scope addition needed. **No write_agent to Tank required** — Tank was never given the auto-pause directive in its prompt.
+
+---
+
+## v0.2.0+ — Things to reconsider
+
+These are notes for future iterations, NOT v0.1.0 requirements:
+
+### ❌ DROPPED: "Absorb the pistons" idea
+
+**Earlier note proposed adding per-zone `controlHvac` toggle to Climate Advisor in v0.2+ to consolidate config. Mads pushed back (2026-05-23): the pistons do HVAC control, Climate Advisor does notifications — there's no overlap to consolidate. Absorbing working code to unify a config screen is scope creep, not value.**
+
+**Permanent boundary:** Pistons own HVAC actions forever. Climate Advisor owns notifications forever. Two app/piston screens for related-but-distinct concerns is fine.
+
+### 1. Warning offset tuning informed by piston behavior
+
+The thermostat management piston's 60-second open threshold + the cool setpoint of 75°F means real-world breach happens at roughly `(outdoor temp - indoor temp delta) / passive-heating rate` seconds after open. Climate Advisor's predictive warning should fire well before that so user has time to act before the 60s reactive off-trigger ever needs to fire. Trinity's v2 spec sets relativeOffset to ~3°F below setpoint — likely correct, but worth validating in production once v0.1.0 ships.
+
+### 2. Confirm temp sensor selector accepts multi-sensors
+
+The sunroom piston uses `Sunroom motion`'s temperature attribute (motion sensor with built-in temp). When Climate Advisor configures the sunroom zone, the indoor temp sensor preference should accept this device. Already supported by Trinity's `capability.temperatureMeasurement` selector — confirm in implementation review.
+
+---
+
+## Status
+
+- v0.1.0 scope: **frozen as advisor-only**. Tank continues uninterrupted.
+- v0.2.0+ scope: **deferred** — revisit after v0.1.0 ships and Mads has lived with the alerts-only behavior for a few weeks. Real production feedback will inform whether absorbing pistons is worth it.
+
+---
+
+### 2026-05-23T15:56:18-07:00: User directive — Climate Advisor v2 requirements
+**By:** Mads Kristensen (via Copilot)
+**What:**
+1. **Generic zones (no Mads-specific hardcoding).** App must support a dynamic number of zones (`zoneCount` preference or repeated dynamicPage entries). Each zone independently picks its own thermostat(s), indoor temp sensor(s), contact sensor(s), AQ sensor, speaker(s), etc. Anyone should be able to install this on their hub.
+2. **Drop HomeKit from scope.** Mads doesn't care about HomeKit visibility for this app. Don't carry `ContactSensor` capability just to satisfy HomeKit if it's not earning its keep — expose data via custom attributes for SharpTools only. Simplifies driver. (Keeps Cypher's analysis as background — string data can't cross HomeKit anyway, so nothing of value is lost.)
+3. **Predictive "close the windows" alert.** New requirement on top of existing setpoint logic:
+   - Cooling-season case: when **indoor temp ≥ (coolingSetpoint − coolingPreAlertOffset)** AND **outdoorTemp > indoorTemp** AND **outdoor trend = rising**, alert "close the windows before the AC kicks in". Example: cooling SP=75, offset=3 → trigger at 72°F indoor rising on a hot rising-temp day.
+   - Heating-season mirror: when **indoor temp ≤ (heatingSetpoint + heatingPreAlertOffset)** AND **outdoorTemp < indoorTemp** AND **outdoor trend = falling**, alert "close the windows before the heat kicks in".
+   - Both offsets configurable per-zone (or app-wide, Trinity's call). Defaults: 3°F each.
+4. **Outdoor temp trend detection (resolves question from Mads).** Confirmed approach: app keeps a rolling ring buffer of `(timestamp, outdoorTemp)` samples in `state` (sampled on outdoor temp event or periodic poll). Compute slope between newest and oldest sample in a configurable window (default 30 min). Classify: `rising` if slope > +0.2°F/10min, `falling` if < −0.2°F/10min, `steady` otherwise. Expose `outdoorTrend` as an attribute on the child device so SharpTools can show it and the predictive logic can gate on it.
+
+**Why:** User requirements added during design iteration before implementation. Trinity must revise architecture before Tank codes. HomeKit-related artifacts in original proposal (ContactSensor capability mapping) can be dropped to simplify the driver.
+
+---
+
+# Climate Advisor v0.1.0 — Manual Smoke-Test Plan
+
+**By:** Switch (QA)  
+**Date:** 2026-05-23  
+**Target:** Mads's Hubitat C-8 Pro  
+**App version:** 0.1.0  
+**Status:** Ready for execution — do NOT merge until post-validation sign-off by Scribe
+
+---
+
+## Prerequisites
+
+- [ ] Hub firmware up to date
+- [ ] HPM installed and working
+- [ ] Both webCoRE pistons ("Thermostat management" + "Sunroom climate") are **active and unpaused** for coexistence tests
+- [ ] SharpTools tablet reachable on local LAN
+- [ ] A window you can physically open/close for each zone during testing
+
+---
+
+## 1 — Install & First Run
+
+### 1.1 HPM Install
+- [ ] Open HPM → **Install** → search "Climate Advisor"
+- [ ] Confirm two entries appear: **Climate Advisor** (app) + **Climate Advisor Device** (driver)
+- [ ] Install both; confirm "Installed successfully" with no errors in HPM log
+
+### 1.2 App appears in Apps list
+- [ ] Navigate to **Apps** → **Add User App**
+- [ ] Confirm "Climate Advisor" appears in the list
+- [ ] Tap it; confirm the main page loads with three `href` links: **Global settings**, **Zones**, **Notifications**
+- [ ] Confirm **Version 0.1.0** paragraph is visible
+
+### 1.3 Initial save with 0 zones configured
+- [ ] Tap **Install** (or Done) without configuring anything
+- [ ] ⚠️ Expected: app saves without crash (zoneCount defaults to 1; zone1Name is blank so no zone children are created yet)
+- [ ] Confirm no "NullPointerException" in **Logs**
+
+---
+
+## 2 — Zone Configuration Smoke
+
+Open the app → **Zones** → set **Zone Count = 3** (tap Done to reload page).
+
+### 2.1 Zone 1 — Downstairs
+- [ ] Zone 1 Name: `Downstairs`
+- [ ] Thermostats: select downstairs Honeywell T6 Pro thermostat
+- [ ] Indoor temp sensors: select downstairs temp sensor(s)
+- [ ] Contact sensors: select all downstairs contacts (Front door, Living room window left, Living room window right)
+- [ ] Leave AQ sensor, speakers, notification devices blank for now
+
+### 2.2 Zone 2 — Upstairs
+- [ ] Zone 2 Name: `Upstairs`
+- [ ] Thermostats: select upstairs thermostat
+- [ ] Indoor temp sensors: select upstairs temp sensor(s)
+- [ ] Contact sensors: select upstairs contacts (Bedroom L/R, Claire's, Lincoln's east/north, Wesley's north/west)
+
+### 2.3 Zone 3 — Sunroom
+- [ ] Zone 3 Name: `Sunroom`
+- [ ] Thermostats: select Sunroom mini-split thermostat (Daikin)
+- [ ] Indoor temp sensors: select **Sunroom motion** multi-sensor
+  - ⚠️ **RISK ITEM (v0.2+):** The picker is `capability.temperatureMeasurement`. Verify "Sunroom motion" appears in the list. If it does not appear, the multi-sensor's driver may not declare `temperatureMeasurement` — note the exact device/driver name and log as a defect.
+- [ ] Contact sensors: select Sunroom left/right/side door contacts
+- [ ] Leave AQ, speakers blank
+
+### 2.4 Global Settings
+- [ ] Navigate to **Global settings**
+- [ ] Outdoor temperature device: select outdoor weather device
+- [ ] Weather device: select outdoor AQI / weather device
+- [ ] Weather attribute: `weather` (default)
+- [ ] Rain keyword: `rain` (default)
+- [ ] Trend window: `30` min (default)
+- [ ] Rising/falling thresholds: `0.2` / `-0.2` (defaults)
+- [ ] Enable debug logging: **ON** (for test session; auto-disables in 30 min)
+
+### 2.5 Save
+- [ ] Tap **Done** / **Install** on main page
+- [ ] Confirm no errors in **Logs**
+- [ ] Check Logs for "Created aggregate child" and "Created zone child" × 3 log lines
+
+---
+
+## 3 — Child Device Creation
+
+Navigate to **Devices** and filter by "Climate Advisor".
+
+- [ ] **Climate Advisor — Aggregate** device exists
+- [ ] **Climate Advisor — Downstairs** device exists
+- [ ] **Climate Advisor — Upstairs** device exists
+- [ ] **Climate Advisor — Sunroom** device exists
+- [ ] Total: exactly **4 child devices** (1 aggregate + 3 zone)
+- [ ] Open the Aggregate device → verify `advisorRole` data value = `aggregate`
+- [ ] Open a zone device → verify `advisorRole` = `zone` and `zoneId` = `zone1` / `zone2` / `zone3`
+- [ ] Verify all zone children have `severity = 0`, `severityText = clear`, `outdoorTrend = unknown` on initial load
+
+---
+
+## 4 — SharpTools Tile Setup
+
+> Climate Advisor never pushes to SharpTools directly — SharpTools polls Hubitat device attributes.
+
+- [ ] In SharpTools dashboard editor, **Add Tile** → **Device** → select **Climate Advisor — Aggregate**
+- [ ] Bind the primary value to attribute: **`latestMessage`** (STRING — the human-readable top alert)
+- [ ] Optional secondary tiles per zone: bind each zone child's `latestMessage` for per-room cards
+- [ ] Optional: add `severity` attribute tile for numeric alerting (0/1/2)
+- [ ] Confirm tile updates within ~30 s of app initialization (SharpTools poll interval)
+
+---
+
+## 5 — Functional Smoke Tests
+
+Allow ~5 min after save for `outdoorTrend` to accumulate at least 2 samples before running tests.
+
+### 5.1 Open-window alert fires
+- [ ] Open one downstairs window contact
+- [ ] Wait ≤ 60 s (or tap **Refresh** on the Downstairs child device)
+- [ ] Confirm **Downstairs** child: `openContactCount ≥ 1`, `openContacts` contains sensor name
+- [ ] Confirm **Downstairs** child `latestMessage` contains window-open advisory text
+- [ ] Confirm **Aggregate** child `latestMessage` reflects the same (or higher severity) message
+
+### 5.2 Close-window clears alert
+- [ ] Close the window contact
+- [ ] Wait ≤ 60 s (or tap Refresh)
+- [ ] Confirm Downstairs child `openContactCount = 0`, `openContacts = ""`
+- [ ] Confirm if no other active alerts: `severityText = clear` on Downstairs child
+- [ ] Confirm Aggregate `severity` drops if no other zones are active
+
+### 5.3 High-severity scenario — rain + open window
+- [ ] Open a downstairs contact sensor
+- [ ] On the weather device, manually (via device edit or Rule Machine) temporarily set the `weather` attribute to a string containing `rain`
+- [ ] Wait for evaluateAll (≤ 60 s or tap Refresh)
+- [ ] Confirm Downstairs child `severityText = alert` (severity = 2)
+- [ ] Confirm Aggregate `activeAlertCount ≥ 1`
+- [ ] Revert weather attribute; close window → confirm alert clears
+
+### 5.4 Outdoor trend — real-world observation
+- [ ] Leave hub running for **20 minutes** on a day with rising outdoor temps (sunny morning) or falling (evening)
+- [ ] Open Aggregate child device page; check attribute `outdoorTrend`
+- [ ] **Pass:** value is one of `rising`, `falling`, or `steady` (not `unknown`) after ≥ 2 outdoor temp events within the 30-min window
+- [ ] Check `outdoorTempSlope10min` is a non-null decimal
+- [ ] If `unknown` after 20 min: confirm outdoor sensor is reporting temp events in Logs — may indicate subscription issue
+
+### 5.5 Predictive close-window warning fires before piston's 60 s
+> This is the primary v0.1.0 value-add: advisor warns *before* piston acts.
+
+- [ ] On a warm day with outdoor temp > indoor and outdoor rising, open a downstairs window
+- [ ] Note the **timestamp** when Downstairs `severityText` changes to `warning` (cooling pre-alert)
+- [ ] Note the **timestamp** when the thermostat management piston fires `thermostat.off()` (check piston log or thermostat device events — should be ~60 s after open)
+- [ ] **Pass:** Climate Advisor WARNING appears **before** the piston's off-command
+- [ ] Record the delta (seconds) — target is advisory fires well within the 60 s piston window
+- [ ] ⚠️ **v0.2+ validation item:** if outdoor trend is `unknown` (insufficient samples), pre-alert will NOT fire even with open windows — note this edge case if observed
+
+### 5.6 Message ring buffer — history retained
+- [ ] Rapidly open and close 3–4 different contacts across zones over ~2 min
+- [ ] Open Aggregate child device → attribute `messages` (JSON array)
+- [ ] Confirm JSON array length ≤ 20 (aggregate cap)
+- [ ] Open a zone child → confirm `messages` length ≤ 10 (zone cap)
+- [ ] Confirm messages are ordered highest-severity first, then newest-first within severity
+
+### 5.7 "No issues" state — non-empty informational text
+- [ ] Ensure all contacts closed, no rain, AQI normal, temps within offsets
+- [ ] Tap **Refresh** on Aggregate child
+- [ ] Confirm `severity = 0`, `severityText = clear`
+- [ ] Confirm `latestMessage` is **not blank** — should show an informational summary (e.g. outdoor trend, indoor temp summary)
+- [ ] Confirm `houseStatus` is **not blank**
+
+---
+
+## 6 — Coexistence Verification (CRITICAL)
+
+> Climate Advisor is **advisor-only** and must never conflict with the thermostat pistons.
+
+### 6.1 Both systems active — downstairs window open > 60 s
+- [ ] Confirm "Thermostat management" piston is **active** (unpaused) in webCoRE
+- [ ] Open a downstairs window contact sensor
+- [ ] Watch **Climate Advisor** (Downstairs child): within ≤ 60 s, `latestMessage` should show advisory/warning
+- [ ] Watch the **downstairs thermostat**: after 60 s open, piston should fire `thermostat.off()`
+- [ ] **Pass:** both events occur; no Hubitat error in Logs; no double-write or conflict
+- [ ] Confirm Climate Advisor never writes `thermostatMode` or calls `.off()` — check Logs for any thermostat command from the app (should be **zero**)
+
+### 6.2 Window closes — piston restores; advisor clears
+- [ ] Close the downstairs window contact
+- [ ] Watch piston: it should fire the mode-appropriate RM preset rule (restores thermostat setpoints)
+- [ ] Watch Climate Advisor Downstairs child: `openContactCount = 0`, alert clears within ≤ 60 s
+- [ ] **Pass:** thermostat restored by piston, alert cleared by advisor — independently, no interference
+
+### 6.3 Sunroom — piston 2 + advisor coexistence
+- [ ] Open a Sunroom door contact
+- [ ] Sunroom piston fires `mini-split.off()` after 1 min (per piston config)
+- [ ] Climate Advisor Sunroom child shows advisory
+- [ ] Close door → piston restores mini-split; advisor clears
+- [ ] **Pass:** no conflicts, no duplicate thermostat commands from advisor
+
+---
+
+## 7 — Performance Sanity
+
+### 7.1 Immediate post-install baseline (Day 0)
+- [ ] Navigate to **Settings → Hub Details** (or Diagnostic Tool → Hub Info)
+- [ ] Record: **Free memory (MB)**, **CPU load (%)**, **DB size**
+- [ ] Repeat after 1 hour of normal operation; confirm no runaway growth
+
+### 7.2 24-hour check
+- [ ] After 24 h continuous operation with all 3 zones active:
+  - [ ] Record **Free memory** — note any change from baseline
+  - [ ] Check **Logs** for any repeated exceptions or high-frequency log spam
+  - [ ] Confirm `state.outdoorSamples` has not grown unbounded (check via **App State** in app's detail page; should be ≤ ~36 entries for a 30-min + 5-min trim window)
+  - [ ] Confirm debug logging auto-disabled (logEnable = false) after 30 min
+- [ ] **Pass baseline for regression:** note numbers here for v0.2 comparison
+
+---
+
+## 8 — Rollback Plan
+
+> Execute only if Climate Advisor is **not** validated or causes issues.
+
+- [ ] In webCoRE: open the **window-notification piston** (the one sending SharpTools/phone notifications on window open)
+- [ ] **Pause** it (do NOT delete — keep for 1-week fallback)
+- [ ] Climate Advisor is now the sole notification source
+- [ ] If rollback needed within 1 week: **Resume** the old piston; uninstall Climate Advisor via HPM
+- [ ] After 1 week stable: delete the paused piston permanently
+
+> The **Thermostat management** and **Sunroom climate** pistons are **never paused** — they own HVAC actions permanently and are not replaced by Climate Advisor.
+
+---
+
+## Known Risk Items for v0.2+
+
+| # | Risk | Mitigation in v0.1.0 |
+|---|---|---|
+| R1 | "Sunroom motion" multi-sensor may not appear in `capability.temperatureMeasurement` picker | Note device/driver name if missing; workaround: add temp sensor manually |
+| R2 | `outdoorTrend = unknown` for first ~35 min after install | Pre-alert predictive warnings skip when trend unknown — expected behavior |
+| R3 | 3°F pre-alert offset may be too wide/narrow in practice | Tunable via zone settings; observe real-world delta vs piston's 60 s threshold |
+| R4 | SharpTools tile does not auto-refresh if Hubitat cloud relay is slow | Local LAN access to hub recommended for real-time tile updates |
+
+---
+
+## Sign-off Checklist
+
+- [ ] Sections 1–3: Install + child devices ✅
+- [ ] Section 4: SharpTools tile bound ✅
+- [ ] Sections 5.1–5.7: All functional tests ✅
+- [ ] Section 6: Coexistence confirmed — no HVAC conflicts ✅
+- [ ] Section 7: Performance baseline recorded ✅
+- [ ] Section 8: Rollback plan understood ✅
+
+**Tester:** Mads Kristensen  
+**Date completed:** ___________  
+**Result:** PASS / FAIL / PARTIAL (note failures below)
+
+> Notes:
+
+---
+
+# Climate Advisor v2 Architecture Revision
+
+**Date:** 2026-05-23  
+**By:** Trinity  
+**Status:** Architecture revision for Tank implementation
+
+## Summary
+
+Keep the original Climate Advisor direction where it still fits: **Parent App + child virtual device**, app owns all subscriptions/evaluation, child exposes SharpTools-readable state, `houseStatus` remains a permanent back-compat attribute, messages stay JSON-encoded, and `addMessage` / `clearMessage` remain private app methods.
+
+This revision tightens v2 around Mads's new requirements: generic zones, no HomeKit-driven `ContactSensor`, predictive close-window alerts, concrete trend algorithms, and **per-zone child devices** so SharpTools can show one clean tile per zone plus an aggregate house device.
+
+---
+
+## 1. Genericize zones
+
+Decision: **generic community app, no hard-coded Mads devices or zone names.** Mads's Honeywell T6 Pro / Daikin / sunroom setup is reference context only.
+
+Use Hubitat `dynamicPage` preferences with app-level `zoneCount`:
+
+- `zoneCount`: `number`, range `1..10`, default `1`
+- Render zone sections/pages for `1..zoneCount`
+- Runtime zone config is built from numbered settings: `zone${i}Name`, `zone${i}Thermostats`, etc.
+- Do not require thermostats or contacts; do require at least one indoor temperature sensor per enabled zone.
+
+Per-zone inputs:
+
+- `name`: string, required for enabled zones
+- `thermostats`: `capability.thermostat`, multiple, optional
+- `indoorTempSensors`: `capability.temperatureMeasurement`, multiple, required
+- `contactSensors`: `capability.contactSensor`, multiple, optional
+- `aqSensor`: `capability.airQuality`, single, optional
+- `aqiAttribute`: string, default `airQualityIndex`, configurable per zone because community AQI drivers vary (`aqi`, `airQualityIndex`, etc.)
+- `speakers`: `capability.speechSynthesis`, multiple, optional
+- `coolingPreAlertOffset`: decimal, default `3.0`
+- `heatingPreAlertOffset`: decimal, default `3.0`
+- `notificationDevices`: `capability.notification`, multiple, optional
+
+App-level inputs:
+
+- `outdoorTempDevice`: `capability.temperatureMeasurement`, required
+- `weatherDevice`: optional; use `capability.sensor` rather than inventing a weather/rain capability
+- `weatherAttribute`: string, default `weather`
+- `rainKeyword`: string, default `rain`
+- `trendWindowMinutes`: number, default `30`
+- `outdoorTrendRisingThreshold10min`: decimal, default `0.2`
+- `outdoorTrendFallingThreshold10min`: decimal, default `-0.2`
+- `indoorTrendEnabled`: bool, default `true`
+- `indoorTrendWindowMinutes`: number, default same as outdoor unless set
+- global throttle/logging/announcement threshold settings from the original proposal stay unchanged unless Tank finds a Hubitat UI reason to split them.
+
+Back-compat contract: **keep Mads's existing webCoRE `houseStatus` URL-trigger contract as an app-wide child attribute.** The app should write aggregate `houseStatus` to the aggregate child. Per-zone children may also expose `houseStatus`, but the app-wide aggregate one is the compatibility target.
+
+---
+
+## 2. Drop HomeKit-driven `ContactSensor` capability from the child device
+
+Decision: **drop `ContactSensor` entirely.** The child device is not a contact sensor; it is a virtual data carrier for SharpTools and Rule Machine.
+
+Final aggregate child driver capabilities:
+
+```groovy
+capability "Sensor"        // marker only
+capability "Refresh"       // recalculate now
+capability "Notification"  // optional command sink: deviceNotification(text)
+```
+
+Final per-zone child driver capabilities: same driver, same capabilities:
+
+```groovy
+capability "Sensor"
+capability "Refresh"
+capability "Notification"
+```
+
+No `ContactSensor`, no `PresenceSensor`, no `MotionSensor`, no HomeKit proxy capability. `SpeechSynthesis` should stay off the child; actual announcements go directly from the app to selected speaker devices. That keeps the virtual device's purpose narrow.
+
+SharpTools confirmation: **SharpTools can read Hubitat custom attributes without a matching capability.** It binds to the device attribute name (`severity`, `latestMessage`, `outdoorTrend`, etc.); no `ContactSensor` capability is required.
+
+---
+
+## 3. Predictive close-windows alert
+
+Decision: add predictive close-window alerts as a new **WARNING** family layered above the existing setpoint-breach and rain/AQI logic.
+
+Severity scale is now explicit for this app:
+
+- `0` = INFO / clear-or-advisory baseline
+- `1` = WARNING
+- `2` = ALERT
+
+For Mads's requested wording, the new predictive alert is **WARNING**, so implement pre-alert severity as `1`. Existing rain/AQI-danger and hard setpoint-breach alerts can remain `ALERT` (`2`) where appropriate. The important distinction: predictive alert sits above ordinary info and below alert-level conditions.
+
+Cooling pre-alert fires when all are true:
+
+```text
+thermostatMode in ["cool", "auto"]
+indoorTemp >= (coolingSetpoint - coolingPreAlertOffset)
+outdoorTemp > indoorTemp
+outdoorTrend == "rising"
+open-window gate passes
+```
+
+Message pattern:
+
+```text
+Sunroom 72°F approaching 75°F cool setpoint, outside 81°F rising — close windows
+```
+
+Heating pre-alert fires when all are true:
+
+```text
+thermostatMode in ["heat", "auto"]
+indoorTemp <= (heatingSetpoint + heatingPreAlertOffset)
+outdoorTemp < indoorTemp
+outdoorTrend == "falling"
+open-window gate passes
+```
+
+Message pattern:
+
+```text
+Upstairs 69°F approaching 66°F heat setpoint, outside 42°F falling — close windows
+```
+
+Open-window gate:
+
+- If the zone has contact sensors configured: fire only when at least one contact is `open`.
+- If the zone has **no** contact sensors configured: skip the open-window gate and allow the temp/trend alert to fire. Document this in the app UI because it can produce generic "check windows" guidance without knowing actual window state.
+- If contacts are configured and all are closed: do not fire; no point telling the user to close already-closed windows.
+
+Clearing:
+
+- Predictive alerts are state-derived, not sticky.
+- They clear automatically on the next evaluation when any predicate no longer holds.
+- Use stable message IDs such as `zone-${zoneId}-cooling-prealert` and `zone-${zoneId}-heating-prealert` so replacement/clearing is deterministic.
+
+Thermostat handling:
+
+- Multiple thermostats per zone are allowed.
+- Evaluate each thermostat independently, then produce one zone-level pre-alert if any thermostat qualifies.
+- For message text, choose the qualifying setpoint nearest the current indoor temperature.
+
+---
+
+## 4. Outdoor trend algorithm — concrete
+
+Decision: use a state-backed sample buffer with exact slope calculation. No vague "ring buffer" language left for Tank to interpret.
+
+Outdoor sample capture:
+
+```groovy
+subscribe(outdoorTempDevice, "temperature", outdoorTempHandler)
+
+void outdoorTempHandler(evt) {
+    BigDecimal t = evt.value as BigDecimal
+    Long ts = now()
+    state.outdoorSamples = (state.outdoorSamples ?: []) + [[now: ts, t: t]]
+
+    Long cutoff = ts - ((settings.trendWindowMinutes ?: 30) + 5) * 60 * 1000L
+    state.outdoorSamples = state.outdoorSamples.findAll { it.now >= cutoff }
+    evaluateAll()
+}
+```
+
+Trend evaluation:
+
+```groovy
+Map computeTrend(List samples, Integer windowMinutes, BigDecimal risingThreshold, BigDecimal fallingThreshold) {
+    Long newestTs = now()
+    Long cutoff = newestTs - windowMinutes * 60 * 1000L
+    List window = (samples ?: []).findAll { it.now >= cutoff }.sort { it.now }
+
+    if (window.size() < 2) return [trend: "unknown", slope10min: null]
+
+    def oldest = window.first()
+    def newest = window.last()
+    BigDecimal spanMinutes = (newest.now - oldest.now) / 60000G
+    if (spanMinutes < 5G) return [trend: "unknown", slope10min: null]
+
+    BigDecimal slopePerMinute = ((newest.t as BigDecimal) - (oldest.t as BigDecimal)) / spanMinutes
+    BigDecimal slope10min = slopePerMinute * 10G
+
+    String trend = slope10min > risingThreshold ? "rising" :
+                   slope10min < fallingThreshold ? "falling" :
+                   "steady"
+    return [trend: trend, slope10min: slope10min]
+}
+```
+
+Rules:
+
+- Append `[now: epochMs, t: value]` to `state.outdoorSamples` on every outdoor temperature event.
+- Trim entries older than `(trendWindowMinutes + 5)` minutes.
+- On each evaluation, find the oldest sample inside the configured `trendWindowMinutes` and compare it to the newest sample.
+- Slope = `(newest.t - oldest.t) / ((newest.now - oldest.now) / 60000)`.
+- Expose slope as °F per 10 minutes by multiplying by `10`.
+- Classify:
+  - `rising` if `slope10min > +0.2` by default
+  - `falling` if `slope10min < -0.2` by default
+  - `steady` otherwise
+- Edge cases:
+  - fewer than 2 samples → `unknown`
+  - sample span under 5 minutes → `unknown`
+  - predictive pre-alerts skip when outdoor trend is `unknown`
+
+Child attributes:
+
+```groovy
+attribute "outdoorTrend", "ENUM", ["rising", "falling", "steady", "unknown"]
+attribute "outdoorTempSlope10min", "NUMBER"
+```
+
+Indoor trend:
+
+- Add per-zone indoor sample buffers: `state.indoorSamples[zoneId] = [[now: epochMs, t: avgIndoorTemp]]`.
+- `avgIndoorTemp` is the average of configured `indoorTempSensors` current `temperature` values that coerce cleanly to `BigDecimal`.
+- Use the same algorithm and edge cases as outdoor trend.
+- Expose `indoorTrend` and `indoorTempSlope10min` on each per-zone child.
+- Default `indoorTrendEnabled = true`; allow disabling if a hub with many zones needs less event/state churn.
+
+---
+
+## 5. Preferences UI sketch
+
+Tank should implement this shape, not redesign it. This is pseudo-Groovy, intentionally light on Hubitat UI polish.
+
+```groovy
+preferences {
+    page(name: "mainPage")
+    page(name: "globalPage")
+    page(name: "zonesPage")
+    page(name: "notificationsPage")
+}
+
+def mainPage() {
+    dynamicPage(name: "mainPage", title: "Climate Advisor", install: true, uninstall: true) {
+        section("Setup") {
+            href "globalPage", title: "Global settings", description: "Outdoor weather, trend windows, logging"
+            href "zonesPage", title: "Zones", description: "Configure ${settings.zoneCount ?: 1} zone(s)"
+            href "notificationsPage", title: "Notifications", description: "Global notification and throttling defaults"
+        }
+    }
+}
+
+def globalPage() {
+    dynamicPage(name: "globalPage", title: "Global Settings") {
+        section("Outdoor Conditions") {
+            input "outdoorTempDevice", "capability.temperatureMeasurement",
+                title: "Outdoor temperature device", required: true
+            input "weatherDevice", "capability.sensor",
+                title: "Weather / forecast device (optional)", required: false
+            input "weatherAttribute", "string",
+                title: "Weather condition attribute", defaultValue: "weather", required: false
+            input "rainKeyword", "string",
+                title: "Rain keyword", defaultValue: "rain", required: false
+        }
+        section("Trend Detection") {
+            input "trendWindowMinutes", "number",
+                title: "Outdoor trend window minutes", defaultValue: 30, required: true
+            input "outdoorTrendRisingThreshold10min", "decimal",
+                title: "Rising threshold (°F per 10 min)", defaultValue: 0.2, required: true
+            input "outdoorTrendFallingThreshold10min", "decimal",
+                title: "Falling threshold (°F per 10 min)", defaultValue: -0.2, required: true
+            input "indoorTrendEnabled", "bool",
+                title: "Track indoor trend per zone", defaultValue: true, required: true
+        }
+    }
+}
+
+def notificationsPage() {
+    dynamicPage(name: "notificationsPage", title: "Notifications") {
+        section("Global notification defaults") {
+            input "throttleMinutes", "number",
+                title: "Minimum minutes between repeated notifications", defaultValue: 60, required: true
+            input "announceSeverityThreshold", "number",
+                title: "Minimum severity for announcements", range: "0..2", defaultValue: 1, required: true
+        }
+    }
+}
+
+def zonesPage() {
+    dynamicPage(name: "zonesPage", title: "Zones") {
+        section("Zone Count") {
+            input "zoneCount", "number",
+                title: "Number of zones", range: "1..10", defaultValue: 1, required: true,
+                submitOnChange: true
+        }
+
+        Integer count = Math.max(1, Math.min((settings.zoneCount ?: 1) as Integer, 10))
+        (1..count).each { i ->
+            section("Zone ${i}") {
+                input "zone${i}Name", "string",
+                    title: "Zone ${i} name", required: true
+                input "zone${i}Thermostats", "capability.thermostat",
+                    title: "Thermostats (optional)", multiple: true, required: false
+                input "zone${i}IndoorTempSensors", "capability.temperatureMeasurement",
+                    title: "Indoor temperature sensors", multiple: true, required: true
+                input "zone${i}ContactSensors", "capability.contactSensor",
+                    title: "Window / door contact sensors (optional)", multiple: true, required: false
+                input "zone${i}AqSensor", "capability.airQuality",
+                    title: "Air quality sensor (optional)", multiple: false, required: false
+                input "zone${i}AqiAttribute", "string",
+                    title: "AQI attribute name", defaultValue: "airQualityIndex", required: false
+                input "zone${i}Speakers", "capability.speechSynthesis",
+                    title: "Speakers (optional)", multiple: true, required: false
+                input "zone${i}CoolingPreAlertOffset", "decimal",
+                    title: "Cooling pre-alert offset (°F)", defaultValue: 3.0, required: true
+                input "zone${i}HeatingPreAlertOffset", "decimal",
+                    title: "Heating pre-alert offset (°F)", defaultValue: 3.0, required: true
+                input "zone${i}NotificationDevices", "capability.notification",
+                    title: "Notification devices for this zone (optional)", multiple: true, required: false
+            }
+        }
+    }
+}
+```
+
+Runtime zone builder:
+
+```groovy
+List<Map> configuredZones() {
+    Integer count = Math.max(1, Math.min((settings.zoneCount ?: 1) as Integer, 10))
+    return (1..count).collect { i ->
+        String name = settings["zone${i}Name"]?.trim()
+        if (!name) return null
+        [
+            id                    : "zone${i}",
+            index                 : i,
+            name                  : name,
+            thermostats           : settings["zone${i}Thermostats"] ?: [],
+            indoorTempSensors     : settings["zone${i}IndoorTempSensors"] ?: [],
+            contactSensors        : settings["zone${i}ContactSensors"] ?: [],
+            aqSensor              : settings["zone${i}AqSensor"],
+            aqiAttribute          : settings["zone${i}AqiAttribute"] ?: "airQualityIndex",
+            speakers              : settings["zone${i}Speakers"] ?: [],
+            coolingPreAlertOffset : (settings["zone${i}CoolingPreAlertOffset"] ?: 3.0) as BigDecimal,
+            heatingPreAlertOffset : (settings["zone${i}HeatingPreAlertOffset"] ?: 3.0) as BigDecimal,
+            notificationDevices   : settings["zone${i}NotificationDevices"] ?: []
+        ]
+    }.findAll { it != null }
+}
+```
+
+---
+
+## 6. Data model update
+
+Decision: **per-zone child devices plus one aggregate app-wide child.** This is cleaner for SharpTools because each zone can be placed as its own tile/card without parsing a giant JSON blob. The aggregate child preserves the house-wide `houseStatus` contract and gives one top-level status tile.
+
+Child creation:
+
+- App creates one aggregate child: `Climate Advisor` or user-configured app label.
+- App creates one child per configured zone: `Climate Advisor - ${zone.name}`.
+- Child DNI should be stable by app ID + zone index, e.g. `${app.id}-aggregate`, `${app.id}-zone1`.
+- If zone names change, update labels; do not change DNI.
+- If `zoneCount` shrinks, either delete removed children after confirmation or mark them disabled/clear. Trinity preference: remove stale children in `updated()` after logging because stale SharpTools tiles are more confusing than disappearing ones.
+
+Aggregate child attributes:
+
+```groovy
+attribute "severity", "NUMBER"
+attribute "severityText", "ENUM", ["clear", "info", "warning", "alert"]
+attribute "latestMessage", "STRING"
+attribute "messages", "STRING"        // JSON array, highest severity then newest
+attribute "houseStatus", "STRING"     // permanent app-wide back-compat attribute
+attribute "tempTrend", "ENUM", ["rising", "falling", "steady", "unknown"] // legacy alias for outdoorTrend
+attribute "outdoorTrend", "ENUM", ["rising", "falling", "steady", "unknown"]
+attribute "outdoorTempSlope10min", "NUMBER"
+attribute "activeAlertCount", "NUMBER"
+attribute "zoneCount", "NUMBER"
+```
+
+Per-zone child attributes:
+
+```groovy
+attribute "severity", "NUMBER"
+attribute "severityText", "ENUM", ["clear", "info", "warning", "alert"]
+attribute "latestMessage", "STRING"
+attribute "messages", "STRING"
+attribute "houseStatus", "STRING"      // zone-local mirror for simple tiles
+attribute "zoneName", "STRING"
+attribute "indoorTemp", "NUMBER"
+attribute "indoorTrend", "ENUM", ["rising", "falling", "steady", "unknown"]
+attribute "indoorTempSlope10min", "NUMBER"
+attribute "outdoorTrend", "ENUM", ["rising", "falling", "steady", "unknown"]
+attribute "outdoorTempSlope10min", "NUMBER"
+attribute "openContactCount", "NUMBER"
+attribute "openContacts", "STRING"     // comma-separated display string; details also in messages JSON
+attribute "aqi", "NUMBER"
+```
+
+Keep existing attributes:
+
+- `severity`
+- `severityText`
+- `latestMessage`
+- `messages`
+- `houseStatus`
+- `tempTrend` as legacy alias on aggregate, mapped to `outdoorTrend`
+
+New attributes:
+
+- `outdoorTrend`
+- `outdoorTempSlope10min`
+- `indoorTrend` per zone
+- `indoorTempSlope10min` per zone
+- zone helper attributes listed above
+
+Message JSON schema from the original proposal stays valid. Add optional fields where useful:
+
+```json
+{
+  "id": "zone-zone1-cooling-prealert",
+  "ts": 1716485814000,
+  "severity": 1,
+  "severityText": "warning",
+  "source": "Sunroom",
+  "family": "coolingPreAlert",
+  "text": "Sunroom 72°F approaching 75°F cool setpoint, outside 81°F rising — close windows"
+}
+```
+
+Justification for per-zone children over single-child JSON only:
+
+- SharpTools users can bind tiles directly to zone attributes without custom JSON parsing.
+- Zone status survives dashboard layout changes better than a single complex `messages` blob.
+- Aggregate child still gives whole-house status for existing automations.
+- Hubitat child count is small: max 11 children (1 aggregate + 10 zones), acceptable on C-7/C-8.
+
+---
+
+## 7. Folder/file naming
+
+Keep the original folder/file naming:
+
+```text
+apps/climate-advisor/climate-advisor-app.groovy
+drivers/climate-advisor/climate-advisor-device.groovy
+```
+
+No new driver file is needed for per-zone children. Use the same `climate-advisor-device.groovy` driver for both aggregate and zone children, distinguished by device data values:
+
+- `advisorRole = aggregate | zone`
+- `zoneId = zone1`, `zone2`, etc. for zone children
+
+This keeps HPM packaging simple: one app file, one driver file. Tank should register both in root `README.md` and `packageManifest.json` as already planned.
+
+Unchanged from original proposal and not rewritten here:
+
+- Parent App + child virtual device split
+- App owns subscriptions/evaluation
+- Private app-side message mutation methods
+- JSON messages array and all-clear behavior
+- BigDecimal coercion for thermostat setpoints
+- Rain/weather device remains generic and attribute-driven
+- Notification throttling and announcement threshold concepts
+

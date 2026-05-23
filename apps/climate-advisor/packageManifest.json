@@ -1,0 +1,32 @@
+{
+  "packageName": "Climate Advisor",
+  "author": "Mads Kristensen",
+  "minimumHEVersion": "2.3.0",
+  "dateReleased": "2026-05-23",
+  "version": "0.1.0",
+  "communityLink": "",
+  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/climate-advisor/README.md",
+  "apps": [
+    {
+      "id": "1cb7c904-a569-4cfa-88c0-7dfefb499dec",
+      "name": "Climate Advisor",
+      "namespace": "madskristensen",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/climate-advisor/climate-advisor-app.groovy",
+      "iconUrl": "https://github.githubassets.com/favicons/favicon.png",
+      "iconX2Url": "https://github.githubassets.com/favicons/favicon.png",
+      "required": true,
+      "oauth": false,
+      "version": "0.1.0"
+    }
+  ],
+  "drivers": [
+    {
+      "id": "fe46d32a-174f-426a-88d1-0aee91b1df1b",
+      "name": "Climate Advisor Device",
+      "namespace": "madskristensen",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/climate-advisor/climate-advisor-device.groovy",
+      "required": true,
+      "version": "0.1.0"
+    }
+  ]
+}

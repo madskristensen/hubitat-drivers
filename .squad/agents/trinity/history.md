@@ -2,7 +2,7 @@
 
 ## Status Summary (2026-05-23)
 
-**Current focus:** Climate Advisor architecture design; completed comprehensive proposal (App + child device, capability selection, multi-zone data model). Awaiting Mads sign-off for Tank implementation.
+**Current focus:** Climate Advisor architecture v2 — generic preferences, HomeKit dropped, dynamic zone config. Proposal filed at `.squad/decisions/inbox/trinity-climate-advisor-v2-architecture.md`. Awaiting Mads sign-off before Tank implementation.
 
 **Recent work:** 3 community driver audits completed (PurpleAir v0.4.0 shipped, T6 Pro forked, Fully Kiosk forked). 5 reusable skills extracted to .squad/skills/. Gemstone OAuth pattern documented.
 
@@ -78,4 +78,58 @@ Detailed learnings from Daikin, Gemstone, SunStat, MyQ, Rainbird, Bosch, OAuth, 
 
 ---
 
-**Last updated:** 2026-05-23 (Climate Advisor architecture; history summarized below 15,360 byte threshold)
+---
+
+## PERMANENT ARCHITECTURAL BOUNDARY (2026-05-23)
+
+**Piston Coexistence — v0.1.0 and beyond:**
+
+Mads confirmed that Climate Advisor v0.1.0 is **advisor-only.** The existing webCoRE pistons ("Thermostat management" and "Sunroom climate") will retain permanent ownership of HVAC actions (off-on-open, mode/setpoint restoration via RM preset rules). Climate Advisor owns notifications, alerts, and predictive guidance.
+
+This separation is permanent: **not to be revisited for v0.2.0+.** The pistons have been running stably for 6 months; porting working code into new code is where regressions live. The "mode preset rules" restoration pattern is cleaner than Climate Advisor re-implementing it.
+
+**Why this works:**
+1. No dual-write conflict — Climate Advisor never calls `thermostat.off()` or `setThermostatMode()`
+2. Failure isolation — if RM rules break, Climate Advisor alerts still work
+3. Complementary timing — Climate Advisor warns before setpoint breach; piston catches after 60s
+4. Cleanly scoped — SharpTools status attributes + messaging never touch thermostat control
+
+**Previous consideration (withdrawn):** v0.2.0+ might consolidate config under Climate Advisor + toggle `controlHvac`. **This idea is dropped.** Two app/piston screens for related-but-distinct concerns is fine. No value in absorbing working code just to unify config.
+
+**Last updated:** 2026-05-23 (Climate Advisor architecture v2 — generic app, dropped HomeKit)
+
+---
+
+## Learnings
+
+### Generic App Preference Pattern (2026-05-23)
+
+When building a community-distributable Hubitat app, never hard-code device names, zone names, or attribute names — even when designing for a specific user's home. All devices must be user-selectable via preferences. All attribute names (especially non-standard ones like `aqi` vs `airQualityIndex`) must be user-configurable with a sensible default.
+
+For N-zone configurations where N is user-defined: define a fixed maximum and use numbered input names (`zone1Name`, `zone2Name`, etc.). Build the runtime zone list dynamically by iterating through the configured count; for Climate Advisor, use `dynamicPage` with `zoneCount` 1–10 and render only the active numbered sections.
+
+### Drop HomeKit When It Adds No Value (2026-05-23)
+
+`ContactSensor` was selected as a HomeKit proxy because it's the cleanest binary signal that homebridge maps. But when HomeKit is not a requirement, that capability adds semantic confusion (the device isn't actually a contact sensor) and creates a false coupling to a HomeKit bridge pattern. The rule: if a capability exists purely to satisfy one integration that the user isn't requiring, drop it. Custom attributes for the actual target platform (SharpTools) are cleaner and more expressive.
+
+Corollary: don't let one speculative "it might be useful for X" question drive capability selection. Confirm the requirement first.
+
+### Rain Device Pattern: No Standard Hubitat Capability (2026-05-23)
+
+Hubitat has no `capability.rain`. Weather devices (e.g., OpenWeatherMap app device) expose a `weather` (STRING) attribute. Make both the attribute name and the keyword configurable preferences. Default `rainAttribute = "weather"`, `rainKeyword = "rain"`. This pattern handles any weather device a user might have.
+
+### Climate Advisor Dynamic Zone Pattern (2026-05-23)
+
+Use a Hubitat `dynamicPage` with app-level `zoneCount` constrained to 1–10, then render numbered zone inputs (`zone${i}Name`, `zone${i}Thermostats`, `zone${i}IndoorTempSensors`, etc.) for the active count. Build runtime zone maps by iterating `1..zoneCount`; keep DNIs stable by zone index so renames only update labels.
+
+### Climate Advisor Predictive Alerts (2026-05-23)
+
+Predictive close-window alerts are WARNING severity between INFO=0 and ALERT=2. Cooling pre-alert requires cooling-capable mode, indoor temp within the cooling offset, outdoor temp hotter than indoor, outdoor trend rising, and open contacts when contacts exist; heating mirrors this with outdoor colder and falling.
+
+### Climate Advisor Trend Buffers (2026-05-23)
+
+Trend detection stores `[now: epochMs, t: value]` samples in app state, trims older than `trendWindowMinutes + 5`, and computes °F/10min from newest versus oldest sample inside the window. Fewer than two samples or less than five minutes of span yields `unknown`; predictive alerts skip unknown trends.
+
+### Climate Advisor Child Device Split (2026-05-23)
+
+Use one aggregate child plus one per-zone child, all backed by `drivers/climate-advisor/climate-advisor-device.groovy`. The aggregate child preserves app-wide `houseStatus`; per-zone children make SharpTools tiles simple without parsing zone JSON.
