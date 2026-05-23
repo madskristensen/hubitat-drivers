@@ -19,7 +19,6 @@ Virtual child driver for the [Climate Advisor](../apps/climate-advisor/README.md
 | Attribute | Type | Notes |
 |---|---|---|
 | `outdoorTrend` | ENUM | rising / falling / steady / unknown |
-| `tempTrend` | ENUM | Legacy alias for outdoorTrend — deprecated, removed in v0.3 |
 | `outdoorTempSlope10min` | NUMBER | °F change per 10 min |
 
 ### Counters
@@ -48,4 +47,3 @@ Virtual child driver for the [Climate Advisor](../apps/climate-advisor/README.md
 
 - Do not add this driver to a Hubitat device manually; it is managed by the Climate Advisor app.
 - The `contact` attribute maps severity ≥ 1 → `open`, all-clear → `closed`. Use it with the tonesto7 HomeKit bridge to surface Climate Advisor as a contact sensor in HomeKit.
-- `tempTrend` is a deprecated alias for `outdoorTrend` and will be removed in v0.3.

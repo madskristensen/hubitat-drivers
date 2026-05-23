@@ -2,16 +2,17 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.2.1
+ * Version:   0.2.2
  *
  * Changelog:
+ *   0.2.2 — 2026-05-23 — Remove tempTrend legacy alias attribute (use outdoorTrend)
  *   0.2.1 — 2026-05-23 — Single-child architecture, optional dashboard children, 4-level severity restored, namespace fix, null-slope guard, dedicated indoor temp handler, comfort-open advisory
  *   0.1.0 — 2026-05-23 — Initial release: parent app + child driver, per-zone alerts, outdoor/indoor trend detection, predictive close-windows alerts (cooling + heating); event-coalescing debounce, change-only sendEvent, lazy trend computation, childDniMap lookup cache.
  */
 
 import groovy.json.JsonOutput
 
-@Field static final String  APP_VERSION        = "0.2.1"
+@Field static final String  APP_VERSION        = "0.2.2"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -394,7 +395,6 @@ def evaluateAll() {
             sendEventIfChanged(aggChild, "houseStatus",           houseStatus)
             sendEventIfChanged(aggChild, "contact",               aggSeverity >= 1 ? "open" : "closed")
             sendEventIfChanged(aggChild, "outdoorTrend",          outdoorTrend.trend ?: "unknown")
-            sendEventIfChanged(aggChild, "tempTrend",             outdoorTrend.trend ?: "unknown")  // TODO v0.3: remove legacy alias
             sendEventIfChanged(aggChild, "outdoorTempSlope10min", outdoorTrend.slope10min)
             sendEventIfChanged(aggChild, "activeAlertCount",      alertCount)
             sendEventIfChanged(aggChild, "openContactCount",      totalOpenContacts)

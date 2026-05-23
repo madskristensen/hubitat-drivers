@@ -2,6 +2,40 @@
 
 Generated 2026-05-20T14:20:14Z
 
+# Climate Advisor v0.2.2 Ship + No-Backcompat Directive (2026-05-23)
+
+**Date:** 2026-05-23  
+**Merged from inbox:**
+- copilot-directive-no-backcompat.md
+
+## v0.2.2 Changes
+
+**Ship:** Removes legacy 	empTrend ENUM attribute that duplicated outdoorTrend. Both attribute appearances (driver metadata + app references) are gone. No migration grace period — dashboards reading 	empTrend should switch to outdoorTrend immediately.
+
+---
+
+## Standing Rule: No Backwards-Compatibility Constraints
+
+### 2026-05-23: User directive — no backwards-compatibility constraints
+
+**By:** Mads (via Copilot)
+
+**What:** Backwards-compatibility is a non-goal for this repo. Always design for the best possible architecture. Do NOT keep legacy attribute names, deprecated commands, alias fields, or "for old users" code paths. If a name, shape, or pattern is wrong, fix it cleanly — even if it means breaking existing installs.
+
+**Why:** This is a personal repo. Mads is the only known user of these drivers/apps. Other Hubitat users who install via HPM accept that updates can change the device interface. Optimizing for a hypothetical migration path adds complexity that buys nothing.
+
+**Permanent rule for all agents:**
+- No legacy aliases on attributes, commands, settings keys, or DNI patterns
+- No "deprecated, will remove in vNext" — just remove it now
+- No conditional code branches that read both an old and a new state key
+- No README sections explaining a migration from a prior version (release notes in the changelog header are sufficient)
+- When refactoring: pick the best name/shape and use it; do NOT preserve the old one alongside
+
+**Implication:** Future audits and refactors should be evaluated on "what's the best design?" — never on "what would break existing users?".
+
+---
+
+
 # Audit & Decision Merge — Climate Advisor v0.2.1 Ship (2026-05-23)
 
 **Date:** 2026-05-23  
