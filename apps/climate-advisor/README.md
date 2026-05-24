@@ -13,6 +13,7 @@ Climate Advisor monitors indoor and outdoor temperatures, outdoor trend (rising 
 | Alert family | Severity | Trigger |
 |---|---|---|
 | Comfort-open suggestion | INFO (1) | All contacts closed AND outdoor in comfort band AND not raining AND AQI ok |
+| Free cooling opportunity | INFO (1) | Indoor at/near cooling setpoint AND outdoor cooler than indoor AND contacts closed AND not raining AND AQI ok |
 | Cooling pre-alert | WARNING (2) | Indoor ≥ (cooling SP − offset) AND outdoor > indoor AND outdoor rising |
 | Heating pre-alert | WARNING (2) | Indoor ≤ (heating SP + offset) AND outdoor < indoor AND outdoor falling |
 | AQI moderate | WARNING (2) | AQI > warn threshold (default 51) |

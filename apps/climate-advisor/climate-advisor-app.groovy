@@ -2,9 +2,10 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.3.2
+ * Version:   0.3.3
  *
  * Changelog:
+ *   0.3.3 — 2026-05-23 — Free cooling opportunity evaluator: notify when outside cooler than inside and AC would otherwise run
  *   0.3.2 — 2026-05-23 — Child device now nests under app (isComponent: true) — matches Groups and Scenes pattern; cleaner Devices list
  *   0.3.1 — 2026-05-23 — Remove redundant aqiAttribute input — capability.airQuality standardizes attribute as airQualityIndex.
  *   0.3.0 — 2026-05-23 — Lift AQI to house-level: one global AQI device input instead of per-zone. Breaking config change (re-select your AQI device after upgrade).
@@ -17,7 +18,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.3.2"
+@Field static final String  APP_VERSION        = "0.3.3"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -478,6 +479,9 @@ private Map evaluateZone(Map zone, BigDecimal outdoorTemp, Map outdoorTrend, boo
     m = evaluateComfortOpen(zone, indoorTemp, outdoorTemp, outdoorTrend, rainDetected, openContacts, aqiVal)
     if (m) { candidates << m }
 
+    m = evaluateFreeCooling(zone, indoorTemp, outdoorTemp, outdoorTrend, openContacts, !noContactsConfigured, aqiVal, rainDetected)
+    if (m) { candidates << m }
+
     return [
         candidates: candidates,
         meta: [
@@ -624,6 +628,40 @@ private Map evaluateComfortOpen(Map zone, BigDecimal indoorTemp, BigDecimal outd
 
     String text = "${zone.name} outdoor ${outdoorTemp}°F is comfortable \u2014 consider opening windows for fresh air"
     return buildCandidate("zone-${zone.id}-comfort-open", 1, zone.name, "comfortOpen", text, zone.id as String)
+}
+
+// Free cooling opportunity: outdoor cooler than indoor and indoor at/near cooling setpoint.
+// Ventilation displaces AC run without spending comfort — the gap evaluateComfortOpen misses
+// because outdoor is below the comfort band but still cooler than the overheated interior.
+// Severity = 1 (info) — positive opportunity, not a warning.
+private Map evaluateFreeCooling(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp,
+                                 Map outdoorTrend, List openContacts, boolean contactsConfigured,
+                                 BigDecimal aqiVal, boolean rainDetected) {
+    if (outdoorTemp == null)            { return null }
+    if (rainDetected)                   { return null }
+    if (!contactsConfigured)            { return null }  // no contacts to open
+    if (!openContacts.isEmpty())        { return null }  // windows already open — suggestion redundant
+    if (outdoorTemp >= indoorTemp)      { return null }  // outdoor not cooler than indoor
+    if (outdoorTrend.trend == "rising") { return null }  // temp trending up — opportunity closing
+
+    Integer warnThreshold = (settings.aqiWarnThreshold ?: AQI_WARN_DEFAULT) as Integer
+    if (aqiVal != null && aqiVal >= warnThreshold) { return null }
+
+    List qualifying = []
+    (zone.thermostats ?: []).each { t ->
+        String mode = t.currentValue("thermostatMode")
+        if (!(mode in ["cool", "auto"])) { return }
+        BigDecimal coolSP = safeCurrentBD(t, "coolingSetpoint")
+        if (coolSP == null) { return }
+        BigDecimal offset = zone.coolingPreAlertOffset ?: 3.0G
+        if (indoorTemp >= (coolSP - offset)) { qualifying << [coolSP: coolSP] }
+    }
+    if (qualifying.isEmpty()) { return null }
+
+    Map best = qualifying.min { Math.abs((it.coolSP as BigDecimal) - indoorTemp) }
+    BigDecimal delta = (indoorTemp - outdoorTemp).setScale(1, java.math.RoundingMode.HALF_UP)
+    String text = "${zone.name} outdoor ${outdoorTemp}°F is ${delta}°F cooler than indoor ${indoorTemp}°F \u2014 consider opening windows for free cooling (cool setpoint ${best.coolSP}°F)"
+    return buildCandidate("zone-${zone.id}-free-cooling", 1, zone.name, "freeCooling", text, zone.id as String)
 }
 
 private List evaluateHouseRain(boolean rainDetected, List zones) {
