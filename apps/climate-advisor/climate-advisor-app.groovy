@@ -2,9 +2,10 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.2.3
+ * Version:   0.3.0
  *
  * Changelog:
+ *   0.3.0 — 2026-05-23 — Lift AQI to house-level: one global AQI device input instead of per-zone. Breaking config change (re-select your AQI device after upgrade).
  *   0.2.3 — 2026-05-23 — Add missing groovy.transform.Field import (fixes Hubitat publish failure)
  *   0.2.2 — 2026-05-23 — Remove tempTrend legacy alias attribute (use outdoorTrend)
  *   0.2.1 — 2026-05-23 — Single-child architecture, optional dashboard children, 4-level severity restored, namespace fix, null-slope guard, dedicated indoor temp handler, comfort-open advisory
@@ -14,7 +15,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.2.3"
+@Field static final String  APP_VERSION        = "0.3.0"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -69,6 +70,12 @@ def globalPage() {
                 title: "Weather condition attribute", defaultValue: "weather", required: false
             input "rainKeyword", "string",
                 title: "Rain keyword in weather attribute", defaultValue: "rain", required: false
+        }
+        section("Air Quality") {
+            input "aqiDevice", "capability.airQuality",
+                title: "Air quality sensor (optional — house-wide)", required: false
+            input "aqiAttribute", "string",
+                title: "AQI attribute name", defaultValue: "airQualityIndex", required: false
         }
         section("AQI Thresholds") {
             input "aqiWarnThreshold", "number",
@@ -138,10 +145,6 @@ def zonesPage() {
                     title: "Indoor temperature sensors (optional — uses thermostat temp if omitted)", multiple: true, required: false
                 input "zone${i}ContactSensors", "capability.contactSensor",
                     title: "Window / door contact sensors (optional)", multiple: true, required: false
-                input "zone${i}AqSensor", "capability.airQuality",
-                    title: "Air quality sensor (optional)", multiple: false, required: false
-                input "zone${i}AqiAttribute", "string",
-                    title: "AQI attribute name", defaultValue: "airQualityIndex", required: false
                 input "zone${i}Speakers", "capability.speechSynthesis",
                     title: "Speakers for zone announcements (optional)", multiple: true, required: false
                 input "zone${i}CoolingPreAlertOffset", "decimal",
@@ -215,6 +218,11 @@ private void subscribeAll(List zones) {
         subscribe(settings.weatherDevice, wAttr, debounceHandler)
     }
 
+    if (settings.aqiDevice) {
+        String aqAttr = (settings.aqiAttribute ?: "airQualityIndex") as String
+        subscribe(settings.aqiDevice, aqAttr, debounceHandler)
+    }
+
     zones.each { zone ->
         // Indoor temp sensors get a dedicated handler that appends trend samples
         zone.indoorTempSensors?.each { sensor ->
@@ -227,10 +235,6 @@ private void subscribeAll(List zones) {
         }
         zone.contactSensors?.each { c ->
             subscribe(c, "contact", debounceHandler)
-        }
-        if (zone.aqSensor) {
-            String aqAttr = zone.aqiAttribute ?: "airQualityIndex"
-            subscribe(zone.aqSensor, aqAttr, debounceHandler)
         }
     }
 }
@@ -330,6 +334,7 @@ def evaluateAll() {
         Map outdoorTrend = outdoorTrendResult()
         BigDecimal outdoorTemp = safeCurrentTemp(settings.outdoorTempDevice)
         boolean rainDetected = checkRain()
+        BigDecimal houseAqi = currentHouseAqi()
         List zones = configuredZones()
         Long nowMs = now()
 
@@ -339,7 +344,7 @@ def evaluateAll() {
         Map zoneResults = [:]
 
         zones.each { zone ->
-            Map zoneEval     = evaluateZone(zone, outdoorTemp, outdoorTrend, rainDetected)
+            Map zoneEval     = evaluateZone(zone, outdoorTemp, outdoorTrend, rainDetected, houseAqi)
             List candidates  = zoneEval.candidates as List
             Map  meta        = zoneEval.meta as Map
             List zoneResolved = resolveMessages(candidates, prevActive, newActive, nowMs)
@@ -435,7 +440,7 @@ private List resolveMessages(List candidates, Map prevActive, Map newActive, Lon
 // ── Zone evaluation ───────────────────────────────────────────────────────────
 
 // Returns a Map {candidates: List, meta: Map{indoorTemp, openContactCount, aqi}}
-private Map evaluateZone(Map zone, BigDecimal outdoorTemp, Map outdoorTrend, boolean rainDetected) {
+private Map evaluateZone(Map zone, BigDecimal outdoorTemp, Map outdoorTrend, boolean rainDetected, BigDecimal houseAqi) {
     Map emptyMeta = [indoorTemp: null, openContactCount: 0, openContactNames: "", aqi: null]
 
     BigDecimal indoorTemp = averageTemps(zone.indoorTempSensors)
@@ -451,12 +456,8 @@ private Map evaluateZone(Map zone, BigDecimal outdoorTemp, Map outdoorTrend, boo
     boolean windowGatePasses = noContactsConfigured || anyOpen
     String noSensorNote = noContactsConfigured ? " (no window sensors configured)" : ""
 
-    // Pre-compute AQI once for use in multiple evaluators
-    BigDecimal aqiVal = null
-    if (zone.aqSensor) {
-        def raw = zone.aqSensor.currentValue(zone.aqiAttribute ?: "airQualityIndex")
-        if (raw != null) { try { aqiVal = raw as BigDecimal } catch (Exception ignored) {} }
-    }
+    // House-wide AQI passed in from evaluateAll (one read per cycle)
+    BigDecimal aqiVal = houseAqi
 
     List candidates = []
     def m
@@ -749,8 +750,6 @@ private List<Map> configuredZones() {
             thermostats          : settings["zone${i}Thermostats"]            ?: [],
             indoorTempSensors    : settings["zone${i}IndoorTempSensors"]      ?: [],
             contactSensors       : settings["zone${i}ContactSensors"]         ?: [],
-            aqSensor             : settings["zone${i}AqSensor"],
-            aqiAttribute         : settings["zone${i}AqiAttribute"]           ?: "airQualityIndex",
             speakers             : settings["zone${i}Speakers"]               ?: [],
             coolingPreAlertOffset: (settings["zone${i}CoolingPreAlertOffset"] ?: 3.0) as BigDecimal,
             heatingPreAlertOffset: (settings["zone${i}HeatingPreAlertOffset"] ?: 3.0) as BigDecimal,
@@ -759,8 +758,16 @@ private List<Map> configuredZones() {
     }.findAll { it != null }
 }
 
+private BigDecimal currentHouseAqi() {
+    if (!settings.aqiDevice) { return null }
+    try {
+        def raw = settings.aqiDevice.currentValue((settings.aqiAttribute ?: "airQualityIndex") as String)
+        if (raw != null) { return raw as BigDecimal }
+    } catch (Exception e) { log.warn "currentHouseAqi error: ${e.message}" }
+    return null
+}
+
 private boolean checkRain() {
-    if (!settings.weatherDevice || !settings.weatherAttribute) { return false }
     try {
         String val     = settings.weatherDevice.currentValue(settings.weatherAttribute as String) as String
         String keyword = (settings.rainKeyword ?: "rain") as String

@@ -81,7 +81,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/climate-advisor/climate-advisor-device.groovy",
       "required": true,
-      "version": "0.2.3"
+      "version": "0.3.0"
     }
   ],
   "apps": [
@@ -108,7 +108,7 @@
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/climate-advisor/climate-advisor-app.groovy",
       "required": true,
       "oauth": false,
-      "version": "0.2.3"
+      "version": "0.3.0"
     }
   ]
 }

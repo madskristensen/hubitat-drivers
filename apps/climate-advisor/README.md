@@ -49,13 +49,14 @@ One parent app + one optional child device (house-wide aggregate):
 ### Global
 - **Outdoor temperature device** (required)
 - **Weather device** + attribute + rain keyword (optional)
+- **Air quality sensor** (optional — house-wide; single device for the whole house)
 - **AQI warning threshold** (default 51), **AQI danger threshold** (default 101)
 - **Trend window** (default 30 min), rising/falling thresholds (default ±0.2°F/10 min)
 - **Indoor trend enabled** (default true)
 - **Create dashboard child device** (default false — opt in for SharpTools/dashboard users)
 
 ### Per zone
-- Zone name, thermostats (optional), indoor temp sensors (optional — falls back to thermostat temp), contact sensors (optional), AQ sensor + attribute, speakers, notification devices
+- Zone name, thermostats (optional), indoor temp sensors (optional — falls back to thermostat temp), contact sensors (optional), speakers, notification devices
 - Cooling/heating pre-alert offsets (default 3°F)
 
 ### Notifications
