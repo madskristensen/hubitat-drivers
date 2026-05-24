@@ -2,6 +2,38 @@
 
 Generated 2026-05-20T14:20:14Z
 
+# Climate Advisor v0.3.0 — AQI Lifted to House Level
+
+**Author:** Tank (Backend Dev)  
+**Date:** 2026-05-23  
+**Requested by:** Mads
+
+## What changed
+
+AQI input moved from per-zone configuration to a single house-wide input in Global Settings.
+
+- **Removed:** zone${i}AqSensor and zone${i}AqiAttribute inputs from the Zones page; qSensor and qiAttribute keys removed from the zone Map in configuredZones().
+- **Added:** qiDevice (capability.airQuality) and qiAttribute (string, default "airQualityIndex") in a new **Air Quality** section in globalPage(), placed between "Outdoor Conditions" and "AQI Thresholds".
+- **Subscription:** Per-zone AQI subscribe loop replaced with a single settings.aqiDevice subscribe in subscribeAll().
+- **Read path:** New currentHouseAqi() helper reads the device once per evaluation cycle. valuateAll() calls it and passes the result as houseAqi to valuateZone(zone, outdoorTemp, outdoorTrend, rainDetected, houseAqi). One device read per cycle instead of N reads.
+- **Zone status JSON:** The qi field is still reported per zone in zoneStatuses (house-wide value duplicated across zones) — keeps the existing attribute shape intact for dashboards.
+
+## Why
+
+Mads's directive: "my aqi sensor is not the same as the weather forecast device. you need to separate them."
+
+Indoor air mixes between zones — a single house-wide AQI device is architecturally correct. Burying AQI inside each zone config caused UI confusion (Mads perceived AQI and the weather/rain device as tangled).
+
+## Breaking change
+
+**v0.3.0 is a breaking config change.** Any existing per-zone AQI sensor selections (zoneXAqSensor settings) are silently dropped on upgrade — Hubitat retains the old setting values but the app no longer reads them.
+
+**Upgrade action required:** After upgrading, go to Global Settings → Air Quality and re-select your AQI device.
+
+No migration shim (per standing no-backcompat rule).
+
+---
+
 # Climate Advisor v0.2.2 Ship + No-Backcompat Directive (2026-05-23)
 
 **Date:** 2026-05-23  
