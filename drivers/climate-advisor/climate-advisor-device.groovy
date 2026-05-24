@@ -2,18 +2,21 @@
  * Climate Advisor Device
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.2.2
+ * Version:   0.2.3
  *
  * House-wide aggregate child driver for the Climate Advisor app (one device per installation).
  * Per-zone data exposed via zoneStatuses JSON attribute and indexed flat attributes zone1..zone10.
  *
  * Changelog:
+ *   0.2.3 — 2026-05-23 — Add missing groovy.transform.Field import (fixes Hubitat publish failure)
  *   0.2.2 — 2026-05-23 — Remove tempTrend legacy alias attribute (use outdoorTrend)
  *   0.2.1 — 2026-05-23 — Single-child architecture, optional dashboard children, 4-level severity restored, namespace fix, null-slope guard, dedicated indoor temp handler, comfort-open advisory
  *   0.1.0 — 2026-05-23 — Initial release: unified aggregate + zone child driver for Climate Advisor app; all attributes from Trinity Section 6; Refresh + Notification capability surface.
  */
 
-@Field static final String DRIVER_VERSION = "0.2.2"
+import groovy.transform.Field
+
+@Field static final String DRIVER_VERSION = "0.2.3"
 
 metadata {
     definition(

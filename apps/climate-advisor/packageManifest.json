@@ -3,7 +3,7 @@
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
   "dateReleased": "2026-05-23",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/climate-advisor/README.md",
   "apps": [
@@ -16,7 +16,7 @@
       "iconX2Url": "https://github.githubassets.com/favicons/favicon.png",
       "required": true,
       "oauth": false,
-      "version": "0.2.2"
+      "version": "0.2.3"
     }
   ],
   "drivers": [
@@ -26,7 +26,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/climate-advisor/climate-advisor-device.groovy",
       "required": true,
-      "version": "0.2.2"
+      "version": "0.2.3"
     }
   ]
 }
