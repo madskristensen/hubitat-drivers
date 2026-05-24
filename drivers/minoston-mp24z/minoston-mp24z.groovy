@@ -1,7 +1,7 @@
 /**
  *  Minoston Smart Plug 2-Channel (MP24Z) — Hubitat Fork
  *  Author:  Mads Kristensen
- *  Version: 1.0.5 — 2026-05-19
+ *  Version: 1.0.7 — 2026-05-23
  *  License: Apache-2.0
  *
  *  Fork of sky-nie/hubitat "Smart Plug 2-Channel" driver.
@@ -9,6 +9,8 @@
  *  Forked because upstream does not accept PRs; this version applies reliability and Hubitat-quality hardening.
  *
  *  Changelog:
+ *    1.0.7 — 2026-05-23 — Fix BasicReport interpretation: per Z-Wave spec, value 0x01-0x63 means 'on at that level' (not off). Treat any non-zero BasicReport/SwitchBinaryReport value as on. Previously the device's unsolicited BasicReport(value:99) was flipping state to off ~5s after on().
+ *    1.0.6 — 2026-05-23 — Fix state-drift on slow Z-Wave nodes: emit optimistic switch events on on/off/childOn/childOff, use child.parse for component state, drop in-driver verify/retry loop (duplicated Hubitat's platform command-retry and raced stale Get reports against optimistic state).
  *    1.0.5 — 2026-05-19 — Reduce hub/radio load with light-first child command path, duplicate child command suppression, throttled lastActivity writes, and stale verify cancellation.
  *    1.0.4 — 2026-05-19 — Remove script-scope private/static modifiers for Hubitat parser compatibility.
  *    1.0.3 — 2026-05-19 — Accept legacy child DNI formats when resolving endpoint number (supports prior child formats like -01 and -1 in addition to -ep1).
@@ -77,8 +79,6 @@ def debugLog(String msg) {
     if (logEnable) log.debug msg
 }
 
-def parentVerifyMaxRetries() { 2 }
-def childVerifyMaxRetries() { 1 }
 def lastActivityThrottleMs() { 60000L }
 
 def formatNow() {
@@ -103,59 +103,14 @@ def endpointIsOn(int ep) {
 def updateEndpointSwitchEvent(Integer ep, String value) {
     def child = getTargetDeviceByEndPoint(ep)
     if (child && child.currentValue("switch") != value) {
-        child.sendEvent(name: "switch", value: value, type: "physical")
+        child.parse([[name: "switch", value: value, descriptionText: "${child.displayName} is ${value}"]])
     }
 }
 
-def getMapState(String key) {
-    (state[key] instanceof Map) ? (state[key] as Map) : [:]
-}
-
-def putMapState(String key, Map value) {
-    state[key] = value
-}
-
-def shouldSkipDuplicateChildCommand(Integer endpoint, String target) {
-    Map pendingTargets = getMapState("childPendingTargets")
-    pendingTargets["${endpoint}"] == target
-}
-
-def markChildPending(Integer endpoint, String target) {
-    Map pendingTargets = getMapState("childPendingTargets")
-    pendingTargets["${endpoint}"] = target
-    putMapState("childPendingTargets", pendingTargets)
-}
-
-def clearChildPending(Integer endpoint) {
-    Map pendingTargets = getMapState("childPendingTargets")
-    pendingTargets.remove("${endpoint}")
-    putMapState("childPendingTargets", pendingTargets)
-
-    Map retryCounts = getMapState("childRetryCounts")
-    retryCounts.remove("${endpoint}")
-    putMapState("childRetryCounts", retryCounts)
-
-    Map tokens = getMapState("childVerifyTokens")
-    tokens.remove("${endpoint}")
-    putMapState("childVerifyTokens", tokens)
-}
-
-def nextChildVerifyToken(Integer endpoint) {
-    Long token = ((state.childTokenSequence ?: 0L) as Long) + 1L
-    state.childTokenSequence = token
-    Map tokens = getMapState("childVerifyTokens")
-    tokens["${endpoint}"] = token
-    putMapState("childVerifyTokens", tokens)
-    return token
-}
-
-def isCurrentChildVerifyToken(Integer endpoint, Long token) {
-    Map tokens = getMapState("childVerifyTokens")
-    (tokens["${endpoint}"] as Long) == token
-}
-
-def updateAggregateSwitch() {
-    boolean anyOn = endpointIsOn(1) || endpointIsOn(2)
+def updateAggregateSwitch(Integer changedEp = null, String changedValue = null) {
+    boolean ep1On = (changedEp == 1) ? (changedValue == "on") : endpointIsOn(1)
+    boolean ep2On = (changedEp == 2) ? (changedValue == "on") : endpointIsOn(2)
+    boolean anyOn = ep1On || ep2On
     String value = anyOn ? "on" : "off"
     if (device.currentValue("switch") != value) {
         sendEvent(name: "switch", value: value, type: "physical", descriptionText: "${device.displayName} is ${value}")
@@ -216,11 +171,15 @@ def parse(String description) {
 
 def zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd, Integer ep = null) {
     debugLog "BasicReport ${cmd} - ep ${ep}"
-    String value = cmd.value == 0xFF ? "on" : "off"
+    if (cmd.value == 0xFE) {
+        debugLog "BasicReport value 0xFE (unknown) - ignoring"
+        return
+    }
+    String value = cmd.value == 0x00 ? "off" : "on"
 
     if (ep != null) {
         updateEndpointSwitchEvent(ep, value)
-        updateAggregateSwitch()
+        updateAggregateSwitch(ep, value)
     } else {
         sendEvent(name: "switch", value: value, type: "physical", descriptionText: "${device.displayName} is ${value}")
     }
@@ -228,11 +187,11 @@ def zwaveEvent(hubitat.zwave.commands.basicv1.BasicReport cmd, Integer ep = null
 
 def zwaveEvent(hubitat.zwave.commands.switchbinaryv1.SwitchBinaryReport cmd, Integer ep = null) {
     debugLog "SwitchBinaryReport ${cmd} - ep ${ep}"
-    String value = cmd.value == 0xFF ? "on" : "off"
+    String value = cmd.value == 0x00 ? "off" : "on"
 
     if (ep != null) {
         updateEndpointSwitchEvent(ep, value)
-        updateAggregateSwitch()
+        updateAggregateSwitch(ep, value)
     } else {
         sendEvent(name: "switch", value: value, type: "physical", descriptionText: "${device.displayName} is ${value}")
     }
@@ -326,64 +285,44 @@ def zwaveEvent(hubitat.zwave.Command cmd) {
 
 def on() {
     debugLog "on()"
-    unschedule("verifyParentState")
-    state.pendingParentTarget = "on"
-    state.pendingParentRetries = 0
-    state.pendingParentVerifyPass = 0
+    updateEndpointSwitchEvent(1, "on")
+    updateEndpointSwitchEvent(2, "on")
+    sendEvent(name: "switch", value: "on", type: "digital", descriptionText: "${device.displayName} is on")
     sendCommands([
         encap(zwave.basicV1.basicSet(value: 0xFF), 1),
-        encap(zwave.basicV1.basicSet(value: 0xFF), 2),
-        encap(zwave.switchBinaryV1.switchBinaryGet(), 1),
-        encap(zwave.switchBinaryV1.switchBinaryGet(), 2)
-    ])
-    runIn(1, "verifyParentState")
+        encap(zwave.basicV1.basicSet(value: 0xFF), 2)
+    ], 400)
 }
 
 def off() {
     debugLog "off()"
-    unschedule("verifyParentState")
-    state.pendingParentTarget = "off"
-    state.pendingParentRetries = 0
-    state.pendingParentVerifyPass = 0
+    updateEndpointSwitchEvent(1, "off")
+    updateEndpointSwitchEvent(2, "off")
+    sendEvent(name: "switch", value: "off", type: "digital", descriptionText: "${device.displayName} is off")
     sendCommands([
         encap(zwave.basicV1.basicSet(value: 0x00), 1),
-        encap(zwave.basicV1.basicSet(value: 0x00), 2),
-        encap(zwave.switchBinaryV1.switchBinaryGet(), 1),
-        encap(zwave.switchBinaryV1.switchBinaryGet(), 2)
-    ])
-    runIn(1, "verifyParentState")
+        encap(zwave.basicV1.basicSet(value: 0x00), 2)
+    ], 400)
 }
 
 def childOn(String dni) {
     Integer endpoint = channelNumber(dni)
-    if (shouldSkipDuplicateChildCommand(endpoint, "on")) {
-        debugLog "childOn($dni) skipped duplicate pending target"
-        return
-    }
     debugLog "childOn($dni)"
-    markChildPending(endpoint, "on")
-    Long token = nextChildVerifyToken(endpoint)
+    updateEndpointSwitchEvent(endpoint, "on")
+    updateAggregateSwitch(endpoint, "on")
     sendCommands([
-        encap(zwave.basicV1.basicSet(value: 0xFF), endpoint),
-        encap(zwave.switchBinaryV1.switchBinaryGet(), endpoint)
+        encap(zwave.basicV1.basicSet(value: 0xFF), endpoint)
     ], 200)
-    runIn(1, "verifyChildEndpoint", [data: [ep: endpoint, target: "on", token: token]])
 }
 
 def childOff(String dni) {
     Integer endpoint = channelNumber(dni)
-    if (shouldSkipDuplicateChildCommand(endpoint, "off")) {
-        debugLog "childOff($dni) skipped duplicate pending target"
-        return
-    }
     debugLog "childOff($dni)"
-    markChildPending(endpoint, "off")
-    Long token = nextChildVerifyToken(endpoint)
+    updateEndpointSwitchEvent(endpoint, "off")
+    updateAggregateSwitch(endpoint, "off")
     sendCommands([
-        encap(zwave.basicV1.basicSet(value: 0x00), endpoint),
-        encap(zwave.switchBinaryV1.switchBinaryGet(), endpoint)
+        encap(zwave.basicV1.basicSet(value: 0x00), endpoint)
     ], 200)
-    runIn(1, "verifyChildEndpoint", [data: [ep: endpoint, target: "off", token: token]])
 }
 
 def childRefresh(String dni) {
@@ -519,93 +458,6 @@ def initialize() {
     cmds << encap(zwave.switchBinaryV1.switchBinaryGet(), 1)
     cmds << encap(zwave.switchBinaryV1.switchBinaryGet(), 2)
     sendCommands(cmds)
-}
-
-def verifyParentState() {
-    String target = state.pendingParentTarget as String
-    if (!(target in ["on", "off"])) return
-
-    Integer verifyPass = (state.pendingParentVerifyPass ?: 0) as Integer
-    if (verifyPass == 0) {
-        state.pendingParentVerifyPass = 1
-        sendCommands([
-            encap(zwave.switchBinaryV1.switchBinaryGet(), 1),
-            encap(zwave.switchBinaryV1.switchBinaryGet(), 2)
-        ], 150)
-        unschedule("verifyParentState")
-        runIn(1, "verifyParentState")
-        return
-    }
-
-    boolean targetOn = target == "on"
-    List<Integer> mismatched = []
-    if (endpointIsOn(1) != targetOn) mismatched << 1
-    if (endpointIsOn(2) != targetOn) mismatched << 2
-
-    if (!mismatched) {
-        debugLog "Parent ${target} verified on both outlets"
-        unschedule("verifyParentState")
-        state.remove("pendingParentTarget")
-        state.remove("pendingParentRetries")
-        state.remove("pendingParentVerifyPass")
-        return
-    }
-
-    Integer retries = (state.pendingParentRetries ?: 0) as Integer
-    if (retries >= parentVerifyMaxRetries()) {
-        log.warn "Parent ${target} not fully applied after retries. Mismatched endpoints: ${mismatched}"
-        unschedule("verifyParentState")
-        state.remove("pendingParentTarget")
-        state.remove("pendingParentRetries")
-        state.remove("pendingParentVerifyPass")
-        return
-    }
-
-    state.pendingParentRetries = retries + 1
-    state.pendingParentVerifyPass = 0
-    debugLog "Retrying parent ${target} for endpoints ${mismatched} (attempt ${state.pendingParentRetries}/${parentVerifyMaxRetries()})"
-
-    short setValue = (short) (targetOn ? 0xFF : 0x00)
-    List<hubitat.zwave.Command> retryCmds = []
-    mismatched.each { Integer ep ->
-        retryCmds << encap(zwave.basicV1.basicSet(value: setValue), ep)
-        retryCmds << encap(zwave.switchBinaryV1.switchBinaryGet(), ep)
-    }
-    sendCommands(retryCmds, 200)
-    unschedule("verifyParentState")
-    runIn(1, "verifyParentState")
-}
-
-def verifyChildEndpoint(Map data = [:]) {
-    Integer endpoint = (data.ep ?: data.endpoint) as Integer
-    String target = data.target as String
-    Long token = data.token as Long
-    if (!(endpoint in [1, 2]) || !(target in ["on", "off"])) return
-    if (!isCurrentChildVerifyToken(endpoint, token)) return
-
-    boolean targetOn = target == "on"
-    if (endpointIsOn(endpoint) == targetOn) {
-        clearChildPending(endpoint)
-        return
-    }
-
-    Map retryCounts = getMapState("childRetryCounts")
-    Integer retries = (retryCounts["${endpoint}"] ?: 0) as Integer
-    if (retries >= childVerifyMaxRetries()) {
-        log.warn "Child endpoint ${endpoint} did not reach ${target} after retries."
-        clearChildPending(endpoint)
-        return
-    }
-
-    retryCounts["${endpoint}"] = retries + 1
-    putMapState("childRetryCounts", retryCounts)
-
-    short setValue = (short) (targetOn ? 0xFF : 0x00)
-    sendCommands([
-        encap(zwave.basicV1.basicSet(value: setValue), endpoint),
-        encap(zwave.switchBinaryV1.switchBinaryGet(), endpoint)
-    ], 200)
-    runIn(1, "verifyChildEndpoint", [data: [ep: endpoint, target: target, token: token]])
 }
 
 def setDefaultAssociations() {

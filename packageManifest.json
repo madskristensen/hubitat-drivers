@@ -57,7 +57,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/minoston-mp24z/minoston-mp24z.groovy",
       "required": false,
-      "version": "1.0.5"
+      "version": "1.0.7"
     },
     {
       "id": "71f1eb74-4302-4a96-9c4d-20391936bf94",
