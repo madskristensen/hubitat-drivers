@@ -2,12 +2,13 @@
  * Climate Advisor Device
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.3.3
+ * Version:   0.3.4
  *
  * House-wide aggregate child driver for the Climate Advisor app (one device per installation).
  * Per-zone data exposed via zoneStatuses JSON attribute and indexed flat attributes zone1..zone10.
  *
  * Changelog:
+ *   0.3.4 — 2026-05-23 — Replace idle "all clear" with contextual weather/AQI dashboard line
  *   0.3.3 — 2026-05-23 — Free cooling opportunity evaluator: notify when outside cooler than inside and AC would otherwise run
  *   0.3.2 — 2026-05-23 — Set isComponent: true on child device; provides ownership metadata and auto-cleanup on app uninstall; device appears in Devices list AND under the app in App Details (same platform behavior as Groups and Scenes)
  *   0.3.1 — 2026-05-23 — Remove redundant aqiAttribute input — capability.airQuality standardizes attribute as airQualityIndex.
@@ -20,7 +21,7 @@
 
 import groovy.transform.Field
 
-@Field static final String DRIVER_VERSION = "0.3.3"
+@Field static final String DRIVER_VERSION = "0.3.4"
 
 metadata {
     definition(

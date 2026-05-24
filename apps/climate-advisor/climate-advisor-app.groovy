@@ -2,9 +2,10 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.3.3
+ * Version:   0.3.4
  *
  * Changelog:
+ *   0.3.4 — 2026-05-23 — Replace idle "all clear" with contextual weather/AQI dashboard line
  *   0.3.3 — 2026-05-23 — Free cooling opportunity evaluator: notify when outside cooler than inside and AC would otherwise run
  *   0.3.2 — 2026-05-23 — Set isComponent: true on child device; provides ownership metadata and auto-cleanup on app uninstall; device appears in Devices list AND under the app in App Details (same platform behavior as Groups and Scenes)
  *   0.3.1 — 2026-05-23 — Remove redundant aqiAttribute input — capability.airQuality standardizes attribute as airQualityIndex.
@@ -18,7 +19,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.3.3"
+@Field static final String  APP_VERSION        = "0.3.4"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -381,10 +382,10 @@ def evaluateAll() {
 
         int    aggSeverity     = allMessages ? allMessages.collect { it.severity as Integer }.max() : 0
         String aggSeverityText = severityText(aggSeverity)
-        String aggLatest       = allMessages ? allMessages[0].text : "All clear — no climate issues detected"
+        String aggLatest       = allMessages ? allMessages[0].text : buildIdleStatus(outdoorTemp, rainDetected, houseAqi)
         int    alertCount      = allMessages.count { (it.severity as Integer) >= 1 }
         int    totalOpenContacts = zoneResults.values().sum { (it.openContactCount ?: 0) as Integer } ?: 0
-        String houseStatus     = alertCount > 0 ? "${alertCount} active alert${alertCount > 1 ? 's' : ''}" : "House — all clear"
+        String houseStatus     = alertCount > 0 ? "${alertCount} active alert${alertCount > 1 ? 's' : ''}" : "House comfortable"
         String aggJson         = JsonOutput.toJson(allMessages)
 
         def aggChild = lookupChild()
@@ -873,4 +874,82 @@ private void logInfo(String msg)  { if (settings.txtEnable != false) { log.info 
 def logsOff() {
     log.info "Debug logging disabled"
     app.updateSetting("logEnable", [value: false, type: "bool"])
+}
+
+// ── Idle ambient status ───────────────────────────────────────────────────────
+// Called when no advisory messages are active.
+// Builds "☀️ Sunny · 72°F · AQI 38 (good) · House comfortable" for dashboard tiles.
+// Every segment is optional — gracefully omitted when data is unavailable.
+
+private String buildIdleStatus(BigDecimal outdoorTemp, boolean rainDetected, BigDecimal houseAqi) {
+    List<String> parts = []
+
+    // Weather emoji + condition word
+    String conditionRaw = null
+    if (settings.weatherDevice) {
+        try {
+            String attr = (settings.weatherAttribute ?: "weather") as String
+            conditionRaw = settings.weatherDevice.currentValue(attr) as String
+        } catch (Exception e) { /* skip — device not ready */ }
+    }
+
+    if (conditionRaw || rainDetected) {
+        boolean isNight = isNighttime()
+        String emoji
+        String word
+        if (rainDetected) {
+            emoji = "🌧️"; word = "Rain"
+        } else {
+            String cond = conditionRaw.toLowerCase()
+            if      (cond.contains("snow") || cond.contains("sleet") || cond.contains("flurr"))                { emoji = "🌨️"; word = "Snow"          }
+            else if (cond.contains("thunder") || cond.contains("storm"))                                        { emoji = "⛈️";  word = "Stormy"        }
+            else if (cond.contains("fog") || cond.contains("mist") || cond.contains("haze"))                   { emoji = "🌫️"; word = "Foggy"          }
+            else if (cond.contains("partly") || cond.contains("partial") ||
+                     cond.contains("mostly cloud") || cond.contains("mostly sunny"))                            { emoji = "⛅"; word = "Partly cloudy"   }
+            else if (cond.contains("cloud") || cond.contains("overcast"))                                       { emoji = "☁️";  word = "Cloudy"         }
+            else if (cond.contains("clear") || cond.contains("sunny") ||
+                     cond.contains("fair") || cond.contains("bright"))                                          { emoji = isNight ? "🌙" : "☀️"
+                                                                                                                  word = isNight ? "Clear"  : "Sunny"   }
+            else {
+                // Unknown condition: show raw string with a generic day/night emoji
+                emoji = isNight ? "🌙" : "🌤️"
+                word  = conditionRaw.capitalize()
+            }
+        }
+        parts << "${emoji} ${word}"
+    }
+
+    // Outdoor temperature — integer display ("72°F")
+    if (outdoorTemp != null) {
+        parts << "${outdoorTemp.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()}°F"
+    }
+
+    // AQI value + EPA category (omitted entirely when no AQI device configured)
+    if (houseAqi != null) {
+        int aqi = houseAqi.toInteger()
+        String cat = aqiCategory(aqi)
+        parts << "AQI ${aqi}${cat ? ' (' + cat + ')' : ''}"
+    }
+
+    parts << "House comfortable"
+    return parts.join(" \u00B7 ")  // middle dot separator: " · "
+}
+
+private boolean isNighttime() {
+    try {
+        Long rise = location.sunrise?.time
+        Long set  = location.sunset?.time
+        Long nowT = now()
+        if (rise != null && set != null) { return nowT < rise || nowT > set }
+    } catch (Exception e) { /* graceful skip if location data unavailable */ }
+    return false
+}
+
+private String aqiCategory(int aqi) {
+    if (aqi <= 50)  { return "good" }
+    if (aqi <= 100) { return "moderate" }
+    if (aqi <= 150) { return "sensitive groups" }
+    if (aqi <= 200) { return "unhealthy" }
+    if (aqi <= 300) { return "very unhealthy" }
+    return "hazardous"
 }
