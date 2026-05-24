@@ -2,8 +2,8 @@
   "packageName": "Mads Kristensen — Hubitat Drivers",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
-  "dateReleased": "2026-05-22",
-  "version": "1.2.17",
+  "dateReleased": "2026-05-23",
+  "version": "1.2.18",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/README.md",
   "drivers": [
@@ -49,7 +49,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/fully-kiosk/fully-kiosk.groovy",
       "required": false,
-      "version": "0.5.0"
+      "version": "0.6.1"
     },
     {
       "id": "beccce18-31db-4fc3-8bdd-4fe5958a3b40",

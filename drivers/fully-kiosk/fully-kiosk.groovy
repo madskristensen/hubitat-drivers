@@ -10,7 +10,8 @@
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
  *  Changelog:
- *    0.6.0 — 2026-05-21 — PERF: Wrapped parse() events (switch/battery/volume) in emitIfChanged to prevent duplicate event spam from device pushes; motion/acceleration now use emitIfChanged; configurable polling interval (1m/5m/15m/30m, default 5m); parse deduplication (5s window); fixed motion/acceleration scheduling race condition; lazy logging evaluation to reduce CPU; fixed setLevel parameter validation; URL-encode all key parameters; explicit null checks in all async callbacks.
+ *    0.6.1 — 2026-05-23 — setLevel(1) and setLevel(2) now pass through as raw FKB brightness values (1/255, 2/255) so users can reach FKB's true minimum brightness; levels 0 and 3-100 still use the 0-100→0-255 conversion as before.
+ *    0.6.0 — 2026-05-21 — Perf improvements
  *    0.5.0 — 2026-05-18 — Removed MQTT support: reverted to local REST polling after broker compatibility issues; cleaner, simpler, more reliable.
  *    0.4.2 — 2026-05-18 — Add clearOverlayMessage() command to dismiss an active overlay popup on the tablet (calls FKB's setOverlayMessage with empty text); complements setOverlayMessage(text) and deviceNotification(text) — both show, this one clears.
  *    0.4.1 — 2026-05-18 — BUG: guard NPE in beep() when toneFile preference is unset (log.warn instead of NPE); demote HTTP 408/5xx callback logging from error to warn (transient tablet unreachable); BREAKING: remove setScreenBrightness command — use setLevel(0-100) instead (SwitchLevel capability primary).
@@ -21,7 +22,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.6.0"
+@Field static final String VERSION = "0.6.1"
 
 metadata {
     definition (name: "Fully Kiosk Browser", namespace: "mads", author: "Mads Kristensen",
@@ -329,7 +330,16 @@ def setLevel(level) {
         logger(logprefix + "ERROR: level '${level}' is not numeric: ${e.message}", "error")
         return
     }
-    int fkbBrightness = Math.round(levelBD * 2.55).toInteger()
+    // Special case: levels 1 and 2 pass through as raw FKB values (1/255, 2/255)
+    // so users can reach FKB's true minimum brightness. Without this, 1→3 and 2→5
+    // after rounding, making raw 1 and 2 unreachable via setLevel.
+    int fkbBrightness
+    int levelInt = levelBD.toInteger()
+    if (levelInt == 1 || levelInt == 2) {
+        fkbBrightness = levelInt
+    } else {
+        fkbBrightness = Math.round(levelBD * 2.55).toInteger()
+    }
     fkbBrightness = Math.min(255, Math.max(0, fkbBrightness))
     def postParams = [
         uri: "http://${serverIP}:${serverPort}/?type=json&password=${serverPassword}&cmd=setStringSetting&key=screenBrightness&value=${fkbBrightness}",
