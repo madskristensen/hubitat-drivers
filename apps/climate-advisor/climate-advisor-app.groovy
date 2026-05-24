@@ -6,7 +6,7 @@
  *
  * Changelog:
  *   0.3.3 — 2026-05-23 — Free cooling opportunity evaluator: notify when outside cooler than inside and AC would otherwise run
- *   0.3.2 — 2026-05-23 — Child device now nests under app (isComponent: true) — matches Groups and Scenes pattern; cleaner Devices list
+ *   0.3.2 — 2026-05-23 — Set isComponent: true on child device; provides ownership metadata and auto-cleanup on app uninstall; device appears in Devices list AND under the app in App Details (same platform behavior as Groups and Scenes)
  *   0.3.1 — 2026-05-23 — Remove redundant aqiAttribute input — capability.airQuality standardizes attribute as airQualityIndex.
  *   0.3.0 — 2026-05-23 — Lift AQI to house-level: one global AQI device input instead of per-zone. Breaking config change (re-select your AQI device after upgrade).
  *   0.2.3 — 2026-05-23 — Add missing groovy.transform.Field import (fixes Hubitat publish failure)
