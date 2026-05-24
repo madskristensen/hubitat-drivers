@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.19
+ * Version: 0.4.21
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,8 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.21 — 2026-05-23 — Apply the v0.4.20 "don't skip while switch is off" fix to setLevel, setColor, and setColorTemperature. All three now capture the prior switch state, only short-circuit the pattern PUT when the cached value matches AND the switch was already on, and defer state.lastOnState mutation until after the request is built so the buildXRequest helpers can correctly wrap an off→on transition with /onState true. Fixes the same WebCoRE dusk turn-on no-op for level/color/CT commands.
+ *   0.4.20 — 2026-05-23 — playEffectByName / setEffect now turns the lights on when the switch is off, even if the named effect was already the active pattern. Previously the v0.4.12 "effect already active — skip PUT" optimization no-opted in this case, leaving lights dark (Mads-reported: WebCoRE dusk turn-on calling playEffectByName left lights off).
  *   0.4.19 — 2026-05-19 — remove on/off dedup guard so switch commands always send /onState (fixes stale Hubitat state causing first press to no-op)
  *   0.4.18 — 2026-05-19 — mark switch state as uncertain when /onState writes fail and bypass on/off dedup until a confirmed success/refresh (fixes stale optimistic 'on' state blocking retries)
  *   0.4.17 — 2026-05-18 — ensureSession() check before command dedup guards so an expired Cognito token always triggers re-auth instead of silent no-op (Mads-reported: control lost after inactivity until refresh)
@@ -56,7 +58,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.19"
+@Field static final String DRIVER_VERSION = "0.4.21"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -76,7 +78,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.19"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.21"
 
 metadata {
     definition(
@@ -230,23 +232,28 @@ def setLevel(level, duration = 0) {
     def rawLevel = device.currentValue("level")
     Integer currentLevel = (rawLevel != null) ? (rawLevel as Integer) : null
     boolean sessionReady = ensureSession()
+    boolean wasOn = isSwitchCurrentlyOn()
 
     infoLog "${device.displayName} level → ${clamped}"
     sendEvent(name: "level", value: clamped, unit: "%", descriptionText: "${device.displayName} level set to ${clamped}%", type: "digital")
     sendEvent(name: "switch", value: clamped > 0 ? "on" : "off", descriptionText: "${device.displayName} turned ${clamped > 0 ? 'on' : 'off'}", type: "digital")
-    state.lastOnState = clamped > 0
 
     if (clamped == 0) {
         sendCommand(action: "off")
+        state.lastOnState = false
         return
     }
 
-    if (sessionReady && currentLevel != null && currentLevel == clamped) {
-        debugLog "setLevel: already ${clamped} — skipping pattern PUT"
+    if (sessionReady && wasOn && currentLevel != null && currentLevel == clamped) {
+        state.lastOnState = true
+        debugLog "setLevel: already ${clamped} and switch on — skipping pattern PUT"
         return
     }
 
+    // Send the request BEFORE flipping state.lastOnState so buildLevelRequest can
+    // wrap the PUT with /onState true when the switch was off.
     sendCommand(action: "setLevel", level: clamped)
+    state.lastOnState = true
 }
 
 // ---------------------------------------------------------------------------
@@ -263,31 +270,36 @@ def setColor(colorMap) {
     def curLevel = device.currentValue("level")
     def curMode = device.currentValue("colorMode")
     boolean sessionReady = ensureSession()
+    boolean wasOn = isSwitchCurrentlyOn()
 
     infoLog "${device.displayName} color → hue=${hue} sat=${saturation} level=${level}"
     sendEvent(name: "hue", value: hue, descriptionText: "${device.displayName} hue set to ${hue}", type: "digital")
     sendEvent(name: "saturation", value: saturation, descriptionText: "${device.displayName} saturation set to ${saturation}", type: "digital")
     sendEvent(name: "level", value: level, unit: "%", descriptionText: "${device.displayName} level set to ${level}%", type: "digital")
     sendEvent(name: "switch", value: level > 0 ? "on" : "off", descriptionText: "${device.displayName} turned ${level > 0 ? 'on' : 'off'}", type: "digital")
-    state.lastOnState = level > 0
     clearCurrentEffectIndex()
     updateColorMode(COLOR_MODE_RGB)
 
     if (level == 0) {
         sendCommand(action: "off")
+        state.lastOnState = false
         return
     }
 
-    // G-5: only skip if already in RGB mode and all three components match
-    if (sessionReady && curMode == "RGB" && curHue != null && curSat != null && curLevel != null
+    // G-5: only skip if switch already on, already in RGB mode, and all three components match
+    if (sessionReady && wasOn && curMode == "RGB" && curHue != null && curSat != null && curLevel != null
             && (curHue as Integer) == hue
             && (curSat as Integer) == saturation
             && (curLevel as Integer) == level) {
-        debugLog "setColor: H=${hue}/S=${saturation}/L=${level} already active — skipping pattern PUT"
+        state.lastOnState = true
+        debugLog "setColor: H=${hue}/S=${saturation}/L=${level} already active and switch on — skipping pattern PUT"
         return
     }
 
+    // Send the request BEFORE flipping state.lastOnState so buildColorRequest can
+    // wrap the PUT with /onState true when the switch was off.
     sendCommand(action: "setColor", color: [hue: hue, saturation: saturation, level: level])
+    state.lastOnState = true
 }
 
 def setHue(hue) {
@@ -321,6 +333,7 @@ def setColorTemperature(colorTemperature, level = null, transitionTime = null) {
     def rawTemp = device.currentValue("colorTemperature")
     Integer currentTemp = (rawTemp != null) ? (rawTemp as Integer) : null
     boolean sessionReady = ensureSession()
+    boolean wasOn = isSwitchCurrentlyOn()
 
     warnColorTemperatureFallback()
     infoLog "${device.displayName} color temperature → ${kelvin}K level=${targetLevel} (RGB fallback)"
@@ -330,22 +343,26 @@ def setColorTemperature(colorTemperature, level = null, transitionTime = null) {
     sendEvent(name: "saturation", value: hs.saturation, descriptionText: "${device.displayName} saturation set to ${hs.saturation}", type: "digital")
     sendEvent(name: "level", value: targetLevel, unit: "%", descriptionText: "${device.displayName} level set to ${targetLevel}%", type: "digital")
     sendEvent(name: "switch", value: targetLevel > 0 ? "on" : "off", descriptionText: "${device.displayName} turned ${targetLevel > 0 ? 'on' : 'off'}", type: "digital")
-    state.lastOnState = targetLevel > 0
     clearCurrentEffectIndex()
     updateColorMode(COLOR_MODE_CT)
 
     if (targetLevel == 0) {
         sendCommand(action: "off")
+        state.lastOnState = false
         return
     }
 
-    // G-6: only skip if already in CT mode and temperature matches
-    if (sessionReady && curMode == "CT" && currentTemp != null && currentTemp == kelvin) {
-        debugLog "setColorTemperature: already ${kelvin}K in CT mode — skipping pattern PUT"
+    // G-6: only skip if switch already on, already in CT mode, and temperature matches
+    if (sessionReady && wasOn && curMode == "CT" && currentTemp != null && currentTemp == kelvin) {
+        state.lastOnState = true
+        debugLog "setColorTemperature: already ${kelvin}K in CT mode and switch on — skipping pattern PUT"
         return
     }
 
+    // Build/execute the request BEFORE flipping state.lastOnState so
+    // buildColorTemperatureRequest can wrap the PUT with /onState true when the switch was off.
     executeOrQueueRequest(buildColorTemperatureRequest(kelvin, targetLevel))
+    state.lastOnState = true
 }
 
 def setEffect(BigDecimal effectNumber) {
@@ -1041,21 +1058,28 @@ private void activateEffectWithPattern(String patternId, String resolvedName, Ma
         pattern.name = resolvedName
     }
 
+    boolean wasOn = isSwitchCurrentlyOn()
     Integer effectIndex = effectIndexForPatternId(patternId)
     boolean sessionReady = ensureSession()
     infoLog "${device.displayName} effect → ${displayEffectName(resolvedName)}"
     rememberPattern(pattern)
     sendEvent(name: "level", value: wireBrightnessToLevel(safeInt(pattern.brightness, 255)), unit: "%", descriptionText: "${device.displayName} level set to ${wireBrightnessToLevel(safeInt(pattern.brightness, 255))}%", type: "digital")
-    state.lastOnState = true
-    sendEvent(name: "switch", value: "on", descriptionText: "${device.displayName} turned on", type: "digital")
     updateCurrentEffectIndex(effectIndex)
     updateColorMode(COLOR_MODE_EFFECTS)
     String currentEffect = safeString(device.currentValue("effectName"))
-    if (sessionReady && resolvedName && currentEffect == resolvedName) {
-        debugLog "setEffect: '${resolvedName}' already active — skipping pattern PUT"
+    if (sessionReady && wasOn && resolvedName && currentEffect == resolvedName) {
+        state.lastOnState = true
+        sendEvent(name: "switch", value: "on", descriptionText: "${device.displayName} turned on", type: "digital")
+        debugLog "setEffect: '${resolvedName}' already active and switch on — skipping pattern PUT"
         return
     }
-    executeOrQueueRequest(buildEffectRequest(pattern, resolvedName))
+    // Build the request before flipping state.lastOnState so buildEffectRequest's
+    // isSwitchCurrentlyOn() check can correctly wrap an off→on transition when the
+    // switch was off (e.g. WebCoRE calling playEffectByName on a dark-time turn-on).
+    Map request = buildEffectRequest(pattern, resolvedName)
+    state.lastOnState = true
+    sendEvent(name: "switch", value: "on", descriptionText: "${device.displayName} turned on", type: "digital")
+    executeOrQueueRequest(request)
 }
 
 private void cycleEffect(Integer direction) {
