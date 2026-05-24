@@ -2,9 +2,10 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.3.1
+ * Version:   0.3.2
  *
  * Changelog:
+ *   0.3.2 — 2026-05-23 — Child device now nests under app (isComponent: true) — matches Groups and Scenes pattern; cleaner Devices list
  *   0.3.1 — 2026-05-23 — Remove redundant aqiAttribute input — capability.airQuality standardizes attribute as airQualityIndex.
  *   0.3.0 — 2026-05-23 — Lift AQI to house-level: one global AQI device input instead of per-zone. Breaking config change (re-select your AQI device after upgrade).
  *   0.2.3 — 2026-05-23 — Add missing groovy.transform.Field import (fixes Hubitat publish failure)
@@ -16,7 +17,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.3.1"
+@Field static final String  APP_VERSION        = "0.3.2"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -97,7 +98,7 @@ def globalPage() {
                 title: "Create dashboard child device (one house-wide device for SharpTools / Hubitat Dashboard)",
                 defaultValue: false, required: false, submitOnChange: true
             if (settings.createDashboardDevices) {
-                paragraph "A single 'Climate Advisor Device' will be created and kept in sync with zone data."
+                paragraph "A single 'Climate Advisor Device' will be created as a component device nested under this app (visible in Apps, not in the main Devices list)."
             }
         }
         section("Logging") {
@@ -197,7 +198,7 @@ private void reconcileChildren() {
     boolean want = settings.createDashboardDevices == true
     if (want && !getChildDevice(dni)) {
         String label = app.label ?: "Climate Advisor"
-        addChildDevice(CHILD_NS, CHILD_DRIVER, dni, [name: label, label: label, isComponent: false])
+        addChildDevice(CHILD_NS, CHILD_DRIVER, dni, [name: label, label: label, isComponent: true])
         logInfo "Created dashboard child: ${dni}"
     } else if (!want && getChildDevice(dni)) {
         deleteChildDevice(dni)

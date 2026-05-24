@@ -25,7 +25,7 @@ Climate Advisor monitors indoor and outdoor temperatures, outdoor trend (rising 
 
 One parent app + one optional child device (house-wide aggregate):
 
-- **Single child device** — created only when "Create dashboard child device" is enabled.
+- **Single child device** — created only when "Create dashboard child device" is enabled. The device is a **component device** nested under the app (visible in Apps, not in the main Devices list — same pattern as Hubitat's Groups and Scenes app).
 - Per-zone data is exposed on the single child via `zoneStatuses` JSON and indexed flat attributes (`zone1Name`, `zone1Severity`, `zone1Message` … `zone10Name`).
 - Zones are configuration only — no per-zone child devices are created.
 
