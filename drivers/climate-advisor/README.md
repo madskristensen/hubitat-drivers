@@ -18,7 +18,7 @@ Virtual child driver for the [Climate Advisor](../apps/climate-advisor/README.md
 ### Outdoor trend
 | Attribute | Type | Notes |
 |---|---|---|
-| `outdoorTrend` | ENUM | rising / falling / steady / unknown |
+| `outdoorTrend` | ENUM | heating up / cooling down / steady / unknown |
 | `outdoorTempSlope10min` | NUMBER | °F change per 10 min |
 
 ### Counters
@@ -42,6 +42,12 @@ Virtual child driver for the [Climate Advisor](../apps/climate-advisor/README.md
 - `deviceNotification(text)` — passive sink; updates `latestMessage` (Rule Machine integration)
 - `clearMessages()` — resets severity to 0 / clears message list / clears parent activeMessages state
 - `acknowledge()` — sets `acknowledged = true`; auto-resets to `false` when new or escalating alerts arrive
+- `pushMessage(key, severity, text)` — push an external message into the Climate Advisor pipeline. `key` is a unique identifier (e.g., piston name); reusing the same key replaces the previous message. `severity` is 1=info, 2=warning, 3=danger. Pass empty/null `text` to clear.
+- `clearMessage(key)` — remove the external message previously pushed under `key`.
+
+### External messages from Rule Machine / webCoRE
+
+Any automation can publish a message to Climate Advisor's aggregate `latestMessage` / `messages` / `severity` pipeline by calling `pushMessage` on this device. Example webCoRE piston: `pushMessage("sump-pump", 3, "Sump pump high water")` to raise a danger alert, then later `pushMessage("sump-pump", 3, "")` (or `clearMessage("sump-pump")`) to clear it. External messages persist across evaluations until explicitly cleared.
 
 ## Notes
 

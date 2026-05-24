@@ -2,9 +2,10 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.3.4
+ * Version:   0.4.0
  *
  * Changelog:
+ *   0.4.0 — 2026-05-24 — External message API (pushMessage/clearMessage on child device for Rule Machine + webCoRE); larger trend sample retention + staleness guard fixes sparse-reporting outdoor sensors; rename trend states to "heating up"/"cooling down"
  *   0.3.4 — 2026-05-23 — Replace idle "all clear" with contextual weather/AQI dashboard line
  *   0.3.3 — 2026-05-23 — Free cooling opportunity evaluator: notify when outside cooler than inside and AC would otherwise run
  *   0.3.2 — 2026-05-23 — Set isComponent: true on child device; provides ownership metadata and auto-cleanup on app uninstall; device appears in Devices list AND under the app in App Details (same platform behavior as Groups and Scenes)
@@ -19,7 +20,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.3.4"
+@Field static final String  APP_VERSION        = "0.4.0"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -167,6 +168,7 @@ def installed() {
     state.indoorSamples      = [:]
     state.lastNotificationAt = [:]
     state.activeMessages     = [:]
+    state.externalMessages   = [:]
     initialize()
 }
 
@@ -248,7 +250,12 @@ def outdoorTempHandler(evt) {
         BigDecimal t = evt.value as BigDecimal
         Long ts = now()
         List samples = (state.outdoorSamples ?: []) + [[now: ts, t: t]]
-        Long cutoff = ts - (((settings.trendWindowMinutes ?: 30) as Integer) + 5) * 60 * 1000L
+        Integer windowMin = (settings.trendWindowMinutes ?: 30) as Integer
+        // Retain at least 3× the trend window so sparsely-reporting sensors still produce
+        // a usable buffer. Many outdoor sensors only report on threshold crossings,
+        // which can leave 30+ min gaps between events.
+        Long retainMin = Math.max(windowMin * 3L + 5L, 90L)
+        Long cutoff = ts - retainMin * 60 * 1000L
         state.outdoorSamples = samples.findAll { it.now >= cutoff }
     } catch (Exception e) {
         log.warn "outdoorTempHandler sample error: ${e.message}"
@@ -282,22 +289,27 @@ def debounceHandler(evt) {
 // ── Trend computation (lazy — only called from evaluateAll) ───────────────────
 
 Map computeTrend(List samples, Integer windowMinutes, BigDecimal risingThreshold, BigDecimal fallingThreshold) {
-    Long newestTs = now()
-    Long cutoff = newestTs - windowMinutes * 60 * 1000L
-    List window = (samples ?: []).findAll { it.now >= cutoff }.sort { it.now }
+    Long nowTs = now()
+    List window = (samples ?: []).sort { it.now }
 
     if (window.size() < 2) { return [trend: "unknown", slope10min: null] }
 
     def oldest = window.first()
     def newest = window.last()
+
+    // Staleness guard: if the most recent sample is older than 2× the trend window,
+    // the sensor has gone quiet and any computed slope is unreliable.
+    BigDecimal ageMinutes = (nowTs - newest.now) / 60000G
+    if (ageMinutes > (windowMinutes * 2G)) { return [trend: "unknown", slope10min: null] }
+
     BigDecimal spanMinutes = (newest.now - oldest.now) / 60000G
     if (spanMinutes < 5G) { return [trend: "unknown", slope10min: null] }
 
     BigDecimal slopePerMinute = ((newest.t as BigDecimal) - (oldest.t as BigDecimal)) / spanMinutes
     BigDecimal slope10min = slopePerMinute * 10G
 
-    String trend = slope10min > risingThreshold ? "rising" :
-                   slope10min < fallingThreshold ? "falling" :
+    String trend = slope10min > risingThreshold ? "heating up" :
+                   slope10min < fallingThreshold ? "cooling down" :
                    "steady"
     return [trend: trend, slope10min: slope10min]
 }
@@ -313,7 +325,9 @@ private void appendIndoorSample(String zoneId, BigDecimal avgTemp, Long ts = nul
     Map indoorSamples = (state.indoorSamples ?: [:]) as Map
     List zoneSamples  = (indoorSamples[zoneId] ?: []) as List
     zoneSamples = zoneSamples + [[now: sampleTs, t: avgTemp]]
-    Long cutoff = sampleTs - (((settings.trendWindowMinutes ?: 30) as Integer) + 5) * 60 * 1000L
+    Integer windowMin = (settings.trendWindowMinutes ?: 30) as Integer
+    Long retainMin = Math.max(windowMin * 3L + 5L, 90L)
+    Long cutoff = sampleTs - retainMin * 60 * 1000L
     indoorSamples[zoneId] = zoneSamples.findAll { it.now >= cutoff }
     state.indoorSamples = indoorSamples
 }
@@ -373,6 +387,26 @@ def evaluateAll() {
         allMessages.addAll(rainResolved)
 
         state.activeMessages = newActive
+
+        // External messages pushed by Rule Machine / webCoRE pistons / other automations.
+        // These live in state.externalMessages until explicitly cleared.
+        Map externalMessages = (state.externalMessages ?: [:]) as Map
+        externalMessages.each { String key, def raw ->
+            Map msg = raw as Map
+            String text = msg?.text as String
+            if (!text) { return }
+            int sev = ((msg.severity ?: 1) as Integer)
+            allMessages << [
+                id          : "ext-${key}".toString(),
+                severity    : sev,
+                severityText: severityText(sev),
+                source      : "External",
+                family      : "external",
+                text        : text,
+                zoneId      : null,
+                ts          : (msg.ts as Long) ?: nowMs
+            ]
+        }
 
         // Sort: severity desc, ts desc; cap
         allMessages = allMessages.sort { a, b ->
@@ -498,7 +532,7 @@ private Map evaluateCoolingPreAlert(Map zone, BigDecimal indoorTemp, BigDecimal 
                                      Map outdoorTrend, boolean windowGatePasses, String noSensorNote) {
     if (!windowGatePasses)              { return null }
     if (outdoorTrend.trend == "unknown") { return null }
-    if (outdoorTrend.trend != "rising")  { return null }
+    if (outdoorTrend.trend != "heating up")  { return null }
     if (outdoorTemp == null || outdoorTemp <= indoorTemp) { return null }
 
     List qualifying = []
@@ -513,7 +547,7 @@ private Map evaluateCoolingPreAlert(Map zone, BigDecimal indoorTemp, BigDecimal 
     if (qualifying.isEmpty()) { return null }
 
     Map best = qualifying.min { Math.abs((it.setpoint as BigDecimal) - indoorTemp) }
-    String text = "${zone.name} ${indoorTemp}°F approaching ${best.setpoint}°F cool setpoint, outside ${outdoorTemp}°F rising \u2014 close windows${noSensorNote}"
+    String text = "${zone.name} ${indoorTemp}°F approaching ${best.setpoint}°F cool setpoint, outside ${outdoorTemp}°F heating up \u2014 close windows${noSensorNote}"
     return buildCandidate("zone-${zone.id}-cooling-prealert", 2, zone.name, "coolingPreAlert", text, zone.id as String)
 }
 
@@ -521,7 +555,7 @@ private Map evaluateHeatingPreAlert(Map zone, BigDecimal indoorTemp, BigDecimal 
                                      Map outdoorTrend, boolean windowGatePasses, String noSensorNote) {
     if (!windowGatePasses)               { return null }
     if (outdoorTrend.trend == "unknown")  { return null }
-    if (outdoorTrend.trend != "falling")  { return null }
+    if (outdoorTrend.trend != "cooling down")  { return null }
     if (outdoorTemp == null || outdoorTemp >= indoorTemp) { return null }
 
     List qualifying = []
@@ -536,7 +570,7 @@ private Map evaluateHeatingPreAlert(Map zone, BigDecimal indoorTemp, BigDecimal 
     if (qualifying.isEmpty()) { return null }
 
     Map best = qualifying.min { Math.abs((it.setpoint as BigDecimal) - indoorTemp) }
-    String text = "${zone.name} ${indoorTemp}°F approaching ${best.setpoint}°F heat setpoint, outside ${outdoorTemp}°F falling \u2014 close windows${noSensorNote}"
+    String text = "${zone.name} ${indoorTemp}°F approaching ${best.setpoint}°F heat setpoint, outside ${outdoorTemp}°F cooling down \u2014 close windows${noSensorNote}"
     return buildCandidate("zone-${zone.id}-heating-prealert", 2, zone.name, "heatingPreAlert", text, zone.id as String)
 }
 
@@ -624,8 +658,8 @@ private Map evaluateComfortOpen(Map zone, BigDecimal indoorTemp, BigDecimal outd
     }
     if (qualifying.isEmpty()) { return null }
 
-    // Don't suggest if outdoor temp is rising toward the cooling band
-    if (outdoorTrend.trend == "rising") { return null }
+    // Don't suggest if outdoor temp is heating up toward the cooling band
+    if (outdoorTrend.trend == "heating up") { return null }
 
     String text = "${zone.name} outdoor ${outdoorTemp}°F is comfortable \u2014 consider opening windows for fresh air"
     return buildCandidate("zone-${zone.id}-comfort-open", 1, zone.name, "comfortOpen", text, zone.id as String)
@@ -643,7 +677,7 @@ private Map evaluateFreeCooling(Map zone, BigDecimal indoorTemp, BigDecimal outd
     if (!contactsConfigured)            { return null }  // no contacts to open
     if (!openContacts.isEmpty())        { return null }  // windows already open — suggestion redundant
     if (outdoorTemp >= indoorTemp)      { return null }  // outdoor not cooler than indoor
-    if (outdoorTrend.trend == "rising") { return null }  // temp trending up — opportunity closing
+    if (outdoorTrend.trend == "heating up") { return null }  // temp trending up — opportunity closing
 
     Integer warnThreshold = (settings.aqiWarnThreshold ?: AQI_WARN_DEFAULT) as Integer
     if (aqiVal != null && aqiVal >= warnThreshold) { return null }
@@ -707,8 +741,41 @@ private void pushZoneAttributes(def aggChild, List zones, Map zoneResults) {
 
 def clearAllMessages() {
     logInfo "clearAllMessages()"
-    state.activeMessages = [:]
+    state.activeMessages   = [:]
+    state.externalMessages = [:]
     runIn(DEBOUNCE_SECONDS, "evaluateAll", [overwrite: true])
+}
+
+// External message API — callable from the child device, which exposes
+// pushMessage(key, severity, text) and clearMessage(key) commands for Rule
+// Machine, webCoRE pistons, and other automations. Sending null/empty text via
+// pushMessage clears the entry for that key.
+def pushExternalMessage(String key, def severity, String text) {
+    if (!key) { log.warn "pushExternalMessage: key required"; return }
+    if (text == null || (text instanceof String && text.trim().isEmpty())) {
+        clearExternalMessage(key)
+        return
+    }
+    Integer sev = ((severity ?: 1) as Integer)
+    if (sev < 0) { sev = 0 }
+    if (sev > 3) { sev = 3 }
+    Map external = (state.externalMessages ?: [:]) as Map
+    Map prev = external[key] as Map
+    Long ts = (prev && prev.text == text && (prev.severity as Integer) == sev) ? (prev.ts as Long) : now()
+    external[key] = [severity: sev, text: text, ts: ts]
+    state.externalMessages = external
+    logDebug "pushExternalMessage(${key}, sev=${sev}): ${text}"
+    runIn(DEBOUNCE_SECONDS, "evaluateAll", [overwrite: true])
+}
+
+def clearExternalMessage(String key) {
+    if (!key) { log.warn "clearExternalMessage: key required"; return }
+    Map external = (state.externalMessages ?: [:]) as Map
+    if (external.remove(key) != null) {
+        state.externalMessages = external
+        logDebug "clearExternalMessage(${key})"
+        runIn(DEBOUNCE_SECONDS, "evaluateAll", [overwrite: true])
+    }
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────────

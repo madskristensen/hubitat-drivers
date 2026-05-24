@@ -8,7 +8,7 @@ Climate Advisor **never sends commands** to thermostats, contacts, or any actuat
 
 ## What it does
 
-Climate Advisor monitors indoor and outdoor temperatures, outdoor trend (rising / falling / steady), window/door contacts, air quality, and a weather device to produce actionable alerts:
+Climate Advisor monitors indoor and outdoor temperatures, outdoor trend (heating up / cooling down / steady), window/door contacts, air quality, and a weather device to produce actionable alerts:
 
 | Alert family | Severity | Trigger |
 |---|---|---|
@@ -18,8 +18,8 @@ Climate Advisor monitors indoor and outdoor temperatures, outdoor trend (rising 
 ## Idle dashboard line
 
 When no advisories are active, the `latestMessage` attribute shows a contextual one-line ambient status instead of a plain "all clear." Format: `☀️ Sunny · 72°F · AQI 38 (good) · House comfortable`. Segments are omitted gracefully when data is unavailable (no weather device → temp only; no AQI device → AQI omitted). Weather emoji switches to 🌙 after sunset.
-| Cooling pre-alert | WARNING (2) | Indoor ≥ (cooling SP − offset) AND outdoor > indoor AND outdoor rising |
-| Heating pre-alert | WARNING (2) | Indoor ≤ (heating SP + offset) AND outdoor < indoor AND outdoor falling |
+| Cooling pre-alert | WARNING (2) | Indoor ≥ (cooling SP − offset) AND outdoor > indoor AND outdoor heating up |
+| Heating pre-alert | WARNING (2) | Indoor ≤ (heating SP + offset) AND outdoor < indoor AND outdoor cooling down |
 | AQI moderate | WARNING (2) | AQI > warn threshold (default 51) |
 | AQI hazardous | DANGER (3) | AQI > danger threshold (default 101) |
 | Rain + windows open | DANGER (3) | Weather attribute contains rain keyword AND any contact open |
@@ -56,7 +56,7 @@ One parent app + one optional child device (house-wide aggregate):
 - **Weather device** + attribute + rain keyword (optional)
 - **Air quality sensor** (optional — house-wide; single device for the whole house)
 - **AQI warning threshold** (default 51), **AQI danger threshold** (default 101)
-- **Trend window** (default 30 min), rising/falling thresholds (default ±0.2°F/10 min)
+- **Trend window** (default 30 min), heating up / cooling down thresholds (default ±0.2°F/10 min)
 - **Indoor trend enabled** (default true)
 - **Create dashboard child device** (default false — opt in for SharpTools/dashboard users)
 

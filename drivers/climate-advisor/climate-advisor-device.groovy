@@ -2,12 +2,13 @@
  * Climate Advisor Device
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.3.4
+ * Version:   0.4.0
  *
  * House-wide aggregate child driver for the Climate Advisor app (one device per installation).
  * Per-zone data exposed via zoneStatuses JSON attribute and indexed flat attributes zone1..zone10.
  *
  * Changelog:
+ *   0.4.0 — 2026-05-24 — External message API: pushMessage(key,severity,text) and clearMessage(key) commands for Rule Machine + webCoRE pistons; outdoorTrend ENUM renamed to heating up / cooling down
  *   0.3.4 — 2026-05-23 — Replace idle "all clear" with contextual weather/AQI dashboard line
  *   0.3.3 — 2026-05-23 — Free cooling opportunity evaluator: notify when outside cooler than inside and AC would otherwise run
  *   0.3.2 — 2026-05-23 — Set isComponent: true on child device; provides ownership metadata and auto-cleanup on app uninstall; device appears in Devices list AND under the app in App Details (same platform behavior as Groups and Scenes)
@@ -21,7 +22,7 @@
 
 import groovy.transform.Field
 
-@Field static final String DRIVER_VERSION = "0.3.4"
+@Field static final String DRIVER_VERSION = "0.4.0"
 
 metadata {
     definition(
@@ -45,7 +46,7 @@ metadata {
         attribute "acknowledged",          "ENUM",   ["false", "true"]
 
         // ── Outdoor trend ─────────────────────────────────────────────────────
-        attribute "outdoorTrend",          "ENUM",   ["rising", "falling", "steady", "unknown"]
+        attribute "outdoorTrend",          "ENUM",   ["heating up", "cooling down", "steady", "unknown"]
         attribute "outdoorTempSlope10min", "NUMBER"
 
         // ── Aggregate counters ────────────────────────────────────────────────
@@ -92,6 +93,14 @@ metadata {
 
         command "clearMessages"
         command "acknowledge"
+        command "pushMessage", [
+            [name: "key*",      type: "STRING", description: "Unique key/id for this external message (e.g., piston name). Re-using the key replaces the previous message."],
+            [name: "severity*", type: "NUMBER", description: "1=info, 2=warning, 3=danger"],
+            [name: "text",      type: "STRING", description: "Message text. Empty or omitted clears the message for this key."]
+        ]
+        command "clearMessage", [
+            [name: "key*", type: "STRING", description: "Key/id of the external message to clear"]
+        ]
     }
 
     preferences {
@@ -161,6 +170,27 @@ def acknowledge() {
     logInfo "acknowledge()"
     sendEvent(name: "acknowledged", value: "true")
     // acknowledged resets to "false" automatically when new/escalating alerts arrive
+}
+
+// External message API — Rule Machine / webCoRE / other automations can call
+// these commands to push messages into the Climate Advisor pipeline. Use the
+// same key when updating; pass empty/null text (or call clearMessage) to remove.
+def pushMessage(String key, BigDecimal severity, String text = null) {
+    logInfo "pushMessage(${key}, sev=${severity}): ${text ?: '(clear)'}"
+    try {
+        parent?.pushExternalMessage(key, severity, text)
+    } catch (Exception e) {
+        log.warn "pushMessage error: ${e.message}"
+    }
+}
+
+def clearMessage(String key) {
+    logInfo "clearMessage(${key})"
+    try {
+        parent?.clearExternalMessage(key)
+    } catch (Exception e) {
+        log.warn "clearMessage error: ${e.message}"
+    }
 }
 
 // ── Logging helpers ───────────────────────────────────────────────────────────
