@@ -2,12 +2,13 @@
  * Climate Advisor Device
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.3.0
+ * Version:   0.3.1
  *
  * House-wide aggregate child driver for the Climate Advisor app (one device per installation).
  * Per-zone data exposed via zoneStatuses JSON attribute and indexed flat attributes zone1..zone10.
  *
  * Changelog:
+ *   0.3.1 — 2026-05-23 — Remove redundant aqiAttribute input — capability.airQuality standardizes attribute as airQualityIndex.
  *   0.3.0 — 2026-05-23 — Lift AQI to house-level: one global AQI device input instead of per-zone. Breaking config change (re-select your AQI device after upgrade).
  *   0.2.3 — 2026-05-23 — Add missing groovy.transform.Field import (fixes Hubitat publish failure)
  *   0.2.2 — 2026-05-23 — Remove tempTrend legacy alias attribute (use outdoorTrend)
@@ -17,7 +18,7 @@
 
 import groovy.transform.Field
 
-@Field static final String DRIVER_VERSION = "0.3.0"
+@Field static final String DRIVER_VERSION = "0.3.1"
 
 metadata {
     definition(

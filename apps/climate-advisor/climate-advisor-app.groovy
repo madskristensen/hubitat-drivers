@@ -2,9 +2,10 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.3.0
+ * Version:   0.3.1
  *
  * Changelog:
+ *   0.3.1 — 2026-05-23 — Remove redundant aqiAttribute input — capability.airQuality standardizes attribute as airQualityIndex.
  *   0.3.0 — 2026-05-23 — Lift AQI to house-level: one global AQI device input instead of per-zone. Breaking config change (re-select your AQI device after upgrade).
  *   0.2.3 — 2026-05-23 — Add missing groovy.transform.Field import (fixes Hubitat publish failure)
  *   0.2.2 — 2026-05-23 — Remove tempTrend legacy alias attribute (use outdoorTrend)
@@ -15,7 +16,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.3.0"
+@Field static final String  APP_VERSION        = "0.3.1"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -74,8 +75,6 @@ def globalPage() {
         section("Air Quality") {
             input "aqiDevice", "capability.airQuality",
                 title: "Air quality sensor (optional — house-wide)", required: false
-            input "aqiAttribute", "string",
-                title: "AQI attribute name", defaultValue: "airQualityIndex", required: false
         }
         section("AQI Thresholds") {
             input "aqiWarnThreshold", "number",
@@ -219,8 +218,7 @@ private void subscribeAll(List zones) {
     }
 
     if (settings.aqiDevice) {
-        String aqAttr = (settings.aqiAttribute ?: "airQualityIndex") as String
-        subscribe(settings.aqiDevice, aqAttr, debounceHandler)
+        subscribe(settings.aqiDevice, "airQualityIndex", debounceHandler)
     }
 
     zones.each { zone ->
@@ -761,7 +759,7 @@ private List<Map> configuredZones() {
 private BigDecimal currentHouseAqi() {
     if (!settings.aqiDevice) { return null }
     try {
-        def raw = settings.aqiDevice.currentValue((settings.aqiAttribute ?: "airQualityIndex") as String)
+        def raw = settings.aqiDevice.currentValue("airQualityIndex")
         if (raw != null) { return raw as BigDecimal }
     } catch (Exception e) { log.warn "currentHouseAqi error: ${e.message}" }
     return null
