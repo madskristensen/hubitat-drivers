@@ -1,3 +1,50 @@
+## 2026-05-23 — Climate Advisor v0.3.3 + isComponent clarification
+
+**Deliverables:**
+- Climate Advisor v0.3.3: New `evaluateFreeCooling` evaluator for ideal ventilation scenario (outdoor cooler than indoor at setpoint)
+- isComponent behavior clarification: `isComponent: true` prevents accidental deletion/driver-change in Devices UI; does NOT hide child from Devices list (hard platform limitation)
+
+**Learnings:**
+
+### Free-cooling coverage gap (v0.3.3)
+
+When outdoor is cooler than indoor at the cooling setpoint with closed windows, no existing evaluator fires:
+- `evaluateCoolBreach` requires `outdoor > indoor` (opposite direction)
+- `evaluateComfortOpen` requires outdoor inside mid-band (not below)
+- `evaluateCoolingPreAlert` requires windows open or contacts absent (gates on `windowGatePasses = true`)
+
+**Fix:** New evaluator `evaluateFreeCooling` fires INFO when all conditions met:
+1. Outdoor cooler than indoor (optimal for ventilation)
+2. Indoor at/near cooling setpoint (would otherwise run AC)
+3. Thermostat in cool/auto mode
+4. Contacts configured AND closed (something to open)
+5. Not raining
+6. AQI below warn
+7. Trend not rising (avoid overshoot)
+
+Non-overlapping via opposite logical conditions (proved in decision entry). Mads's test case (65°F outdoor, 75°F indoor) now fires INFO instead of silence.
+
+### isComponent behavior and Hubitat platform limitations
+
+Mads questioned whether v0.3.2's `isComponent: true` worked as described. Investigation of live Hubitat docs + 2018 staff posts confirmed:
+
+**What `isComponent: true` does:**
+- Device still appears in main Devices list
+- Prevents user deletion via Devices UI ✅
+- Prevents user driver change via Devices UI ✅
+- Child shows "Parent app" in Device Info tab
+
+**What it does NOT do:**
+- Hide from Devices list (NO Hubitat SDK mechanism available for third-party apps to hide app-created children)
+- Only device-parented children get visual indentation; app-parented children never do
+- Groups and Scenes app confirms same behavior — no third-party app can hide its children from Devices list
+
+**Changelog/README corrected** to accurate wording. Feature is genuinely useful (prevents accidental deletion) — just the *marketing* description was wrong. No code change needed; wording fix only.
+
+**Decision recorded:** Mads accepted Option 1 (accept platform behavior; no architecture change). `isComponent: true` stays.
+
+---
+
 ## 2026-05-23 — Climate Advisor v2 IMPLEMENTED
 
 **Deliverables:**
