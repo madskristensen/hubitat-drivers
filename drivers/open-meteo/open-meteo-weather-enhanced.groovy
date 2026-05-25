@@ -1,7 +1,7 @@
 /**
  *  Open-Meteo Weather Enhanced
  *  Author:  Mads Kristensen
- *  Version: 0.1.3 — 2026-05-25 — Renamed to "Open-Meteo Weather Enhanced" to avoid name clash with the built-in Hubitat Open-Meteo driver
+ *  Version: 0.1.4 — 2026-05-25 — Bugfix and cleanup pass (see changelog)
  *  License: MIT
  *
  *  Free weather driver backed by https://open-meteo.com — no API key required.
@@ -14,6 +14,12 @@
  *  Source: https://github.com/madskristensen/hubitat-drivers
  *
  *  Changelog:
+ *    0.1.4 — 2026-05-25 — Fix: precipitationNextHour / precipitationProbabilityNextHour now cover the next 60 minutes
+ *                         (previously only sampled the current hour bucket).
+ *                       Fix: refresh runs immediately after install and on hub reboot (was waiting up to one poll interval).
+ *                       Fix: debug auto-off timer is now scheduled from initialize() so it works after install too.
+ *                       Cleanup: simplified safeResponseJson, removed duplicate unschedule, redundant `command "refresh"`,
+ *                       and dead parse() method.
  *    0.1.3 — 2026-05-25 — Renamed to "Open-Meteo Weather Enhanced" to avoid name clash with the built-in Hubitat Open-Meteo driver
  *    0.1.2 — 2026-05-25 — Add today's high/low temperature attributes (temperatureMax, temperatureMin)
  *    0.1.1 — 2026-05-25 — Fix: fetch 2 forecast days so next-6h precip probability stays accurate late in the day
@@ -23,7 +29,7 @@
 import groovy.transform.Field
 import groovy.json.JsonOutput
 
-@Field static final String DRIVER_VERSION = "0.1.3"
+@Field static final String DRIVER_VERSION = "0.1.4"
 @Field static final String FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
 // WMO weather interpretation codes — standard Open-Meteo descriptions
@@ -102,8 +108,6 @@ metadata {
 		// Status
 		attribute "lastUpdated", "string"
 		attribute "status", "string"
-
-		command "refresh"
 	}
 
 	preferences {
@@ -141,10 +145,6 @@ metadata {
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
-def parse(String description) {
-	if (logEnable) log.debug "Open-Meteo: parse called with '${description}' (unused)"
-}
-
 def installed() {
 	log.info "Open-Meteo Weather Enhanced ${DRIVER_VERSION} installed"
 	initialize()
@@ -152,10 +152,7 @@ def installed() {
 
 def updated() {
 	log.info "Open-Meteo Weather Enhanced ${DRIVER_VERSION} updated"
-	unschedule()
-	if (logEnable) runIn(1800, "logsOff")
 	initialize()
-	refresh()
 }
 
 def uninstalled() {
@@ -164,6 +161,7 @@ def uninstalled() {
 
 def initialize() {
 	unschedule()
+	if (logEnable) runIn(1800, "logsOff")
 	Integer interval = (pollInterval ?: "30").toInteger()
 	switch (interval) {
 		case 15: runEvery15Minutes("refresh"); break
@@ -171,6 +169,7 @@ def initialize() {
 		default: runEvery30Minutes("refresh")
 	}
 	if (txtEnable) log.info "Open-Meteo: scheduled refresh every ${interval} minutes"
+	refresh()
 }
 
 def poll() {
@@ -330,12 +329,13 @@ private void parseHourly(Map json, String tUnit, String pUnit) {
 		blob << entry
 
 		if (rel == 0) currentHourUv = entry.uv as BigDecimal
-		if (rel < 1) {
+		// "Next hour" = remainder of current hour bucket + next hour bucket, so we cover a full 60 min window from now.
+		if (rel < 2) {
 			if (entry.precip != null) precipNext1h += (entry.precip as BigDecimal)
-			if (entry.precipProb != null) probNext1hMax = Math.max(probNext1hMax ?: 0, entry.precipProb as Integer)
+			if (entry.precipProb != null) probNext1hMax = Math.max(probNext1hMax != null ? probNext1hMax : 0, entry.precipProb as Integer)
 		}
 		if (rel < 6) {
-			if (entry.precipProb != null) probNext6hMax = Math.max(probNext6hMax ?: 0, entry.precipProb as Integer)
+			if (entry.precipProb != null) probNext6hMax = Math.max(probNext6hMax != null ? probNext6hMax : 0, entry.precipProb as Integer)
 		}
 	}
 
@@ -445,10 +445,6 @@ private void setStatus(String value) {
 }
 
 private Map safeResponseJson(hubitat.scheduling.AsyncResponse resp) {
-	try {
-		if (resp?.json instanceof Map) return resp.json as Map
-	} catch (ignored) {
-	}
 	try {
 		def parsed = resp?.getJson()
 		if (parsed instanceof Map) return parsed as Map
