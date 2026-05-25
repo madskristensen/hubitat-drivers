@@ -2,7 +2,7 @@
 
 Community Hubitat Elevation drivers and apps by Mads Kristensen.
 
-**9 production-ready drivers + 2 apps** • 🌐 6 Local LAN • ☁️ 3 Cloud API • 📦 HPM Ready
+**10 production-ready drivers + 3 apps** • 🌐 6 Local LAN • ☁️ 4 Cloud API • 📦 HPM Ready
 
 ## Available Drivers
 
@@ -28,10 +28,11 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
 | -------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------- |
 | **Fully Kiosk Browser**    | Local | Tablet remote • Browser control • Motion detection • Local REST API • Screen commands | [Docs](drivers/fully-kiosk/README.md)        |
 
-### 🌍 Air Quality
+### 🌍 Air Quality & Weather
 
 | Driver                     | Type  | Key Features                                                                 | Docs                                         |
 | -------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------- |
+| **Open-Meteo Weather Enhanced** | Cloud | Free • No API key • Current + hourly forecast • WMO conditions • Next-hour precipitation helpers • Today's high/low | [Docs](drivers/open-meteo/README.md)        |
 | **PurpleAir AQI Virtual Sensor** | Cloud | Real-time AQI • Multi-sensor averaging • EPA/Woodsmoke correction • Geolocation support | [Docs](drivers/purpleair-aqi/README.md)        |
 
 ### 🔌 Power & Outlets
@@ -75,8 +76,9 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
    Gemstone Lights:  https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/packageManifest.json
      Honeywell T6:     https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/honeywell-t6-pro/packageManifest.json
      Minoston MP24Z:   https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/minoston-mp24z/packageManifest.json
-    Philio PST02:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/philio-pst02/packageManifest.json
-     PurpleAir AQI:    https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/packageManifest.json
+      Open-Meteo Enhanced: https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/open-meteo/packageManifest.json
+      Philio PST02:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/philio-pst02/packageManifest.json
+       PurpleAir AQI:    https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/purpleair-aqi/packageManifest.json
     SunStat Connect:  https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/sunstat-thermostat/packageManifest.json
     Touchstone:       https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/packageManifest.json
     Auto Away Mode:   https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/auto-away-mode/packageManifest.json

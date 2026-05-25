@@ -1,0 +1,20 @@
+{
+  "packageName": "Open-Meteo Weather Enhanced",
+  "minimumHEVersion": "2.2.0",
+  "author": "Mads Kristensen",
+  "version": "0.1.3",
+  "dateReleased": "2026-05-25",
+  "communityLink": "",
+  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/open-meteo/README.md",
+  "releaseNotes": "v0.1.3: Renamed to 'Open-Meteo Weather Enhanced' to avoid name clash with the built-in Hubitat Open-Meteo driver. v0.1.2: Added today's high/low temperature attributes. v0.1.0: Initial release.",
+  "drivers": [
+    {
+      "id": "576b2cc8-81a6-4525-a4e3-adc8d075fd82",
+      "name": "Open-Meteo Weather Enhanced",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/open-meteo/open-meteo-weather-enhanced.groovy",
+      "required": true,
+      "version": "0.1.3"
+    }
+  ]
+}

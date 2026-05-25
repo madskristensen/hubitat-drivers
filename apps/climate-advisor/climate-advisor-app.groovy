@@ -2,10 +2,13 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.1
+ * Version:   0.4.4
  *
  * Changelog:
- *   0.4.1 — 2026-05-24 — Fix outdoor trend stuck at "unknown" for sparse sensors: retain last N samples regardless of age (was time-only, evicting all history on first event after a long silence) and loosen staleness guard from 2× to 4× the trend window
+ *   0.4.4 — 2026-05-25 — Drop F/C scale suffix from idle status temperatures (just °); the weather device already implies the scale
+ *   0.4.3 — 2026-05-25 — Idle status line is now actionable: drops "House comfortable" filler, hides AQI when good, adds outdoor trend arrow, feels-like (when ≥3° off), today's high/low, precip probability (1h/6h), wind gusts ≥20 mph, UV ≥8. Auto-detects standard attributes from Open-Meteo Weather Enhanced driver.
+ *   0.4.2 — 2026-05-25 — Weather attribute is now a dropdown of the selected sensor's attributes; rain keyword field supports comma-separated includes and ! prefix exclusions (e.g. "rain,!light rain")
+ *   0.4.1 — 2026-05-24
  *   0.4.0 — 2026-05-24 — External message API (pushMessage/clearMessage on child device for Rule Machine + webCoRE); larger trend sample retention + staleness guard fixes sparse-reporting outdoor sensors; rename trend states to "heating up"/"cooling down"
  *   0.3.4 — 2026-05-23 — Replace idle "all clear" with contextual weather/AQI dashboard line
  *   0.3.3 — 2026-05-23 — Free cooling opportunity evaluator: notify when outside cooler than inside and AC would otherwise run
@@ -21,7 +24,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.1"
+@Field static final String  APP_VERSION        = "0.4.4"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -73,11 +76,33 @@ def globalPage() {
             input "outdoorTempDevice", "capability.temperatureMeasurement",
                 title: "Outdoor temperature device", required: true
             input "weatherDevice", "capability.sensor",
-                title: "Weather / forecast device (optional)", required: false
-            input "weatherAttribute", "string",
-                title: "Weather condition attribute", defaultValue: "weather", required: false
-            input "rainKeyword", "string",
-                title: "Rain keyword in weather attribute", defaultValue: "rain", required: false
+                title: "Weather / forecast device (optional)", required: false, submitOnChange: true
+            if (settings.weatherDevice) {
+                List attrNames = []
+                try {
+                    attrNames = settings.weatherDevice.getSupportedAttributes()*.name.unique().sort()
+                } catch (Exception e) {
+                    log.warn "Could not enumerate attributes for weather device: ${e.message}"
+                }
+                if (attrNames) {
+                    String defaultAttr = attrNames.contains("weather") ? "weather"
+                                       : attrNames.contains("condition") ? "condition"
+                                       : attrNames.contains("conditionText") ? "conditionText"
+                                       : attrNames[0]
+                    input "weatherAttribute", "enum",
+                        title: "Weather condition attribute",
+                        options: attrNames, defaultValue: defaultAttr, required: false
+                } else {
+                    input "weatherAttribute", "string",
+                        title: "Weather condition attribute", defaultValue: "weather", required: false
+                }
+                input "rainKeyword", "string",
+                    title: "Rain keywords (comma-separated; prefix with ! to exclude)",
+                    defaultValue: "rain", required: false
+                paragraph "Matches if the weather attribute contains any keyword, unless it also contains an excluded keyword. " +
+                          "Example: <code>rain, !light rain</code> matches \"rain\" and \"heavy rain\" but not \"light rain\". " +
+                          "Matching is case-insensitive."
+            }
         }
         section("Air Quality") {
             input "aqiDevice", "capability.airQuality",
@@ -886,9 +911,25 @@ private BigDecimal currentHouseAqi() {
 
 private boolean checkRain() {
     try {
-        String val     = settings.weatherDevice.currentValue(settings.weatherAttribute as String) as String
-        String keyword = (settings.rainKeyword ?: "rain") as String
-        return val?.toLowerCase()?.contains(keyword.toLowerCase()) ?: false
+        String val = settings.weatherDevice.currentValue(settings.weatherAttribute as String) as String
+        if (!val) { return false }
+        String lower = val.toLowerCase()
+        String raw   = (settings.rainKeyword ?: "rain") as String
+        List<String> includes = []
+        List<String> excludes = []
+        raw.split(",").each { String token ->
+            String t = token?.trim()?.toLowerCase()
+            if (!t) { return }
+            if (t.startsWith("!")) {
+                String ex = t.substring(1).trim()
+                if (ex) { excludes << ex }
+            } else {
+                includes << t
+            }
+        }
+        if (!includes) { includes << "rain" }
+        if (excludes.any { lower.contains(it) }) { return false }
+        return includes.any { lower.contains(it) }
     } catch (Exception e) {
         log.warn "checkRain error: ${e.message}"
         return false
@@ -956,14 +997,26 @@ def logsOff() {
 }
 
 // ── Idle ambient status ───────────────────────────────────────────────────────
-// Called when no advisory messages are active.
-// Builds "☀️ Sunny · 72°F · AQI 38 (good) · House comfortable" for dashboard tiles.
-// Every segment is optional — gracefully omitted when data is unavailable.
+// Called when no advisory messages are active. Builds a contextual dashboard
+// line that surfaces information likely to influence behaviour (open windows?
+// run the AC? bring an umbrella?) and omits everything else. Every segment is
+// conditional — the line gets shorter when there's nothing to act on, which is
+// the desired behaviour for a glance tile.
+//
+// Example output:
+//   "☀️ Sunny · 68° (feels 73°) ↗ heating up · today 54–78° · rain 70% within 6h"
+//
+// Attribute discovery is automatic: the weather device is queried for standard
+// names emitted by the Open-Meteo Weather Enhanced driver (apparentTemperature,
+// temperatureMax, temperatureMin, precipitationProbabilityNextHour,
+// precipitationProbabilityNext6h, windGust, ultravioletIndex). Missing values
+// are silently skipped, so non-forecast weather devices still produce a useful
+// (shorter) line.
 
 private String buildIdleStatus(BigDecimal outdoorTemp, boolean rainDetected, BigDecimal houseAqi) {
     List<String> parts = []
 
-    // Weather emoji + condition word
+    // ── Weather emoji + condition word ──
     String conditionRaw = null
     if (settings.weatherDevice) {
         try {
@@ -990,7 +1043,6 @@ private String buildIdleStatus(BigDecimal outdoorTemp, boolean rainDetected, Big
                      cond.contains("fair") || cond.contains("bright"))                                          { emoji = isNight ? "🌙" : "☀️"
                                                                                                                   word = isNight ? "Clear"  : "Sunny"   }
             else {
-                // Unknown condition: show raw string with a generic day/night emoji
                 emoji = isNight ? "🌙" : "🌤️"
                 word  = conditionRaw.capitalize()
             }
@@ -998,20 +1050,79 @@ private String buildIdleStatus(BigDecimal outdoorTemp, boolean rainDetected, Big
         parts << "${emoji} ${word}"
     }
 
-    // Outdoor temperature — integer display ("72°F")
+    // ── Outdoor temperature + apparent temperature when notably different ──
     if (outdoorTemp != null) {
-        parts << "${outdoorTemp.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()}°F"
+        int curT = outdoorTemp.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
+        String tempSeg = "${curT}°"
+        BigDecimal apparent = safeCurrentBD(settings.weatherDevice, "apparentTemperature")
+        if (apparent != null) {
+            int feels = apparent.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
+            if (Math.abs(feels - curT) >= 3) {
+                tempSeg += " (feels ${feels}°)"
+            }
+        }
+        parts << tempSeg
     }
 
-    // AQI value + EPA category (omitted entirely when no AQI device configured)
+    // ── Outdoor trend arrow + word (omitted when steady/unknown) ──
+    String trend = currentTrendLabel()
+    if (trend) { parts << trend }
+
+    // ── Today's forecast range ──
+    BigDecimal tMax = safeCurrentBD(settings.weatherDevice, "temperatureMax")
+    BigDecimal tMin = safeCurrentBD(settings.weatherDevice, "temperatureMin")
+    if (tMax != null && tMin != null) {
+        int hi = tMax.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
+        int lo = tMin.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
+        parts << "today ${lo}–${hi}°"
+    }
+
+    // ── Precipitation probability (urgent 1h wins over 6h) ──
+    BigDecimal prob1h = safeCurrentBD(settings.weatherDevice, "precipitationProbabilityNextHour")
+    BigDecimal prob6h = safeCurrentBD(settings.weatherDevice, "precipitationProbabilityNext6h")
+    if (prob1h != null && prob1h.intValue() >= 60) {
+        parts << "rain ${prob1h.intValue()}% within 1h"
+    } else if (prob6h != null && prob6h.intValue() >= 40) {
+        parts << "rain ${prob6h.intValue()}% within 6h"
+    }
+
+    // ── Wind gusts (only when notable) ──
+    BigDecimal gust = safeCurrentBD(settings.weatherDevice, "windGust")
+    if (gust != null && gust.intValue() >= 20) {
+        parts << "gusts ${gust.intValue()} mph"
+    }
+
+    // ── UV index (only when high / very high / extreme) ──
+    BigDecimal uv = safeCurrentBD(settings.weatherDevice, "ultravioletIndex")
+    if (uv != null && uv >= 8.0G) {
+        String uvWord = uv >= 11.0G ? "extreme" : "very high"
+        parts << "UV ${uv.intValue()} ${uvWord}"
+    }
+
+    // ── AQI (only when at moderate or worse — 'good' is the boring 80% case) ──
     if (houseAqi != null) {
         int aqi = houseAqi.toInteger()
-        String cat = aqiCategory(aqi)
-        parts << "AQI ${aqi}${cat ? ' (' + cat + ')' : ''}"
+        if (aqi > 50) {
+            String cat = aqiCategory(aqi)
+            parts << "AQI ${aqi}${cat ? ' (' + cat + ')' : ''}"
+        }
     }
 
-    parts << "House comfortable"
+    if (parts.isEmpty()) { return "No weather data" }
     return parts.join(" \u00B7 ")  // middle dot separator: " · "
+}
+
+// Returns a short arrow + word for the current outdoor trend, or null when
+// trend is unknown/steady (steady = not worth surfacing).
+private String currentTrendLabel() {
+    try {
+        Map trend = outdoorTrendResult()
+        switch (trend?.trend) {
+            case "heating up":   return "↗ heating up"
+            case "cooling down": return "↘ cooling down"
+            default:             return null
+        }
+    } catch (Exception e) { return null }
 }
 
 private boolean isNighttime() {
