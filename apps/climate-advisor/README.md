@@ -34,6 +34,10 @@ One parent app + one optional child device (house-wide aggregate):
 - Per-zone data is exposed on the single child via `zoneStatuses` JSON and indexed flat attributes (`zone1Name`, `zone1Severity`, `zone1Message` … `zone10Name`).
 - Zones are configuration only — no per-zone child devices are created.
 
+## Recommended weather driver
+
+The [**Open-Meteo Weather Enhanced**](../../drivers/open-meteo/open-meteo-weather-enhanced.groovy) driver in this same repo is purpose-built as a drop-in weather source for Climate Advisor. It's free, needs no API key, and emits a human-readable WMO `weather` attribute that Climate Advisor's rain-keyword matcher reads directly, plus next-hour / next-6h precipitation probability helpers. Any weather driver exposing a text weather attribute will work, but Open-Meteo Weather Enhanced is the path of least resistance.
+
 ## Installation (manual)
 
 1. Install `climate-advisor-device.groovy` driver first.
