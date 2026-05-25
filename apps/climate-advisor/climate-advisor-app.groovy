@@ -2,9 +2,12 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.4
+ * Version:   0.4.7
  *
  * Changelog:
+ *   0.4.7 — 2026-05-25 — Feels-like calc now prefers humidity from the outdoor temperature device when it's a combo temp+humidity sensor; falls back to the weather device's humidity otherwise
+ *   0.4.6 — 2026-05-25 — Feels-like now also adjusts in the mild range (50–80°F) by applying the weather device's apparent−temperature delta to the local sensor reading, so a breezy 64° day shows the wind cooling effect (NWS wind chill / heat index formulas only cover their strict regimes)
+ *   0.4.5 — 2026-05-25 — Idle-status feels-like is now computed from the local outdoor sensor temperature + weather device wind/humidity (NWS wind chill ≤50°F, heat index ≥80°F) instead of the weather device's forecast-derived apparentTemperature; falls back to apparentTemperature when wind/humidity are unavailable
  *   0.4.4 — 2026-05-25 — Drop F/C scale suffix from idle status temperatures (just °); the weather device already implies the scale
  *   0.4.3 — 2026-05-25 — Idle status line is now actionable: drops "House comfortable" filler, hides AQI when good, adds outdoor trend arrow, feels-like (when ≥3° off), today's high/low, precip probability (1h/6h), wind gusts ≥20 mph, UV ≥8. Auto-detects standard attributes from Open-Meteo Weather Enhanced driver.
  *   0.4.2 — 2026-05-25 — Weather attribute is now a dropdown of the selected sensor's attributes; rain keyword field supports comma-separated includes and ! prefix exclusions (e.g. "rain,!light rain")
@@ -24,7 +27,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.4"
+@Field static final String  APP_VERSION        = "0.4.7"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -977,6 +980,47 @@ private BigDecimal safeCurrentBD(device, String attr) {
     } catch (Exception e) { return null }
 }
 
+// Compute "feels like" temperature from a local sensor reading + weather wind/humidity.
+// Uses NWS wind chill (T ≤ 50°F and V > 3 mph) and NWS Rothfusz heat index
+// (T ≥ 80°F and RH ≥ 40%). Returns null outside those regimes (or when the
+// required wind/humidity input is missing) so the caller can fall back to the
+// weather device's own apparentTemperature. Honours location.temperatureScale:
+// inputs and outputs are in the user's preferred unit, with internal conversion
+// to °F / mph for the formulas.
+private BigDecimal computeFeelsLike(BigDecimal temp, BigDecimal windSpeed, BigDecimal humidity) {
+    if (temp == null) { return null }
+    boolean metric = (location?.temperatureScale == "C")
+    BigDecimal tF   = metric ? (temp * 9.0G / 5.0G + 32.0G) : temp
+    BigDecimal vMph = (windSpeed == null) ? null : (metric ? windSpeed * 0.621371G : windSpeed)
+
+    BigDecimal feelsF = tF
+
+    if (tF <= 50.0G && vMph != null && vMph > 3.0G) {
+        double t  = tF.doubleValue()
+        double v  = vMph.doubleValue()
+        double vp = Math.pow(v, 0.16d)
+        feelsF = new BigDecimal(35.74d + 0.6215d * t - 35.75d * vp + 0.4275d * t * vp)
+    } else if (tF >= 80.0G && humidity != null && humidity >= 40.0G) {
+        double t  = tF.doubleValue()
+        double r  = humidity.doubleValue()
+        double hi = (-42.379d + 2.04901523d * t + 10.14333127d * r - 0.22475541d * t * r
+                     - 0.00683783d * t * t - 0.05481717d * r * r + 0.00122874d * t * t * r
+                     + 0.00085282d * t * r * r - 0.00000199d * t * t * r * r)
+        if (r < 13d && t >= 80d && t <= 112d) {
+            hi -= ((13d - r) / 4d) * Math.sqrt((17d - Math.abs(t - 95d)) / 17d)
+        } else if (r > 85d && t >= 80d && t <= 87d) {
+            hi += ((r - 85d) / 10d) * ((87d - t) / 5d)
+        }
+        feelsF = new BigDecimal(hi)
+    } else {
+        // Outside both regimes — no meaningful adjustment; signal "no feels-like"
+        // by returning null so the caller can fall back to the weather device value.
+        return null
+    }
+
+    return metric ? (feelsF - 32.0G) * 5.0G / 9.0G : feelsF
+}
+
 // Change-only sendEvent: skip the call entirely if value is unchanged.
 // Null guard prevents platform errors on NUMBER attributes when value is unavailable.
 private void sendEventIfChanged(def d, String name, Object value, String unit = null) {
@@ -1051,10 +1095,27 @@ private String buildIdleStatus(BigDecimal outdoorTemp, boolean rainDetected, Big
     }
 
     // ── Outdoor temperature + apparent temperature when notably different ──
+    // Prefer a feels-like anchored to the *local sensor* temperature:
+    //   1. NWS formulas (cold+windy or hot+humid) computed from sensor temp + weather wind/humidity
+    //   2. Mild-range fallback: apply the weather device's own (apparent − temperature) delta
+    //      to the sensor reading, so wind cooling still surfaces between 50–80°F
+    //   3. Last resort: raw weather device apparentTemperature (forecast-based, may drift)
     if (outdoorTemp != null) {
         int curT = outdoorTemp.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
         String tempSeg = "${curT}°"
-        BigDecimal apparent = safeCurrentBD(settings.weatherDevice, "apparentTemperature")
+        BigDecimal wind     = safeCurrentBD(settings.weatherDevice, "windSpeed")
+        BigDecimal humidity = safeCurrentBD(settings.outdoorTempDevice, "humidity")
+        if (humidity == null) { humidity = safeCurrentBD(settings.weatherDevice, "humidity") }
+        BigDecimal apparent = computeFeelsLike(outdoorTemp, wind, humidity)
+        if (apparent == null) {
+            BigDecimal wxTemp     = safeCurrentBD(settings.weatherDevice, "temperature")
+            BigDecimal wxApparent = safeCurrentBD(settings.weatherDevice, "apparentTemperature")
+            if (wxTemp != null && wxApparent != null) {
+                apparent = outdoorTemp + (wxApparent - wxTemp)
+            } else if (wxApparent != null) {
+                apparent = wxApparent
+            }
+        }
         if (apparent != null) {
             int feels = apparent.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
             if (Math.abs(feels - curT) >= 3) {
