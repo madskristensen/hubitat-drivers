@@ -2,8 +2,8 @@
   "packageName": "Mads Kristensen — Hubitat Drivers",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
-  "dateReleased": "2026-05-23",
-  "version": "1.2.18",
+  "dateReleased": "2026-05-24",
+  "version": "1.2.19",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/README.md",
   "drivers": [
@@ -108,7 +108,7 @@
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/climate-advisor/climate-advisor-app.groovy",
       "required": true,
       "oauth": false,
-      "version": "0.4.0"
+      "version": "0.4.1"
     }
   ]
 }

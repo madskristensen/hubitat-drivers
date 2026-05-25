@@ -2,9 +2,10 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.0
+ * Version:   0.4.1
  *
  * Changelog:
+ *   0.4.1 — 2026-05-24 — Fix outdoor trend stuck at "unknown" for sparse sensors: retain last N samples regardless of age (was time-only, evicting all history on first event after a long silence) and loosen staleness guard from 2× to 4× the trend window
  *   0.4.0 — 2026-05-24 — External message API (pushMessage/clearMessage on child device for Rule Machine + webCoRE); larger trend sample retention + staleness guard fixes sparse-reporting outdoor sensors; rename trend states to "heating up"/"cooling down"
  *   0.3.4 — 2026-05-23 — Replace idle "all clear" with contextual weather/AQI dashboard line
  *   0.3.3 — 2026-05-23 — Free cooling opportunity evaluator: notify when outside cooler than inside and AC would otherwise run
@@ -20,7 +21,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.0"
+@Field static final String  APP_VERSION        = "0.4.1"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -29,6 +30,8 @@ import groovy.transform.Field
 @Field static final Integer AQI_DANGER_DEFAULT = 101    // EPA Unhealthy for Sensitive Groups
 @Field static final Integer DEBOUNCE_SECONDS   = 1
 @Field static final Integer SEED_DELAY_SECONDS = 5
+@Field static final Integer MIN_TREND_SAMPLES  = 10     // retain at least this many samples regardless of age (sparse outdoor sensors)
+@Field static final Integer STALENESS_MULTIPLE = 4      // newest sample must be within N × trendWindow to be considered fresh
 
 definition(
     name:           "Climate Advisor",
@@ -250,13 +253,7 @@ def outdoorTempHandler(evt) {
         BigDecimal t = evt.value as BigDecimal
         Long ts = now()
         List samples = (state.outdoorSamples ?: []) + [[now: ts, t: t]]
-        Integer windowMin = (settings.trendWindowMinutes ?: 30) as Integer
-        // Retain at least 3× the trend window so sparsely-reporting sensors still produce
-        // a usable buffer. Many outdoor sensors only report on threshold crossings,
-        // which can leave 30+ min gaps between events.
-        Long retainMin = Math.max(windowMin * 3L + 5L, 90L)
-        Long cutoff = ts - retainMin * 60 * 1000L
-        state.outdoorSamples = samples.findAll { it.now >= cutoff }
+        state.outdoorSamples = pruneSamples(samples, ts)
     } catch (Exception e) {
         log.warn "outdoorTempHandler sample error: ${e.message}"
     }
@@ -297,10 +294,12 @@ Map computeTrend(List samples, Integer windowMinutes, BigDecimal risingThreshold
     def oldest = window.first()
     def newest = window.last()
 
-    // Staleness guard: if the most recent sample is older than 2× the trend window,
-    // the sensor has gone quiet and any computed slope is unreliable.
+    // Staleness guard: if the most recent sample is older than STALENESS_MULTIPLE × the
+    // trend window, the sensor has gone quiet and any computed slope is unreliable.
+    // 4× (default 2h for a 30-min window) tolerates Philio-class outdoor sensors that
+    // only report on threshold crossings.
     BigDecimal ageMinutes = (nowTs - newest.now) / 60000G
-    if (ageMinutes > (windowMinutes * 2G)) { return [trend: "unknown", slope10min: null] }
+    if (ageMinutes > (windowMinutes * (STALENESS_MULTIPLE as BigDecimal))) { return [trend: "unknown", slope10min: null] }
 
     BigDecimal spanMinutes = (newest.now - oldest.now) / 60000G
     if (spanMinutes < 5G) { return [trend: "unknown", slope10min: null] }
@@ -320,15 +319,28 @@ private Map outdoorTrendResult() {
     return computeTrend((state.outdoorSamples ?: []) as List, (settings.trendWindowMinutes ?: 30) as Integer, rising, falling)
 }
 
+private List pruneSamples(List samples, Long nowTs) {
+    Integer windowMin = (settings.trendWindowMinutes ?: 30) as Integer
+    // Retain by time AND by count. Time-only pruning fails for sparse outdoor sensors
+    // (e.g. Philio PAT02) that can go 2+ hours between temperature events: the first
+    // event after the silence would evict all prior history, leaving a single sample
+    // and forcing the trend back to "unknown" for another full window.
+    Long retainMin = Math.max(windowMin * 3L + 5L, 90L)
+    Long cutoff = nowTs - retainMin * 60 * 1000L
+    List sorted = (samples ?: []).sort { it.now }
+    List byTime = sorted.findAll { it.now >= cutoff }
+    if (sorted.size() <= MIN_TREND_SAMPLES) { return sorted }
+    if (byTime.size() >= MIN_TREND_SAMPLES) { return byTime }
+    // Fall back to the most recent MIN_TREND_SAMPLES samples regardless of age.
+    return sorted[-MIN_TREND_SAMPLES..-1]
+}
+
 private void appendIndoorSample(String zoneId, BigDecimal avgTemp, Long ts = null) {
     Long sampleTs = ts ?: now()
     Map indoorSamples = (state.indoorSamples ?: [:]) as Map
     List zoneSamples  = (indoorSamples[zoneId] ?: []) as List
     zoneSamples = zoneSamples + [[now: sampleTs, t: avgTemp]]
-    Integer windowMin = (settings.trendWindowMinutes ?: 30) as Integer
-    Long retainMin = Math.max(windowMin * 3L + 5L, 90L)
-    Long cutoff = sampleTs - retainMin * 60 * 1000L
-    indoorSamples[zoneId] = zoneSamples.findAll { it.now >= cutoff }
+    indoorSamples[zoneId] = pruneSamples(zoneSamples, sampleTs)
     state.indoorSamples = indoorSamples
 }
 
