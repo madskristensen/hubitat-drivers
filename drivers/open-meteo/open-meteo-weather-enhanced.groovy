@@ -1,7 +1,7 @@
 /**
  *  Open-Meteo Weather Enhanced
  *  Author:  Mads Kristensen
- *  Version: 0.1.4 — 2026-05-25 — Bugfix and cleanup pass (see changelog)
+ *  Version: 0.1.5 — 2026-05-25 — Add tomorrow's forecast attributes (high/low/condition/rain probability)
  *  License: MIT
  *
  *  Free weather driver backed by https://open-meteo.com — no API key required.
@@ -14,6 +14,7 @@
  *  Source: https://github.com/madskristensen/hubitat-drivers
  *
  *  Changelog:
+ *    0.1.5 — 2026-05-25 — Add tomorrow's forecast attributes: temperatureMaxTomorrow, temperatureMinTomorrow, weatherTomorrow, precipitationProbabilityTomorrow.
  *    0.1.4 — 2026-05-25 — Fix: precipitationNextHour / precipitationProbabilityNextHour now cover the next 60 minutes
  *                         (previously only sampled the current hour bucket).
  *                       Fix: refresh runs immediately after install and on hub reboot (was waiting up to one poll interval).
@@ -29,7 +30,7 @@
 import groovy.transform.Field
 import groovy.json.JsonOutput
 
-@Field static final String DRIVER_VERSION = "0.1.4"
+@Field static final String DRIVER_VERSION = "0.1.5"
 @Field static final String FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
 // WMO weather interpretation codes — standard Open-Meteo descriptions
@@ -96,6 +97,10 @@ metadata {
 		attribute "sunset", "string"                // ISO local time
 		attribute "temperatureMax", "number"        // today's forecast high
 		attribute "temperatureMin", "number"        // today's forecast low
+		attribute "temperatureMaxTomorrow", "number"        // tomorrow's forecast high
+		attribute "temperatureMinTomorrow", "number"        // tomorrow's forecast low
+		attribute "weatherTomorrow", "string"               // tomorrow's WMO description
+		attribute "precipitationProbabilityTomorrow", "number" // tomorrow's daily max %
 
 		// Precipitation helpers (for Climate Advisor)
 		attribute "precipitationNextHour", "number"            // sum over next 60 min
@@ -196,7 +201,7 @@ def refresh() {
 		precipitation_unit: u.precipitation_unit,
 		current           : "temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m",
 		hourly            : "temperature_2m,relative_humidity_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m,uv_index",
-		daily             : "sunrise,sunset,uv_index_max,temperature_2m_max,temperature_2m_min",
+		daily             : "sunrise,sunset,uv_index_max,temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max",
 		forecast_days     : 2
 	]
 
@@ -358,6 +363,8 @@ private void parseDaily(Map json, String tUnit) {
 	List uvMaxes  = (daily.uv_index_max instanceof List) ? (List) daily.uv_index_max : []
 	List tMaxes   = (daily.temperature_2m_max instanceof List) ? (List) daily.temperature_2m_max : []
 	List tMins    = (daily.temperature_2m_min instanceof List) ? (List) daily.temperature_2m_min : []
+	List codes    = (daily.weather_code instanceof List) ? (List) daily.weather_code : []
+	List rainPMax = (daily.precipitation_probability_max instanceof List) ? (List) daily.precipitation_probability_max : []
 
 	if (sunrises) emitIfChanged("sunrise", sunrises[0] as String, "${device.displayName} sunrise ${sunrises[0]}")
 	if (sunsets)  emitIfChanged("sunset",  sunsets[0]  as String, "${device.displayName} sunset ${sunsets[0]}")
@@ -369,6 +376,24 @@ private void parseDaily(Map json, String tUnit) {
 	if (tMins) {
 		BigDecimal tMin = roundN(tMins[0], 1)
 		if (tMin != null) emitIfChanged("temperatureMin", tMin, "${device.displayName} today's low is ${tMin}${tUnit}", tUnit)
+	}
+
+	if (tMaxes.size() > 1) {
+		BigDecimal tMaxT = roundN(tMaxes[1], 1)
+		if (tMaxT != null) emitIfChanged("temperatureMaxTomorrow", tMaxT, "${device.displayName} tomorrow's high is ${tMaxT}${tUnit}", tUnit)
+	}
+	if (tMins.size() > 1) {
+		BigDecimal tMinT = roundN(tMins[1], 1)
+		if (tMinT != null) emitIfChanged("temperatureMinTomorrow", tMinT, "${device.displayName} tomorrow's low is ${tMinT}${tUnit}", tUnit)
+	}
+	if (codes.size() > 1) {
+		Integer codeT = toInt(codes[1])
+		String condT = wmoDescription(codeT)
+		if (condT) emitIfChanged("weatherTomorrow", condT, "${device.displayName} tomorrow's weather is ${condT}")
+	}
+	if (rainPMax.size() > 1) {
+		Integer probT = toInt(rainPMax[1])
+		if (probT != null) emitIfChanged("precipitationProbabilityTomorrow", probT, "${device.displayName} tomorrow's max precipitation probability ${probT}%", "%")
 	}
 
 	// Only fall back to daily UV max if the hourly parser couldn't set one

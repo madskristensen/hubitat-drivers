@@ -2,9 +2,15 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.7
+ * Version:   0.4.13
  *
  * Changelog:
+ *   0.4.13 — 2026-05-25 — Idle status: restyle tomorrow segment to "Tomorrow ☁️ ↓49° ↑63°" — emoji replaces the condition word; up/down arrows make low/high scannable.
+ *   0.4.12 — 2026-05-25 — Idle status: capitalize "Tomorrow" segment so it reads consistently regardless of position in the line.
+ *   0.4.11 — 2026-05-25 — Idle status: prefix tomorrow's condition word with an emoji (☁️ overcast, ☀️ sunny, ⛅ partly cloudy, etc.).
+ *   0.4.10 — 2026-05-25 — Idle status: drop the "within 6h" suffix on rain probability (6h is the implicit default); keep "within 1h" only for urgent imminent rain.
+ *   0.4.9 — 2026-05-25 — Idle status: capitalize the first segment for nicer dashboard tile reading; remove wind gusts segment (not actionable for this user).
+ *   0.4.8 — 2026-05-25 — Reshape idle status line to be more actionable: drop weather emoji/condition, current temp, today's low, and trend arrow. Keep only signals that change behavior: rain probability (≥1h 60%/6h 30%), today's high (before 4pm only), current feels-like (when delta ≥5°F), tomorrow's range/condition/rain (after 4pm), gusts/UV/AQI as before.
  *   0.4.7 — 2026-05-25 — Feels-like calc now prefers humidity from the outdoor temperature device when it's a combo temp+humidity sensor; falls back to the weather device's humidity otherwise
  *   0.4.6 — 2026-05-25 — Feels-like now also adjusts in the mild range (50–80°F) by applying the weather device's apparent−temperature delta to the local sensor reading, so a breezy 64° day shows the wind cooling effect (NWS wind chill / heat index formulas only cover their strict regimes)
  *   0.4.5 — 2026-05-25 — Idle-status feels-like is now computed from the local outdoor sensor temperature + weather device wind/humidity (NWS wind chill ≤50°F, heat index ≥80°F) instead of the weather device's forecast-derived apparentTemperature; falls back to apparentTemperature when wind/humidity are unavailable
@@ -27,7 +33,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.7"
+@Field static final String  APP_VERSION        = "0.4.13"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -1041,68 +1047,56 @@ def logsOff() {
 }
 
 // ── Idle ambient status ───────────────────────────────────────────────────────
-// Called when no advisory messages are active. Builds a contextual dashboard
-// line that surfaces information likely to influence behaviour (open windows?
-// run the AC? bring an umbrella?) and omits everything else. Every segment is
-// conditional — the line gets shorter when there's nothing to act on, which is
-// the desired behaviour for a glance tile.
+// Called when no advisory messages are active. Builds an actionable single-line
+// dashboard string surfacing only information that influences behaviour. Every
+// segment is conditional and silently drops out when its gate isn't tripped.
 //
-// Example output:
-//   "☀️ Sunny · 68° (feels 73°) ↗ heating up · today 54–78° · rain 70% within 6h"
+// Order (left to right):
+//   1. rain probability (1h ≥ 60% wins over 6h ≥ 30%)
+//   2. today's high — only before 4pm local (afternoon = high is historical)
+//   3. current feels-like — only when |feels − actual| ≥ 5°F
+//   4. tomorrow's range/condition/rain — only after 4pm local
+//   5. UV ≥ 8
+//   6. AQI > 50
 //
-// Attribute discovery is automatic: the weather device is queried for standard
-// names emitted by the Open-Meteo Weather Enhanced driver (apparentTemperature,
-// temperatureMax, temperatureMin, precipitationProbabilityNextHour,
-// precipitationProbabilityNext6h, windGust, ultravioletIndex). Missing values
-// are silently skipped, so non-forecast weather devices still produce a useful
-// (shorter) line.
+// The first segment is capitalized for nicer dashboard tile reading.
+//
+// Examples:
+//   "rain 50% · high 68° · feels 62°"
+//   "Tomorrow ⛅ ↓55° ↑75°, rain 40%"
+//   "high 88° · gusts 28 mph · UV 9 very high · AQI 78 (moderate)"
+//
+// Empty fallback: "No notable weather".
 
 private String buildIdleStatus(BigDecimal outdoorTemp, boolean rainDetected, BigDecimal houseAqi) {
     List<String> parts = []
+    int hourOfDay = currentLocalHour()
+    boolean beforeAfternoonCutoff = hourOfDay < 16
 
-    // ── Weather emoji + condition word ──
-    String conditionRaw = null
-    if (settings.weatherDevice) {
-        try {
-            String attr = (settings.weatherAttribute ?: "weather") as String
-            conditionRaw = settings.weatherDevice.currentValue(attr) as String
-        } catch (Exception e) { /* skip — device not ready */ }
+    // 1. Rain probability — urgent 1h wins over 6h
+    BigDecimal prob1h = safeCurrentBD(settings.weatherDevice, "precipitationProbabilityNextHour")
+    BigDecimal prob6h = safeCurrentBD(settings.weatherDevice, "precipitationProbabilityNext6h")
+    if (prob1h != null && prob1h.intValue() >= 60) {
+        parts << "rain ${prob1h.intValue()}% within 1h"
+    } else if (prob6h != null && prob6h.intValue() >= 30) {
+        parts << "rain ${prob6h.intValue()}%"
     }
 
-    if (conditionRaw || rainDetected) {
-        boolean isNight = isNighttime()
-        String emoji
-        String word
-        if (rainDetected) {
-            emoji = "🌧️"; word = "Rain"
-        } else {
-            String cond = conditionRaw.toLowerCase()
-            if      (cond.contains("snow") || cond.contains("sleet") || cond.contains("flurr"))                { emoji = "🌨️"; word = "Snow"          }
-            else if (cond.contains("thunder") || cond.contains("storm"))                                        { emoji = "⛈️";  word = "Stormy"        }
-            else if (cond.contains("fog") || cond.contains("mist") || cond.contains("haze"))                   { emoji = "🌫️"; word = "Foggy"          }
-            else if (cond.contains("partly") || cond.contains("partial") ||
-                     cond.contains("mostly cloud") || cond.contains("mostly sunny"))                            { emoji = "⛅"; word = "Partly cloudy"   }
-            else if (cond.contains("cloud") || cond.contains("overcast"))                                       { emoji = "☁️";  word = "Cloudy"         }
-            else if (cond.contains("clear") || cond.contains("sunny") ||
-                     cond.contains("fair") || cond.contains("bright"))                                          { emoji = isNight ? "🌙" : "☀️"
-                                                                                                                  word = isNight ? "Clear"  : "Sunny"   }
-            else {
-                emoji = isNight ? "🌙" : "🌤️"
-                word  = conditionRaw.capitalize()
-            }
+    // 2. Today's high — only before 4pm (after that, the high is historical)
+    if (beforeAfternoonCutoff) {
+        BigDecimal tMax = safeCurrentBD(settings.weatherDevice, "temperatureMax")
+        if (tMax != null) {
+            int hi = tMax.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
+            parts << "high ${hi}°"
         }
-        parts << "${emoji} ${word}"
     }
 
-    // ── Outdoor temperature + apparent temperature when notably different ──
-    // Prefer a feels-like anchored to the *local sensor* temperature:
-    //   1. NWS formulas (cold+windy or hot+humid) computed from sensor temp + weather wind/humidity
-    //   2. Mild-range fallback: apply the weather device's own (apparent − temperature) delta
-    //      to the sensor reading, so wind cooling still surfaces between 50–80°F
-    //   3. Last resort: raw weather device apparentTemperature (forecast-based, may drift)
+    // 3. Current feels-like — only when notably different from actual outdoor temp.
+    // Prefers NWS formulas (cold+windy or hot+humid) from sensor temp + weather
+    // wind/humidity; falls back to a mild-range delta against the weather device's
+    // own apparentTemperature so wind cooling still surfaces between 50–80°F.
     if (outdoorTemp != null) {
         int curT = outdoorTemp.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
-        String tempSeg = "${curT}°"
         BigDecimal wind     = safeCurrentBD(settings.weatherDevice, "windSpeed")
         BigDecimal humidity = safeCurrentBD(settings.outdoorTempDevice, "humidity")
         if (humidity == null) { humidity = safeCurrentBD(settings.weatherDevice, "humidity") }
@@ -1118,49 +1112,42 @@ private String buildIdleStatus(BigDecimal outdoorTemp, boolean rainDetected, Big
         }
         if (apparent != null) {
             int feels = apparent.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
-            if (Math.abs(feels - curT) >= 3) {
-                tempSeg += " (feels ${feels}°)"
+            if (Math.abs(feels - curT) >= 5) {
+                parts << "feels ${feels}°"
             }
         }
-        parts << tempSeg
     }
 
-    // ── Outdoor trend arrow + word (omitted when steady/unknown) ──
-    String trend = currentTrendLabel()
-    if (trend) { parts << trend }
-
-    // ── Today's forecast range ──
-    BigDecimal tMax = safeCurrentBD(settings.weatherDevice, "temperatureMax")
-    BigDecimal tMin = safeCurrentBD(settings.weatherDevice, "temperatureMin")
-    if (tMax != null && tMin != null) {
-        int hi = tMax.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
-        int lo = tMin.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
-        parts << "today ${lo}–${hi}°"
+    // 4. Tomorrow — only after 4pm, when tomorrow becomes the actionable day
+    if (!beforeAfternoonCutoff) {
+        BigDecimal tMaxT = safeCurrentBD(settings.weatherDevice, "temperatureMaxTomorrow")
+        BigDecimal tMinT = safeCurrentBD(settings.weatherDevice, "temperatureMinTomorrow")
+        String condT     = settings.weatherDevice?.currentValue("weatherTomorrow") as String
+        BigDecimal rainT = safeCurrentBD(settings.weatherDevice, "precipitationProbabilityTomorrow")
+        if (tMaxT != null && tMinT != null) {
+            int hi = tMaxT.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
+            int lo = tMinT.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
+            StringBuilder seg = new StringBuilder("Tomorrow")
+            if (condT) {
+                String emoji = conditionEmoji(condT)
+                seg.append(" ").append(emoji ?: condT.toLowerCase())
+            }
+            seg.append(" \u2193").append(lo).append("\u00B0 \u2191").append(hi).append("\u00B0")
+            if (rainT != null && rainT.intValue() >= 30) {
+                seg.append(", rain ").append(rainT.intValue()).append("%")
+            }
+            parts << seg.toString()
+        }
     }
 
-    // ── Precipitation probability (urgent 1h wins over 6h) ──
-    BigDecimal prob1h = safeCurrentBD(settings.weatherDevice, "precipitationProbabilityNextHour")
-    BigDecimal prob6h = safeCurrentBD(settings.weatherDevice, "precipitationProbabilityNext6h")
-    if (prob1h != null && prob1h.intValue() >= 60) {
-        parts << "rain ${prob1h.intValue()}% within 1h"
-    } else if (prob6h != null && prob6h.intValue() >= 40) {
-        parts << "rain ${prob6h.intValue()}% within 6h"
-    }
-
-    // ── Wind gusts (only when notable) ──
-    BigDecimal gust = safeCurrentBD(settings.weatherDevice, "windGust")
-    if (gust != null && gust.intValue() >= 20) {
-        parts << "gusts ${gust.intValue()} mph"
-    }
-
-    // ── UV index (only when high / very high / extreme) ──
+    // 5. UV index
     BigDecimal uv = safeCurrentBD(settings.weatherDevice, "ultravioletIndex")
     if (uv != null && uv >= 8.0G) {
         String uvWord = uv >= 11.0G ? "extreme" : "very high"
         parts << "UV ${uv.intValue()} ${uvWord}"
     }
 
-    // ── AQI (only when at moderate or worse — 'good' is the boring 80% case) ──
+    // 6. AQI (only when moderate or worse)
     if (houseAqi != null) {
         int aqi = houseAqi.toInteger()
         if (aqi > 50) {
@@ -1169,31 +1156,37 @@ private String buildIdleStatus(BigDecimal outdoorTemp, boolean rainDetected, Big
         }
     }
 
-    if (parts.isEmpty()) { return "No weather data" }
+    if (parts.isEmpty()) { return "No notable weather" }
+    String first = parts[0]
+    if (first && first.length() > 0) {
+        parts[0] = first.substring(0, 1).toUpperCase() + first.substring(1)
+    }
     return parts.join(" \u00B7 ")  // middle dot separator: " · "
 }
 
-// Returns a short arrow + word for the current outdoor trend, or null when
-// trend is unknown/steady (steady = not worth surfacing).
-private String currentTrendLabel() {
+private int currentLocalHour() {
     try {
-        Map trend = outdoorTrendResult()
-        switch (trend?.trend) {
-            case "heating up":   return "↗ heating up"
-            case "cooling down": return "↘ cooling down"
-            default:             return null
-        }
-    } catch (Exception e) { return null }
+        Calendar cal = Calendar.getInstance(location?.timeZone ?: TimeZone.getDefault())
+        return cal.get(Calendar.HOUR_OF_DAY)
+    } catch (Exception e) {
+        return Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    }
 }
 
-private boolean isNighttime() {
-    try {
-        Long rise = location.sunrise?.time
-        Long set  = location.sunset?.time
-        Long nowT = now()
-        if (rise != null && set != null) { return nowT < rise || nowT > set }
-    } catch (Exception e) { /* graceful skip if location data unavailable */ }
-    return false
+// Maps a free-form WMO/forecast condition string to a single weather emoji.
+// Returns null when no confident match is found, so callers can skip the emoji.
+private String conditionEmoji(String condition) {
+    if (!condition) { return null }
+    String c = condition.toLowerCase()
+    if (c.contains("thunder") || c.contains("storm"))                                     { return "⛈️" }
+    if (c.contains("snow") || c.contains("sleet") || c.contains("flurr") || c.contains("blizzard")) { return "🌨️" }
+    if (c.contains("freezing") || c.contains("hail"))                                     { return "🥶" }
+    if (c.contains("rain") || c.contains("shower") || c.contains("drizzle"))              { return "🌧️" }
+    if (c.contains("fog") || c.contains("mist") || c.contains("haze") || c.contains("smoke")) { return "🌫️" }
+    if (c.contains("partly") || c.contains("partial") || c.contains("mostly cloud") || c.contains("mostly sunny")) { return "⛅" }
+    if (c.contains("cloud") || c.contains("overcast"))                                    { return "☁️" }
+    if (c.contains("clear") || c.contains("sunny") || c.contains("fair") || c.contains("bright")) { return "☀️" }
+    return null
 }
 
 private String aqiCategory(int aqi) {
