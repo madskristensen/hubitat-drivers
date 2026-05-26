@@ -1055,7 +1055,7 @@ def logsOff() {
 //   1. rain probability (1h ≥ 60% wins over 6h ≥ 30%)
 //   2. today's high — only before 4pm local (afternoon = high is historical)
 //   3. current feels-like — only when |feels − actual| ≥ 5°F
-//   4. tomorrow's range/condition/rain — only after 4pm local
+//   4. tomorrow's range/condition/rain — always when forecast available
 //   5. UV ≥ 8
 //   6. AQI > 50
 //
@@ -1118,26 +1118,25 @@ private String buildIdleStatus(BigDecimal outdoorTemp, boolean rainDetected, Big
         }
     }
 
-    // 4. Tomorrow — only after 4pm, when tomorrow becomes the actionable day
-    if (!beforeAfternoonCutoff) {
-        BigDecimal tMaxT = safeCurrentBD(settings.weatherDevice, "temperatureMaxTomorrow")
-        BigDecimal tMinT = safeCurrentBD(settings.weatherDevice, "temperatureMinTomorrow")
-        String condT     = settings.weatherDevice?.currentValue("weatherTomorrow") as String
-        BigDecimal rainT = safeCurrentBD(settings.weatherDevice, "precipitationProbabilityTomorrow")
-        if (tMaxT != null && tMinT != null) {
-            int hi = tMaxT.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
-            int lo = tMinT.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
-            StringBuilder seg = new StringBuilder("Tomorrow")
-            if (condT) {
-                String emoji = conditionEmoji(condT)
-                seg.append(" ").append(emoji ?: condT.toLowerCase())
-            }
-            seg.append(" \u2193").append(lo).append("\u00B0 \u2191").append(hi).append("\u00B0")
-            if (rainT != null && rainT.intValue() >= 30) {
-                seg.append(", rain ").append(rainT.intValue()).append("%")
-            }
-            parts << seg.toString()
+    // 4. Tomorrow — always include when forecast data is available, so users
+    // see what's coming regardless of time of day.
+    BigDecimal tMaxT = safeCurrentBD(settings.weatherDevice, "temperatureMaxTomorrow")
+    BigDecimal tMinT = safeCurrentBD(settings.weatherDevice, "temperatureMinTomorrow")
+    String condT     = settings.weatherDevice?.currentValue("weatherTomorrow") as String
+    BigDecimal rainT = safeCurrentBD(settings.weatherDevice, "precipitationProbabilityTomorrow")
+    if (tMaxT != null && tMinT != null) {
+        int hi = tMaxT.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
+        int lo = tMinT.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
+        StringBuilder seg = new StringBuilder("Tomorrow")
+        if (condT) {
+            String emoji = conditionEmoji(condT)
+            seg.append(" ").append(emoji ?: condT.toLowerCase())
         }
+        seg.append(" \u2193").append(lo).append("\u00B0 \u2191").append(hi).append("\u00B0")
+        if (rainT != null && rainT.intValue() >= 30) {
+            seg.append(", rain ").append(rainT.intValue()).append("%")
+        }
+        parts << seg.toString()
     }
 
     // 5. UV index
