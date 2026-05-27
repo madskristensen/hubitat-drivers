@@ -1,7 +1,7 @@
 /**
  *  Calendar Todo Switch
  *  Author:  Mads Kristensen
- *  Version: 0.6.1 — 2026-05-26 — Idle icon/text now refresh on Save Preferences (previously only seeded on first install). Default idle text changed to "Clear".
+ *  Version: 0.7.0 — 2026-05-26 — Quality pass: cache parsed emoji rules per poll, cheap base64 sentinel check, single-pass iCal parser, fix missed-event dedupe so older queued occurrences get marked triggered, overwrite stacked exact-trigger runIn calls, stable synthetic UIDs, correct unescape ordering, URL scheme guard, unified ISO helper, logd helper, remove dead code.
  *  License: MIT
  *
  *  Subscribes to a webcal/iCal feed (https://...) and exposes a Switch that
@@ -19,6 +19,7 @@
  *  weekly chore fires fresh every week.
  *
  *  Changelog:
+ *    0.7.0 — 2026-05-26 — Quality pass. Perf: parse emoji rules once per poll (was per matching event), single-pass iCal line unfolder (was 2x list allocation), cheap base64 sentinel check (was anchored regex over the entire 1+ MB body). Correctness: queued/older matching occurrences are now all marked triggered (previously only the most-recent fired and older ones could keep being "missed"); exact-trigger runIn now overwrites (was stacking on every poll); synthetic UIDs no longer depend on parse-order index; iCal unescape order fixed with sentinel; URL scheme guard rejects non-http(s); response.getStatus() wrapped in try/catch. Quality: unified ISO timestamps to hub zone; added logd helper; removed dead parseIcsDateTime; fixed (state?:[]) cast precedence; documented WKST limitation.
  *    0.6.1 — 2026-05-26 — Idle icon/text now refresh whenever preferences are saved (was only seeded on first install / when null). Default idle text changed to "Clear".
  *    0.6.0 — 2026-05-26 — New `idleEmoji` and `idleText` preferences. `todo` / `nextTodo` now publish the idle text (default "Clear") when there is no active or upcoming chore. `todoIcon` idle defaults to ✔️ but can be changed.
  *    0.5.2 — 2026-05-26 — Use a single-space placeholder for idle text attributes (`todo`, `todoStart`, `nextTodo`, `nextTodoStart`). Hubitat treats `value: ""` as "remove the attribute", which was causing the Todo row to disappear from the device page.
@@ -45,7 +46,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
-@Field static final String DRIVER_VERSION = "0.6.1"
+@Field static final String DRIVER_VERSION = "0.7.0"
 @Field static final String DEFAULT_PREFIX = "\u2705" // ✅
 @Field static final String DEFAULT_FALLBACK_EMOJI = "\uD83D\uDD14" // 🔔
 @Field static final String DEFAULT_IDLE_ICON = "\u2714\uFE0F" // ✔️ (shown when no active todo)
@@ -176,12 +177,12 @@ def poll() {
 }
 
 def on() {
-	if (logEnable) log.debug "Calendar Todo: manual on"
+	logd "manual on"
 	sendEvent(name: "switch", value: "on", descriptionText: "${device.displayName} switch is on (manual)")
 }
 
 def off() {
-	if (logEnable) log.debug "Calendar Todo: manual off"
+	logd "manual off"
 	sendEvent(name: "switch", value: "off", descriptionText: "${device.displayName} switch is off (manually cleared)")
 	clearTodo()
 }
@@ -219,7 +220,7 @@ void schedulePolling() {
 		case 60: runEvery1Hour("pollFeed");    break
 		default: runEvery5Minutes("pollFeed")
 	}
-	if (logEnable) log.debug "Calendar Todo: polling every ${minutes} min"
+	logd "polling every ${minutes} min"
 }
 
 // ---------- Feed fetch ----------
@@ -234,13 +235,18 @@ void pollFeed() {
 	if (url.toLowerCase().startsWith("webcal://")) {
 		url = "https://" + url.substring("webcal://".length())
 	}
+	String lower = url.toLowerCase()
+	if (!(lower.startsWith("https://") || lower.startsWith("http://"))) {
+		log.warn "Calendar Todo: refusing non-http(s) URL '${url}'"
+		return
+	}
 
 	Map params = [
 		uri: url,
 		timeout: 30,
 		headers: ["Accept": "text/calendar, text/plain, */*"]
 	]
-	if (logEnable) log.debug "Calendar Todo: fetching ${url}"
+	logd "fetching ${url}"
 	try {
 		asynchttpGet("handleFeed", params)
 	} catch (Exception e) {
@@ -254,8 +260,19 @@ void handleFeed(hubitat.scheduling.AsyncResponse response, Map data) {
 		log.warn "Calendar Todo: null response"
 		return
 	}
-	if (response.hasError() || response.getStatus() != 200) {
-		log.warn "Calendar Todo: HTTP ${response.getStatus()} ${response.getErrorMessage() ?: ''}"
+	int status
+	try {
+		if (response.hasError()) {
+			log.warn "Calendar Todo: HTTP error — ${response.getErrorMessage() ?: 'unknown'}"
+			return
+		}
+		status = response.getStatus()
+	} catch (Exception e) {
+		log.warn "Calendar Todo: could not read response status — ${e.message}"
+		return
+	}
+	if (status != 200) {
+		log.warn "Calendar Todo: HTTP ${status}"
 		return
 	}
 
@@ -270,20 +287,21 @@ void handleFeed(hubitat.scheduling.AsyncResponse response, Map data) {
 		return
 	}
 
-	if (logEnable) log.debug "Calendar Todo: response body length=${body?.length() ?: 0}, head='${body?.take(80)}'"
+	logd "response body length=${body?.length() ?: 0}, head='${body?.take(80)}'"
 
 	// Hubitat base64-encodes the body when the response Content-Type isn't recognized as text
 	// (Google serves text/calendar). Detect by looking for the iCal sentinel and decode if absent.
-	if (body && !body.contains("BEGIN:VCALENDAR") && body ==~ /[A-Za-z0-9+\/=\r\n]+/) {
+	// Cheap heuristic: check the first 200 chars look like base64 alphabet — avoids a full-body regex.
+	if (body && !body.contains("BEGIN:VCALENDAR") && looksLikeBase64Head(body)) {
 		try {
 			byte[] decoded = body.decodeBase64()
 			String text = new String(decoded, "UTF-8")
 			if (text.contains("BEGIN:VCALENDAR")) {
 				body = text
-				if (logEnable) log.debug "Calendar Todo: base64-decoded body (decoded length=${body.length()})"
+				logd "base64-decoded body (decoded length=${body.length()})"
 			}
 		} catch (Exception e) {
-			if (logEnable) log.debug "Calendar Todo: base64 decode attempt failed — ${e.message}"
+			logd "base64 decode attempt failed — ${e.message}"
 		}
 	}
 
@@ -297,9 +315,23 @@ void handleFeed(hubitat.scheduling.AsyncResponse response, Map data) {
 	}
 
 	List<Map> events = parseICal(body)
-	if (logEnable) log.debug "Calendar Todo: parsed ${events.size()} VEVENT(s)"
+	logd "parsed ${events.size()} VEVENT(s)"
 
 	processEvents(events)
+}
+
+boolean looksLikeBase64Head(String body) {
+	int len = Math.min(body.length(), 200)
+	for (int i = 0; i < len; i++) {
+		char c = body.charAt(i)
+		boolean ok = (c >= (char)'A' && c <= (char)'Z') ||
+					 (c >= (char)'a' && c <= (char)'z') ||
+					 (c >= (char)'0' && c <= (char)'9') ||
+					 c == (char)'+' || c == (char)'/' || c == (char)'=' ||
+					 c == (char)'\r' || c == (char)'\n'
+		if (!ok) return false
+	}
+	return len > 0
 }
 
 // ---------- Event processing ----------
@@ -314,9 +346,12 @@ void processEvents(List<Map> events) {
 	String prefixStr = (prefix ?: DEFAULT_PREFIX)
 	String mode = matchMode ?: "prefix"
 
-	// Expand RRULE-bearing events into individual occurrences in [windowStart, windowEnd]
+	// Parse emoji rules ONCE per poll instead of per matching event
+	List<List> rules = parseEmojiMap(emojiMap as String)
+	String fallback = resolveFallbackEmoji()
+
 	List<Map> expanded = expandOccurrences(events, windowStart, windowEnd)
-	if (logEnable) log.debug "Calendar Todo: ${expanded.size()} occurrence(s) after RRULE expansion"
+	logd "${expanded.size()} occurrence(s) after RRULE expansion"
 
 	List<Map> matching = expanded.findAll { Map ev ->
 		if (ev.startMs == null) return false
@@ -328,22 +363,28 @@ void processEvents(List<Map> events) {
 
 	sendEvent(name: "matchingEvents", value: matching.size())
 
-	List<String> triggered = (state.triggeredUIDs ?: []) as List<String>
+	List<String> triggered = ((state.triggeredUIDs ?: []) as List<String>)
 
 	// Drop UIDs for events no longer in the lookback window (cleanup)
 	Set<String> currentUids = matching.collect { it.uid }.findAll { it } as Set<String>
 	triggered = triggered.findAll { currentUids.contains(it) }
 
-	// Most recently started, currently-due event among matching set
-	Map activeEvent = matching.findAll { it.startMs <= now }.max { it.startMs }
-	Map nextEvent = matching.find { it.startMs > now }
+	// Single linear split: everything <= now is "due", everything > now is upcoming.
+	int splitIdx = matching.size()
+	for (int i = 0; i < matching.size(); i++) {
+		if ((matching[i].startMs as long) > now) { splitIdx = i; break }
+	}
+	List<Map> due = (splitIdx > 0) ? matching.subList(0, splitIdx) : []
+	Map activeEvent = due ? due.last() : null
+	Map nextEvent = (splitIdx < matching.size()) ? matching[splitIdx] : null
 
-	// Trigger logic: any matching event whose start has passed and which hasn't
-	// been triggered yet → fire the latest such event.
-	Map untriggered = matching.findAll { it.startMs <= now && !triggered.contains(it.uid) }.max { it.startMs }
+	// Trigger logic: any matching due event that hasn't been triggered yet → fire the latest such
+	// event AND mark all older missed ones triggered so they don't get stuck in the untriggered set.
+	List<Map> untriggeredList = due.findAll { !triggered.contains(it.uid) }
+	Map untriggered = untriggeredList ? untriggeredList.last() : null
 	if (untriggered) {
 		String cleanTitle = cleanSummary(untriggered.summary as String, prefixStr, mode)
-		String icon = pickEmoji(cleanTitle)
+		String icon = pickEmojiFromRules(cleanTitle, rules, fallback)
 		String startStr = isoFromMs(untriggered.startMs as long)
 		log.info "Calendar Todo: switching on for '${icon ? icon + ' ' : ''}${cleanTitle}' (start ${startStr})"
 		sendEvent(name: "switch", value: "on",
@@ -351,15 +392,16 @@ void processEvents(List<Map> events) {
 		sendEvent(name: "todo", value: cleanTitle)
 		sendEvent(name: "todoIcon", value: icon)
 		sendEvent(name: "todoStart", value: startStr)
-		triggered << (untriggered.uid as String)
-		// Bound the history list
+		// Mark every queued/missed due event as triggered (the latest fires; older ones are
+		// silently consumed so they don't keep showing up as untriggered next poll).
+		untriggeredList.each { triggered << (it.uid as String) }
 		if (triggered.size() > MAX_TRIGGERED_HISTORY) {
 			triggered = triggered[-MAX_TRIGGERED_HISTORY..-1]
 		}
 	} else if (activeEvent && device.currentValue("switch") == "on") {
 		// Keep current todo string in sync with the active event (in case title changed in calendar)
 		String cleanTitle = cleanSummary(activeEvent.summary as String, prefixStr, mode)
-		String icon = pickEmoji(cleanTitle)
+		String icon = pickEmojiFromRules(cleanTitle, rules, fallback)
 		if (device.currentValue("todo") != cleanTitle) {
 			sendEvent(name: "todo", value: cleanTitle)
 			sendEvent(name: "todoStart", value: isoFromMs(activeEvent.startMs as long))
@@ -375,20 +417,26 @@ void processEvents(List<Map> events) {
 	if (nextEvent) {
 		String nextClean = cleanSummary(nextEvent.summary as String, prefixStr, mode)
 		sendEvent(name: "nextTodo", value: nextClean)
-		sendEvent(name: "nextTodoIcon", value: pickEmoji(nextClean))
+		sendEvent(name: "nextTodoIcon", value: pickEmojiFromRules(nextClean, rules, fallback))
 		sendEvent(name: "nextTodoStart", value: isoFromMs(nextEvent.startMs as long))
-		// Schedule an exact trigger at the next event's start time, so the
-		// switch turns on promptly even between polls.
+		// Schedule an exact trigger at the next event's start time, so the switch turns on promptly
+		// even between polls. Use overwrite:true via a named handler so repeated polls don't stack.
 		long delay = ((nextEvent.startMs as long) - now) / 1000L
 		if (delay > 0 && delay < 24L * 3600L) {
-			runIn((delay as Integer) + 1, "pollFeed", [overwrite: false])
-			if (logEnable) log.debug "Calendar Todo: scheduled trigger in ${delay}s for '${nextEvent.summary}'"
+			runIn((delay as Integer) + 1, "exactTrigger", [overwrite: true])
+			logd "scheduled exact trigger in ${delay}s for '${nextEvent.summary}'"
 		}
 	} else {
 		sendEvent(name: "nextTodo", value: idleTextValue())
 		sendEvent(name: "nextTodoIcon", value: idleIconValue())
 		sendEvent(name: "nextTodoStart", value: idleTextValue())
 	}
+}
+
+// Named handler for the exact-time trigger so it has its own runIn slot
+// (overwrite:true prevents stacking when multiple polls schedule it).
+void exactTrigger() {
+	pollFeed()
 }
 
 String cleanSummary(String summary, String prefixStr, String mode) {
@@ -402,29 +450,32 @@ String cleanSummary(String summary, String prefixStr, String mode) {
 	return s
 }
 
-// Returns just the matching emoji for a cleaned title, or the fallback emoji
-// (default 🔔), or "" if no rule matches and the fallback is blank.
-String pickEmoji(String cleanTitle) {
+// Returns the matching emoji for `cleanTitle` given pre-parsed `rules` (from
+// parseEmojiMap) and a resolved `fallback`. Splitting this from pickEmoji lets
+// the caller parse rules ONCE per poll instead of per matching event.
+String pickEmojiFromRules(String cleanTitle, List<List> rules, String fallback) {
 	if (!cleanTitle) return ""
 	String lowered = cleanTitle.toLowerCase()
-	List<List> rules = parseEmojiMap(emojiMap as String)
 	for (List rule : rules) {
 		String emoji = rule[0] as String
-		List<String> keywords = rule[1] as List<String>
-		for (String kw : keywords) {
-			if (!kw) continue
-			String escaped = kw.replaceAll(/[\\.\[\]{}()*+?^$|]/, '\\\\$0')
-			String pattern = "(?i)\\b" + escaped + "\\b"
-			if (lowered =~ pattern) return emoji
+		List<String> patterns = rule[1] as List<String>
+		for (String pattern : patterns) {
+			if (pattern && (lowered =~ pattern)) return emoji
 		}
 	}
+	return fallback ?: ""
+}
+
+String resolveFallbackEmoji() {
 	String fallback = (defaultEmoji != null) ? (defaultEmoji as String) : DEFAULT_FALLBACK_EMOJI
 	return fallback?.trim() ? fallback.trim() : ""
 }
 
-// Parses the emojiMap preference into an ordered list of [emoji, [keywords]].
+// Parses the emojiMap preference into an ordered list of [emoji, [patterns]].
 // One rule per line; format: `EMOJI = kw1, kw2, ...`. Lines starting with `#`
-// and blank lines are ignored.
+// and blank lines are ignored. Each keyword is converted into a ready-to-use
+// `(?i)\bkeyword\b` regex string so the hot path (pickEmojiFromRules) doesn't
+// re-escape on every call.
 List<List> parseEmojiMap(String text) {
 	List<List> rules = []
 	if (!text) return rules
@@ -436,39 +487,35 @@ List<List> parseEmojiMap(String text) {
 		String emoji = line.substring(0, eq).trim()
 		String rhs = line.substring(eq + 1).trim()
 		if (!emoji || !rhs) continue
-		List<String> keywords = []
+		List<String> patterns = []
 		for (String kw : rhs.split(',')) {
 			String k = kw?.trim()?.toLowerCase()
-			if (k) keywords << k
+			if (!k) continue
+			String escaped = k.replaceAll(/[\\.\[\]{}()*+?^$|]/, '\\\\$0')
+			patterns << ("(?i)\\b" + escaped + "\\b")
 		}
-		if (keywords) rules << [emoji, keywords]
+		if (patterns) rules << [emoji, patterns]
 	}
 	return rules
 }
 
 // ---------- iCal parser ----------
 
-// Unfolds RFC 5545 line folding (continuation lines start with space or tab),
-// splits into VEVENT blocks, and pulls DTSTART/DTEND/SUMMARY/UID. Ignores
-// VTIMEZONE definitions and RRULE expansion.
+// Unfolds RFC 5545 line folding (continuation lines start with space or tab)
+// in a single pass and walks VEVENT blocks, pulling DTSTART/DTEND/SUMMARY/UID/
+// RRULE/EXDATE. Ignores VTIMEZONE definitions.
+//
+// Note on WKST: this parser does not honor RRULE WKST; week boundaries assume
+// Monday (the RFC default). Calendars that explicitly set WKST=SU may compute
+// weekly+BYDAY occurrences off by a week.
 List<Map> parseICal(String body) {
-	List<String> rawLines = body.split(/\r?\n/) as List<String>
-	List<String> lines = []
-	for (String line : rawLines) {
-		if (line == null) continue
-		if ((line.startsWith(" ") || line.startsWith("\t")) && !lines.isEmpty()) {
-			int last = lines.size() - 1
-			lines[last] = lines[last] + line.substring(1)
-		} else {
-			lines << line
-		}
-	}
-
 	List<Map> events = []
 	Map current = null
-	for (String line : lines) {
-		String trimmed = line?.trim()
-		if (!trimmed) continue
+	StringBuilder unfolded = new StringBuilder(256)
+
+	Closure handleLine = { String logical ->
+		String trimmed = logical?.trim()
+		if (!trimmed) return
 		if (trimmed == "BEGIN:VEVENT") {
 			current = [:]
 		} else if (trimmed == "END:VEVENT") {
@@ -478,10 +525,9 @@ List<Map> parseICal(String body) {
 			}
 		} else if (current != null) {
 			int colon = trimmed.indexOf(':')
-			if (colon <= 0) continue
+			if (colon <= 0) return
 			String left = trimmed.substring(0, colon)
 			String value = trimmed.substring(colon + 1)
-			// left may be "PROP" or "PROP;PARAM=VAL;PARAM2=VAL2"
 			List<String> parts = left.split(';') as List<String>
 			String name = parts[0].toUpperCase()
 			Map<String, String> params = [:]
@@ -524,10 +570,27 @@ List<Map> parseICal(String body) {
 		}
 	}
 
-	// Synthesize a UID if missing (rare; defensive)
-	events.eachWithIndex { Map ev, int idx ->
+	// Single pass: accumulate raw lines and emit the previous logical line whenever
+	// the next raw line is not a continuation. eachLine avoids the double List<String>.
+	body.eachLine { String raw ->
+		if (raw == null) return
+		if ((raw.startsWith(" ") || raw.startsWith("\t")) && unfolded.length() > 0) {
+			unfolded.append(raw.substring(1))
+		} else {
+			if (unfolded.length() > 0) {
+				handleLine(unfolded.toString())
+				unfolded.setLength(0)
+			}
+			unfolded.append(raw)
+		}
+	}
+	if (unfolded.length() > 0) handleLine(unfolded.toString())
+
+	// Synthesize a stable UID if missing (rare; defensive). Stable across feed
+	// re-orderings so previously-triggered events aren't re-fired.
+	for (Map ev : events) {
 		if (!ev.uid) {
-			ev.uid = "synthetic-${ev.startMs ?: 0}-${(ev.summary ?: '').hashCode()}-${idx}"
+			ev.uid = "synthetic-${ev.startMs ?: 0}-${(ev.summary ?: '').hashCode()}".toString()
 		}
 	}
 
@@ -536,11 +599,16 @@ List<Map> parseICal(String body) {
 
 String unescapeIcsText(String s) {
 	if (s == null) return null
-	return s.replace("\\,", ",")
+	// Order matters: replace literal escaped backslash with a sentinel first so it
+	// doesn't accidentally combine with following chars (e.g. source "\\n" must
+	// become "\n" literal, not a newline).
+	String sentinel = "\u0001"
+	return s.replace("\\\\", sentinel)
+			.replace("\\,", ",")
 			.replace("\\;", ";")
 			.replace("\\n", "\n")
 			.replace("\\N", "\n")
-			.replace("\\\\", "\\")
+			.replace(sentinel, "\\")
 }
 
 Map parseIcsDateTimeFull(String value, Map<String, String> params) {
@@ -569,7 +637,7 @@ Map parseIcsDateTimeFull(String value, Map<String, String> params) {
 			try {
 				zone = ZoneId.of(tzid)
 			} catch (Exception e) {
-				if (logEnable) log.debug "Calendar Todo: unknown TZID '${tzid}', using hub zone"
+				logd "unknown TZID '${tzid}', using hub zone"
 				zone = hubZone()
 			}
 		} else {
@@ -578,14 +646,9 @@ Map parseIcsDateTimeFull(String value, Map<String, String> params) {
 		ZonedDateTime zdt = ldt.atZone(zone)
 		return [ms: zdt.toInstant().toEpochMilli(), zdt: zdt, allDay: false]
 	} catch (Exception e) {
-		if (logEnable) log.debug "Calendar Todo: could not parse date '${value}' — ${e.message}"
+		logd "could not parse date '${value}' — ${e.message}"
 		return null
 	}
-}
-
-Long parseIcsDateTime(String value, Map<String, String> params) {
-	Map m = parseIcsDateTimeFull(value, params)
-	return m?.ms as Long
 }
 
 // ---------- RRULE expansion ----------
@@ -620,7 +683,7 @@ List<Map> expandOccurrences(List<Map> events, long windowStart, long windowEnd) 
 		Long untilMs = null
 		if (rule.UNTIL) {
 			Map untilParsed = parseIcsDateTimeFull(rule.UNTIL as String, [:])
-			if (untilParsed != null) untilMs = untilParsed.ms as Long
+			if (untilParsed != null) untilMs = untilParsed.ms
 		}
 		List<Long> exdates = (ev.exdates ?: []) as List<Long>
 		Set<DayOfWeek> byDays = parseByDay((rule.BYDAY ?: "") as String)
@@ -681,7 +744,7 @@ List<Map> expandOccurrences(List<Map> events, long windowStart, long windowEnd) 
 				case "MONTHLY": cursor = cursor.plusMonths(interval); break
 				case "YEARLY":  cursor = cursor.plusYears(interval); break
 				default:
-					if (logEnable) log.debug "Calendar Todo: unsupported FREQ '${freq}' on '${summary}'"
+					logd "unsupported FREQ '${freq}' on '${summary}'"
 					cursor = cursor.plusYears(100) // bail
 			}
 		}
@@ -709,13 +772,17 @@ ZoneId hubZone() {
 }
 
 String nowIsoString() {
-	return Instant.now().toString()
+	return ZonedDateTime.now(hubZone()).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
 }
 
 String isoFromMs(long ms) {
 	return ZonedDateTime.ofInstant(Instant.ofEpochMilli(ms), hubZone()).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
 }
 
+void logd(String msg) {
+	if (logEnable) log.debug "Calendar Todo: ${msg}"
+}
+
 def parse(String description) {
-	if (logEnable) log.debug "Calendar Todo: parse '${description}'"
+	logd "parse '${description}'"
 }

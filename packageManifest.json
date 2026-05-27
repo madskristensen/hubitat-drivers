@@ -3,7 +3,7 @@
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
   "dateReleased": "2026-05-26",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/README.md",
   "drivers": [
@@ -97,7 +97,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/calendar-todo/calendar-todo.groovy",
       "required": false,
-      "version": "0.6.1"
+      "version": "0.7.0"
     }
   ],
   "apps": [
