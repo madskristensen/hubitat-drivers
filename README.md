@@ -2,7 +2,7 @@
 
 Community Hubitat Elevation drivers and apps by Mads Kristensen.
 
-**10 production-ready drivers + 3 apps** • 🌐 6 Local LAN • ☁️ 4 Cloud API • 📦 HPM Ready
+**11 production-ready drivers + 3 apps** • 🌐 6 Local LAN • ☁️ 5 Cloud API • 📦 HPM Ready
 
 ## Available Drivers
 
@@ -34,6 +34,12 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
 | -------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------- |
 | **Open-Meteo Weather Enhanced** | Cloud | Free • No API key • Current + hourly forecast • WMO conditions • Next-hour precipitation helpers • Today's high/low | [Docs](drivers/open-meteo/README.md)        |
 | **PurpleAir AQI Virtual Sensor** | Cloud | Real-time AQI • Multi-sensor averaging • EPA/Woodsmoke correction • Geolocation support | [Docs](drivers/purpleair-aqi/README.md)        |
+
+### 📅 Calendar & Productivity
+
+| Driver                     | Type  | Key Features                                                                 | Docs                                         |
+| -------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------- |
+| **Calendar Todo Switch** | Cloud | Subscribes to any iCal/webcal feed • Switch turns on at event start when title starts with ✅ (configurable) • Recurring events (RRULE) expanded with BYDAY + EXDATE support • Publishes cleaned title as `todo` attribute for SharpTools tiles • Standard Switch on/off commands | [Docs](drivers/calendar-todo/README.md) |
 
 ### 🔌 Power & Outlets
 
@@ -71,6 +77,7 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
 2. **Paste** one of these URLs:
 
    ```text
+   Calendar Todo:    https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/calendar-todo/packageManifest.json
    Daikin WiFi:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/daikin-wifi/packageManifest.json
    Fully Kiosk:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/fully-kiosk/packageManifest.json
    Gemstone Lights:  https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/packageManifest.json
