@@ -1,7 +1,7 @@
 /**
  *  Calendar Todo Switch
  *  Author:  Mads Kristensen
- *  Version: 0.7.0 — 2026-05-26 — Quality pass: cache parsed emoji rules per poll, cheap base64 sentinel check, single-pass iCal parser, fix missed-event dedupe so older queued occurrences get marked triggered, overwrite stacked exact-trigger runIn calls, stable synthetic UIDs, correct unescape ordering, URL scheme guard, unified ISO helper, logd helper, remove dead code.
+ *  Version: 0.7.1 — 2026-05-26 — Scrub auth tokens (Google `/private-<hex>/` segments and any query string) from URLs before debug-logging the fetch. WKST=MO assumption now documented inline.
  *  License: MIT
  *
  *  Subscribes to a webcal/iCal feed (https://...) and exposes a Switch that
@@ -19,7 +19,8 @@
  *  weekly chore fires fresh every week.
  *
  *  Changelog:
- *    0.7.0 — 2026-05-26 — Quality pass. Perf: parse emoji rules once per poll (was per matching event), single-pass iCal line unfolder (was 2x list allocation), cheap base64 sentinel check (was anchored regex over the entire 1+ MB body). Correctness: queued/older matching occurrences are now all marked triggered (previously only the most-recent fired and older ones could keep being "missed"); exact-trigger runIn now overwrites (was stacking on every poll); synthetic UIDs no longer depend on parse-order index; iCal unescape order fixed with sentinel; URL scheme guard rejects non-http(s); response.getStatus() wrapped in try/catch. Quality: unified ISO timestamps to hub zone; added logd helper; removed dead parseIcsDateTime; fixed (state?:[]) cast precedence; documented WKST limitation.
+ *    0.7.1 — 2026-05-26 — Scrub auth tokens (Google `/private-<hex>/` segments and any query string) from URLs before debug-logging the fetch. WKST=MO assumption now documented inline on expandOccurrences.
+ *    0.7.0 — 2026-05-26 — Quality pass.Perf: parse emoji rules once per poll (was per matching event), single-pass iCal line unfolder (was 2x list allocation), cheap base64 sentinel check (was anchored regex over the entire 1+ MB body). Correctness: queued/older matching occurrences are now all marked triggered (previously only the most-recent fired and older ones could keep being "missed"); exact-trigger runIn now overwrites (was stacking on every poll); synthetic UIDs no longer depend on parse-order index; iCal unescape order fixed with sentinel; URL scheme guard rejects non-http(s); response.getStatus() wrapped in try/catch. Quality: unified ISO timestamps to hub zone; added logd helper; removed dead parseIcsDateTime; fixed (state?:[]) cast precedence; documented WKST limitation.
  *    0.6.1 — 2026-05-26 — Idle icon/text now refresh whenever preferences are saved (was only seeded on first install / when null). Default idle text changed to "Clear".
  *    0.6.0 — 2026-05-26 — New `idleEmoji` and `idleText` preferences. `todo` / `nextTodo` now publish the idle text (default "Clear") when there is no active or upcoming chore. `todoIcon` idle defaults to ✔️ but can be changed.
  *    0.5.2 — 2026-05-26 — Use a single-space placeholder for idle text attributes (`todo`, `todoStart`, `nextTodo`, `nextTodoStart`). Hubitat treats `value: ""` as "remove the attribute", which was causing the Todo row to disappear from the device page.
@@ -46,7 +47,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
-@Field static final String DRIVER_VERSION = "0.7.0"
+@Field static final String DRIVER_VERSION = "0.7.1"
 @Field static final String DEFAULT_PREFIX = "\u2705" // ✅
 @Field static final String DEFAULT_FALLBACK_EMOJI = "\uD83D\uDD14" // 🔔
 @Field static final String DEFAULT_IDLE_ICON = "\u2714\uFE0F" // ✔️ (shown when no active todo)
@@ -246,7 +247,7 @@ void pollFeed() {
 		timeout: 30,
 		headers: ["Accept": "text/calendar, text/plain, */*"]
 	]
-	logd "fetching ${url}"
+	logd "fetching ${scrubUrl(url)}"
 	try {
 		asynchttpGet("handleFeed", params)
 	} catch (Exception e) {
@@ -666,6 +667,10 @@ Map parseRRule(String value) {
 // Expand each VEVENT into one or more occurrences within [windowStart, windowEnd].
 // Non-recurring events pass through unchanged. Supports FREQ=DAILY/WEEKLY/MONTHLY/
 // YEARLY with INTERVAL, COUNT, UNTIL, and (for WEEKLY) BYDAY. Honors EXDATE.
+//
+// Note: WKST (week start day) is not honored — week boundaries assume Monday
+// (the RFC 5545 default). Calendars that explicitly set WKST=SU may compute
+// weekly+BYDAY occurrences off by a week.
 List<Map> expandOccurrences(List<Map> events, long windowStart, long windowEnd) {
 	List<Map> out = []
 	for (Map ev : events) {
@@ -781,6 +786,18 @@ String isoFromMs(long ms) {
 
 void logd(String msg) {
 	if (logEnable) log.debug "Calendar Todo: ${msg}"
+}
+
+// Scrub secrets from iCal feed URLs before logging. Google's webcal URLs embed
+// a token in the path (`/private-<hex>/`) and other providers append tokens as
+// query parameters. Keep the scheme + host + a trailing path hint so debug logs
+// stay useful without leaking the token.
+String scrubUrl(String url) {
+	if (!url) return ""
+	String scrubbed = url.replaceAll(/(?i)\/private-[A-Za-z0-9]+/, '/private-***')
+	int q = scrubbed.indexOf('?')
+	if (q >= 0) scrubbed = scrubbed.substring(0, q) + '?***'
+	return scrubbed
 }
 
 def parse(String description) {
