@@ -2,9 +2,10 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.13
+ * Version:   0.4.14
  *
  * Changelog:
+ *   0.4.14 — 2026-05-28 — Idle status: prefix today's high segment with the current condition emoji to mirror the Tomorrow styling ("Today ☀️ high 88°").
  *   0.4.13 — 2026-05-25 — Idle status: restyle tomorrow segment to "Tomorrow ☁️ ↓49° ↑63°" — emoji replaces the condition word; up/down arrows make low/high scannable.
  *   0.4.12 — 2026-05-25 — Idle status: capitalize "Tomorrow" segment so it reads consistently regardless of position in the line.
  *   0.4.11 — 2026-05-25 — Idle status: prefix tomorrow's condition word with an emoji (☁️ overcast, ☀️ sunny, ⛅ partly cloudy, etc.).
@@ -33,7 +34,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.13"
+@Field static final String  APP_VERSION        = "0.4.14"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -1082,12 +1083,19 @@ private String buildIdleStatus(BigDecimal outdoorTemp, boolean rainDetected, Big
         parts << "rain ${prob6h.intValue()}%"
     }
 
-    // 2. Today's high — only before 4pm (after that, the high is historical)
+    // 2. Today's high — only before 4pm (after that, the high is historical).
+    // Prefix with the current condition emoji (when available) to match the
+    // Tomorrow segment styling: "Today ☀️ high 88°".
     if (beforeAfternoonCutoff) {
         BigDecimal tMax = safeCurrentBD(settings.weatherDevice, "temperatureMax")
         if (tMax != null) {
             int hi = tMax.setScale(0, BigDecimal.ROUND_HALF_UP).toInteger()
-            parts << "high ${hi}°"
+            String condToday  = settings.weatherDevice?.currentValue((settings.weatherAttribute as String) ?: "weather") as String
+            String emojiToday = conditionEmoji(condToday)
+            StringBuilder seg = new StringBuilder("Today")
+            if (emojiToday) { seg.append(" ").append(emojiToday) }
+            seg.append(" high ").append(hi).append("\u00B0")
+            parts << seg.toString()
         }
     }
 
