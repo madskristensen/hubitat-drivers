@@ -1,17 +1,17 @@
 {
-  "packageName": "Generic Appliance",
+  "packageName": "Appliance Cycle Monitor",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
   "dateReleased": "2026-05-29",
   "version": "0.1.0",
   "communityLink": "",
-  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/generic-appliance/README.md",
+  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/appliance-cycle-monitor/README.md",
   "apps": [
     {
       "id": "35576bdb-ef61-4ad3-969f-e46f4e851905",
-      "name": "Generic Appliance",
+      "name": "Appliance Cycle Monitor",
       "namespace": "mads",
-      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/generic-appliance/generic-appliance-app.groovy",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/appliance-cycle-monitor/appliance-cycle-monitor-app.groovy",
       "iconUrl": "https://github.githubassets.com/favicons/favicon.png",
       "iconX2Url": "https://github.githubassets.com/favicons/favicon.png",
       "required": true,

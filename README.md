@@ -52,7 +52,7 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
 
 | Driver                     | Type  | Key Features                                                                 | Docs                                         |
 | -------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------- |
-| **Generic Appliance** | App | Ready/Running/Finished status for washer, dryer, dishwasher • Power-meter or vibration run detection • Finish debounce • Door-contact reset | [Docs](apps/generic-appliance/README.md) |
+| **Appliance Cycle Monitor** | App | Ready/Running/Finished status for washer, dryer, dishwasher • Power-meter (with hysteresis) or vibration run detection • Finish debounce • Door-contact reset | [Docs](apps/appliance-cycle-monitor/README.md) |
 
 ## Available Apps
 
@@ -61,7 +61,7 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
 | **Auto Away Mode** | Home/Away decisions from selected presence + motion + contact sensors • Simple inactivity thresholds (Home 0 / Away 20 default) • Optional lock/unlock actions on mode changes • Event-driven, debounced evaluation • Presence/motion/contact changes count as activity • Presence not-present has its own timer • Decision explainability | [Docs](apps/auto-away-mode/README.md) |
 | **Away Lights** | Simulates occupancy in Away mode • Configurable on/off time window • Debounced mode-change trigger • Optional push notification • Optional auto-off on return home | [Docs](apps/away-lights/README.md) |
 | **Climate Advisor** | Predictive "close the windows" alerts • Monitors indoor/outdoor temperature trends • Window/door and air quality integration • SharpTools-ready per-zone alerts | [Docs](apps/climate-advisor/README.md) |
-| **Generic Appliance** | Ready/Running/Finished status for washers, dryers, dishwashers • Power-meter or vibration/acceleration run detection • Configurable finish debounce • Door-contact "unloaded" reset • Per-appliance child devices • Manual override commands | [Docs](apps/generic-appliance/README.md) |
+| **Appliance Cycle Monitor** | Ready/Running/Finished cycle status for washers, dryers, dishwashers, and other appliances • Power-meter (hysteresis: separate Running/Finished thresholds) or vibration/acceleration run detection • Configurable finish debounce • Door-contact "unloaded" reset • Per-appliance child devices • Manual override commands | [Docs](apps/appliance-cycle-monitor/README.md) |
 
 ## Quick Start
 
@@ -97,7 +97,7 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
     Touchstone:       https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/packageManifest.json
     Auto Away Mode:   https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/auto-away-mode/packageManifest.json
     Away Lights:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/away-lights/packageManifest.json
-    Generic Appliance: https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/generic-appliance/packageManifest.json
+    Appliance Cycle Monitor: https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/appliance-cycle-monitor/packageManifest.json
     ```
 
 3. **Follow** the prompts

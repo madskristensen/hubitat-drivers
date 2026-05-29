@@ -1,25 +1,28 @@
 /**
- * Generic Appliance
+ * Appliance Cycle Monitor
  * Namespace: mads
  * Author:    Mads Kristensen
  * Version:   0.1.0
  *
- * Turns "dumb" appliances (washer, dryer, dishwasher) into status-reporting
- * devices. Each appliance gets a child "Generic Appliance Device" whose
- * applianceStatus follows a simple lifecycle:
+ * Turns "dumb" appliances such as washers, dryers, and dishwashers into
+ * status-reporting devices. Each appliance gets a child "Appliance Cycle Monitor
+ * Device" whose applianceStatus follows a simple lifecycle:
  *
  *     Ready → Running → Finished → (door opens) → Ready
  *
  * Run detection is per-appliance and uses whichever signal fits the machine:
- *   • Power meter   — Running while watts ≥ threshold (washer / dryer)
- *   • Acceleration  — Running while the vibration sensor is "active" (dishwasher)
+ *   • Power meter   — Running while watts ≥ the Running threshold; heading to
+ *                     Finished once watts fall to ≤ the Finished threshold
+ *                     (hysteresis deadband prevents fluttering)
+ *   • Acceleration  — Running while the vibration sensor is "active"
  *
  * A short "quiet" debounce keeps a mid-cycle pause from prematurely flipping to
  * Finished. An optional door contact sensor is mirrored onto the child and, when
- * opened after a cycle, resets the appliance to Ready ("you unloaded it").
+ * held open for 15 seconds after a cycle, resets the appliance to Ready ("you
+ * unloaded it"); a quick peek that re-closes the door does not reset it.
  *
  * Changelog:
- *   0.1.0 — 2026-05-29 — Initial release: parent app + child driver, power/acceleration run detection, finish debounce, door-open reset, manual status override API.
+ *   0.1.0 — 2026-05-29 — Initial release: parent app + child driver, power (with hysteresis) / acceleration run detection, finish debounce, 15s door-hold-open reset, manual status override API.
  */
 
 import groovy.transform.Field
@@ -29,19 +32,21 @@ import groovy.transform.Field
 @Field static final String  CHILD_NS          = "mads"
 @Field static final Integer MAX_APPLIANCES    = 10
 @Field static final Integer SEED_DELAY_SECONDS = 5
-@Field static final BigDecimal DEFAULT_POWER_THRESHOLD = 5.0   // watts
+@Field static final BigDecimal DEFAULT_POWER_THRESHOLD          = 5.0   // watts — at/above = Running
+@Field static final BigDecimal DEFAULT_POWER_FINISHED_THRESHOLD = 2.0   // watts — at/below = heading to Finished
 @Field static final Integer DEFAULT_FINISH_DELAY_MIN    = 3
+@Field static final Integer DOOR_OPEN_READY_SECONDS      = 15   // door must stay open this long after a cycle before resetting to Ready
 
 definition(
-    name:           "Generic Appliance",
+    name:           "Appliance Cycle Monitor",
     namespace:      "mads",
     author:         "Mads Kristensen",
-    description:    "Report Ready / Running / Finished status for washers, dryers, and dishwashers using a power meter or vibration sensor, with a door-contact reset.",
+    description:    "Report Ready / Running / Finished cycle status for washers, dryers, dishwashers, and other appliances using a power meter or vibration sensor, with a door-contact reset.",
     category:       "Convenience",
     singleInstance: false,
     iconUrl:        "https://github.githubassets.com/favicons/favicon.png",
     iconX2Url:      "https://github.githubassets.com/favicons/favicon.png",
-    importUrl:      "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/generic-appliance/generic-appliance-app.groovy"
+    importUrl:      "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/appliance-cycle-monitor/appliance-cycle-monitor-app.groovy"
 )
 
 // ── Preferences ────────────────────────────────────────────────────────────────
@@ -51,7 +56,7 @@ preferences {
 }
 
 def mainPage() {
-    dynamicPage(name: "mainPage", title: "Generic Appliance", install: true, uninstall: true) {
+    dynamicPage(name: "mainPage", title: "Appliance Cycle Monitor", install: true, uninstall: true) {
         section("Appliances") {
             input "applianceCount", "number",
                 title: "How many appliances?", range: "1..${MAX_APPLIANCES}",
@@ -79,7 +84,7 @@ private void applianceSection(int i) {
 
         input "runSourceType_${i}", "enum",
             title: "Run detection source",
-            options: ["power": "Power meter (washer / dryer)", "accel": "Vibration / acceleration sensor (dishwasher)"],
+            options: ["power": "Power meter", "accel": "Vibration / acceleration sensor"],
             required: true, submitOnChange: true
 
         String src = settings["runSourceType_${i}"]
@@ -87,7 +92,10 @@ private void applianceSection(int i) {
             input "powerDevice_${i}", "capability.powerMeter",
                 title: "Power meter device", required: true
             input "powerThreshold_${i}", "decimal",
-                title: "Running when watts ≥", defaultValue: DEFAULT_POWER_THRESHOLD, required: true
+                title: "Running when watts rise to ≥", defaultValue: DEFAULT_POWER_THRESHOLD, required: true
+            input "powerFinishedThreshold_${i}", "decimal",
+                title: "Finished when watts fall to ≤ (must be ≤ the Running value)",
+                defaultValue: DEFAULT_POWER_FINISHED_THRESHOLD, required: true
         } else if (src == "accel") {
             input "accelDevice_${i}", "capability.accelerationSensor",
                 title: "Acceleration / vibration sensor", required: true
@@ -132,7 +140,7 @@ def initialize() {
 
 private int configuredCount() { return (settings.applianceCount ?: 1) as int }
 
-private String childDni(int i) { return "generic-appliance-${app.id}-${i}" }
+private String childDni(int i) { return "appliance-cycle-monitor-${app.id}-${i}" }
 
 private void reconcileChildren() {
     int count = configuredCount()
@@ -150,7 +158,7 @@ private void reconcileChildren() {
             child.setLabel(label)
         }
         if (state.appliances[dni] == null) {
-            state.appliances[dni] = [status: "Unknown", runningSince: null, pendingFinishAt: null]
+            state.appliances[dni] = [status: "Unknown", runningSince: null, pendingFinishAt: null, pendingReadyAt: null]
         }
     }
 
@@ -211,28 +219,41 @@ private Integer applianceIndexForDevice(def deviceId, String role) {
 
 // ── Run-state evaluation ──────────────────────────────────────────────────────
 
-private boolean isRunningNow(int i) {
+// Returns "running", "idle", or "hold". The power source applies hysteresis: a
+// reading between the Finished and Running thresholds keeps ("holds") the current
+// state so the status doesn't flutter around a single boundary. The acceleration
+// source is binary (active = running, otherwise idle).
+private String runSignal(int i) {
     String src = settings["runSourceType_${i}"]
     if (src == "power") {
         def dev = settings["powerDevice_${i}"]
-        if (!dev) { return false }
-        BigDecimal watts = (dev.currentValue("power") ?: 0) as BigDecimal
-        BigDecimal thr   = (settings["powerThreshold_${i}"] ?: DEFAULT_POWER_THRESHOLD) as BigDecimal
-        return watts >= thr
+        if (!dev) { return "hold" }
+        BigDecimal watts  = (dev.currentValue("power") ?: 0) as BigDecimal
+        BigDecimal runThr = (settings["powerThreshold_${i}"] ?: DEFAULT_POWER_THRESHOLD) as BigDecimal
+        BigDecimal finThr = (settings["powerFinishedThreshold_${i}"] != null
+                                ? settings["powerFinishedThreshold_${i}"]
+                                : DEFAULT_POWER_FINISHED_THRESHOLD) as BigDecimal
+        // Guard against misconfiguration: the Finished value can never exceed Running.
+        if (finThr > runThr) { finThr = runThr }
+        if (watts >= runThr) { return "running" }
+        if (watts <= finThr) { return "idle" }
+        return "hold"
     } else if (src == "accel") {
         def dev = settings["accelDevice_${i}"]
-        if (!dev) { return false }
-        return (dev.currentValue("acceleration") as String) == "active"
+        if (!dev) { return "hold" }
+        return (dev.currentValue("acceleration") as String) == "active" ? "running" : "idle"
     }
-    return false
+    return "hold"
 }
 
 private void evaluateRun(int i) {
     String dni = childDni(i)
     def st = state.appliances[dni]
-    if (st == null) { st = [status: "Unknown", runningSince: null, pendingFinishAt: null]; state.appliances[dni] = st }
+    if (st == null) { st = [status: "Unknown", runningSince: null, pendingFinishAt: null, pendingReadyAt: null]; state.appliances[dni] = st }
 
-    boolean running = isRunningNow(i)
+    String sig = runSignal(i)
+    if (sig == "hold") { return }   // deadband — keep current state, no work
+    boolean running = (sig == "running")
 
     if (running) {
         if (st.status == "Running") {
@@ -256,7 +277,7 @@ private void evaluateRun(int i) {
             if (st.pendingFinishAt == null) {
                 int delayMin = (settings["finishDelayMin_${i}"] ?: DEFAULT_FINISH_DELAY_MIN) as int
                 st.pendingFinishAt = now() + (delayMin * 60_000L)
-                scheduleNearestFinish()
+                scheduleNearestTimer()
                 logDebug "${settings["applianceName_${i}"]}: quiet — Finished in ${delayMin} min unless it resumes"
             }
         } else if (st.status == "Unknown") {
@@ -269,40 +290,63 @@ private void evaluateRun(int i) {
 
 // Single shared finish timer: scan all appliances, fire the due ones, reschedule
 // for the next-soonest. Avoids per-appliance schedule-name clobbering.
-def checkFinishes() {
+// Single shared timer: scan all appliances, fire any due finish/ready transitions,
+// then reschedule for the next-soonest pending deadline. Avoids per-appliance
+// schedule-name clobbering.
+def checkTimers() {
     long nowMs = now()
     state.appliances.each { dni, st ->
+        Integer i = indexForDni(dni)
+
+        // Pending Finished: a cycle went quiet long enough.
         if (st.pendingFinishAt != null && nowMs >= (st.pendingFinishAt as long)) {
-            Integer i = indexForDni(dni)
             if (st.status == "Running") {
                 st.status = "Finished"
                 BigDecimal durMin = null
                 if (st.runningSince) {
                     durMin = (((nowMs - (st.runningSince as long)) / 60_000L) as BigDecimal).setScale(0, BigDecimal.ROUND_HALF_UP)
                 }
-                def child = getChildDevice(dni)
-                child?.applyRunEnded(nowIso(), durMin)
+                getChildDevice(dni)?.applyRunEnded(nowIso(), durMin)
                 if (i) { pushState(i) }
                 logInfo "${settings["applianceName_${i}"]}: Finished${durMin != null ? " (${durMin} min cycle)" : ''}"
+                // If the door is already open as the cycle ends, start the
+                // hold-open countdown now (no further contact event will fire).
+                if (i && currentContact(i) == "open") {
+                    st.pendingReadyAt = nowMs + (DOOR_OPEN_READY_SECONDS * 1000L)
+                }
             }
             st.pendingFinishAt = null
         }
+
+        // Pending Ready: the door has been held open long enough after a cycle.
+        if (st.pendingReadyAt != null && nowMs >= (st.pendingReadyAt as long)) {
+            if (st.status == "Finished") {
+                st.status = "Ready"
+                st.runningSince = null
+                st.pendingFinishAt = null
+                if (i) { pushState(i) }
+                logInfo "${settings["applianceName_${i}"]}: door held open after cycle — reset to Ready"
+            }
+            st.pendingReadyAt = null
+        }
     }
-    scheduleNearestFinish()
+    scheduleNearestTimer()
 }
 
-private void scheduleNearestFinish() {
+private void scheduleNearestTimer() {
     long nowMs = now()
     Long nearest = null
     state.appliances.each { dni, st ->
-        if (st.pendingFinishAt != null) {
-            long due = st.pendingFinishAt as long
-            if (nearest == null || due < nearest) { nearest = due }
+        [st.pendingFinishAt, st.pendingReadyAt].each { v ->
+            if (v != null) {
+                long due = v as long
+                if (nearest == null || due < nearest) { nearest = due }
+            }
         }
     }
     if (nearest != null) {
         int delaySec = Math.max(1, (int) Math.ceil((nearest - nowMs) / 1000.0d))
-        runIn(delaySec, "checkFinishes", [overwrite: true])
+        runIn(delaySec, "checkTimers", [overwrite: true])
     }
 }
 
@@ -316,12 +360,24 @@ private void handleContact(int i, String contactState) {
     def child = getChildDevice(dni)
     child?.applyContact(contactState)
 
-    // Opening the door after a finished cycle = "I unloaded it" → reset to Ready.
-    if (contactState == "open" && st.status == "Finished") {
-        st.status = "Ready"
-        st.runningSince = null
-        st.pendingFinishAt = null
-        logInfo "${settings["applianceName_${i}"]}: door opened after cycle — reset to Ready"
+    // After a finished cycle, the door must stay open for DOOR_OPEN_READY_SECONDS
+    // before we treat it as "unloaded" and reset to Ready. A quick open/close
+    // (peeking inside) won't trigger the reset.
+    if (st.status == "Finished") {
+        if (contactState == "open") {
+            st.pendingReadyAt = now() + (DOOR_OPEN_READY_SECONDS * 1000L)
+            scheduleNearestTimer()
+            logDebug "${settings["applianceName_${i}"]}: door opened — Ready in ${DOOR_OPEN_READY_SECONDS}s if it stays open"
+        } else {
+            // Door closed again before the timer elapsed — cancel the pending reset.
+            if (st.pendingReadyAt != null) {
+                st.pendingReadyAt = null
+                logDebug "${settings["applianceName_${i}"]}: door closed before reset — staying Finished"
+            }
+        }
+    } else if (st.pendingReadyAt != null) {
+        // Status changed out from under a pending reset (e.g. a new cycle began).
+        st.pendingReadyAt = null
     }
     pushState(i)
 }
@@ -385,6 +441,7 @@ def applyManualStatus(String dni, String status) {
 
     st.status = status
     st.pendingFinishAt = null
+    st.pendingReadyAt = null
     if (status == "Running") {
         st.runningSince = nowMs
         getChildDevice(dni)?.applyRunStarted(nowIso())

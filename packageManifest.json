@@ -136,9 +136,9 @@
     },
     {
       "id": "35576bdb-ef61-4ad3-969f-e46f4e851905",
-      "name": "Generic Appliance",
+      "name": "Appliance Cycle Monitor",
       "namespace": "mads",
-      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/generic-appliance/generic-appliance-app.groovy",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/appliance-cycle-monitor/appliance-cycle-monitor-app.groovy",
       "required": false,
       "oauth": false,
       "version": "0.1.0"

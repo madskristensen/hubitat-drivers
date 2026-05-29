@@ -4,14 +4,15 @@
  * Author:    Mads Kristensen
  * Version:   0.1.0
  *
- * Child status device for the Generic Appliance app (one device per appliance).
- * Surfaces a constrained lifecycle status (Ready → Running → Finished → Ready)
- * plus a human-readable dashboard line and a mirrored door contact.
+ * Generic appliance status child device (used by the Appliance Cycle Monitor app,
+ * one device per appliance). Surfaces a constrained lifecycle status
+ * (Ready → Running → Finished → Ready) plus a human-readable dashboard line and a
+ * mirrored door contact.
  *
- * The parent app drives transitions from a run-source device (power meter for
- * washer/dryer, acceleration sensor for dishwasher) and an optional door contact
- * sensor. The setStatus / markRunning / markFinished / markReady commands let
- * Rule Machine and other automations override or seed the state directly.
+ * The parent app drives transitions from a run-source device (power meter or
+ * acceleration/vibration sensor) and an optional door contact sensor. The
+ * setStatus / markRunning / markFinished / markReady commands let Rule Machine and
+ * other automations override or seed the state directly.
  *
  * Changelog:
  *   0.1.0 — 2026-05-29 — Initial release: applianceStatus lifecycle, door contact mirror, run timing, manual override commands.
