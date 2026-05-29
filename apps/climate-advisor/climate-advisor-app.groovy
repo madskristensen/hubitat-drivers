@@ -2,9 +2,10 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.14
+ * Version:   0.4.15
  *
  * Changelog:
+ *   0.4.15 — 2026-05-29 — Idle status: fold today's rain into the Today segment ("Today ☀️ high 88°, rain 61% within 1h") so it no longer dangles ahead of the word "Today"; falls back to a standalone rain segment after 4pm.
  *   0.4.14 — 2026-05-28 — Idle status: prefix today's high segment with the current condition emoji to mirror the Tomorrow styling ("Today ☀️ high 88°").
  *   0.4.13 — 2026-05-25 — Idle status: restyle tomorrow segment to "Tomorrow ☁️ ↓49° ↑63°" — emoji replaces the condition word; up/down arrows make low/high scannable.
  *   0.4.12 — 2026-05-25 — Idle status: capitalize "Tomorrow" segment so it reads consistently regardless of position in the line.
@@ -34,7 +35,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.14"
+@Field static final String  APP_VERSION        = "0.4.15"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -1074,18 +1075,22 @@ private String buildIdleStatus(BigDecimal outdoorTemp, boolean rainDetected, Big
     int hourOfDay = currentLocalHour()
     boolean beforeAfternoonCutoff = hourOfDay < 16
 
-    // 1. Rain probability — urgent 1h wins over 6h
+    // 1. Rain probability — urgent 1h wins over 6h. Folded into the Today
+    // segment below (mirroring the Tomorrow ", rain X%" styling) so today's
+    // rain reads as part of today rather than dangling ahead of the word "Today".
     BigDecimal prob1h = safeCurrentBD(settings.weatherDevice, "precipitationProbabilityNextHour")
     BigDecimal prob6h = safeCurrentBD(settings.weatherDevice, "precipitationProbabilityNext6h")
+    String rainText = null
     if (prob1h != null && prob1h.intValue() >= 60) {
-        parts << "rain ${prob1h.intValue()}% within 1h"
+        rainText = "rain ${prob1h.intValue()}% within 1h"
     } else if (prob6h != null && prob6h.intValue() >= 30) {
-        parts << "rain ${prob6h.intValue()}%"
+        rainText = "rain ${prob6h.intValue()}%"
     }
 
     // 2. Today's high — only before 4pm (after that, the high is historical).
     // Prefix with the current condition emoji (when available) to match the
-    // Tomorrow segment styling: "Today ☀️ high 88°".
+    // Tomorrow segment styling: "Today ☀️ high 88°, rain 61% within 1h".
+    boolean rainAppended = false
     if (beforeAfternoonCutoff) {
         BigDecimal tMax = safeCurrentBD(settings.weatherDevice, "temperatureMax")
         if (tMax != null) {
@@ -1095,8 +1100,17 @@ private String buildIdleStatus(BigDecimal outdoorTemp, boolean rainDetected, Big
             StringBuilder seg = new StringBuilder("Today")
             if (emojiToday) { seg.append(" ").append(emojiToday) }
             seg.append(" high ").append(hi).append("\u00B0")
+            if (rainText) {
+                seg.append(", ").append(rainText)
+                rainAppended = true
+            }
             parts << seg.toString()
         }
+    }
+
+    // Fallback: no Today segment (after 4pm or missing high) — surface rain on its own.
+    if (rainText && !rainAppended) {
+        parts << rainText
     }
 
     // 3. Current feels-like — only when notably different from actual outdoor temp.
