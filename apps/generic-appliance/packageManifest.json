@@ -1,0 +1,32 @@
+{
+  "packageName": "Generic Appliance",
+  "author": "Mads Kristensen",
+  "minimumHEVersion": "2.3.0",
+  "dateReleased": "2026-05-29",
+  "version": "0.1.0",
+  "communityLink": "",
+  "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/generic-appliance/README.md",
+  "apps": [
+    {
+      "id": "35576bdb-ef61-4ad3-969f-e46f4e851905",
+      "name": "Generic Appliance",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/generic-appliance/generic-appliance-app.groovy",
+      "iconUrl": "https://github.githubassets.com/favicons/favicon.png",
+      "iconX2Url": "https://github.githubassets.com/favicons/favicon.png",
+      "required": true,
+      "oauth": false,
+      "version": "0.1.0"
+    }
+  ],
+  "drivers": [
+    {
+      "id": "c713e3fc-71cd-4560-918f-fd07eba2eb68",
+      "name": "Generic Appliance Device",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/generic-appliance/generic-appliance-device.groovy",
+      "required": true,
+      "version": "0.1.0"
+    }
+  ]
+}

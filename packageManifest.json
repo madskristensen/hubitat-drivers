@@ -2,8 +2,8 @@
   "packageName": "Mads Kristensen — Hubitat Drivers",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
-  "dateReleased": "2026-05-26",
-  "version": "1.7.1",
+  "dateReleased": "2026-05-29",
+  "version": "1.8.0",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/README.md",
   "drivers": [
@@ -98,6 +98,14 @@
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/calendar-todo/calendar-todo.groovy",
       "required": false,
       "version": "0.7.1"
+    },
+    {
+      "id": "c713e3fc-71cd-4560-918f-fd07eba2eb68",
+      "name": "Generic Appliance Device",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/generic-appliance/generic-appliance-device.groovy",
+      "required": false,
+      "version": "0.1.0"
     }
   ],
   "apps": [
@@ -125,6 +133,15 @@
       "required": true,
       "oauth": false,
       "version": "0.4.1"
+    },
+    {
+      "id": "35576bdb-ef61-4ad3-969f-e46f4e851905",
+      "name": "Generic Appliance",
+      "namespace": "mads",
+      "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/generic-appliance/generic-appliance-app.groovy",
+      "required": false,
+      "oauth": false,
+      "version": "0.1.0"
     }
   ]
 }

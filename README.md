@@ -2,7 +2,7 @@
 
 Community Hubitat Elevation drivers and apps by Mads Kristensen.
 
-**11 production-ready drivers + 3 apps** • 🌐 6 Local LAN • ☁️ 5 Cloud API • 📦 HPM Ready
+**11 production-ready drivers + 4 apps** • 🌐 6 Local LAN • ☁️ 5 Cloud API • 📦 HPM Ready
 
 ## Available Drivers
 
@@ -48,6 +48,12 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
 | **Minoston Smart Plug 2-Channel (MP24Z)** | Local | Dual-outlet child endpoints • Parent/child sync hardening • Z-Wave associations • Auto-off per channel | [Docs](drivers/minoston-mp24z/README.md)        |
 | **Philio PST02 Enhanced** | Local | Motion/contact/temp/lux sensor • Guided parameter UI (no raw bitmask math) • Variant-aware A/B/C handling | [Docs](drivers/philio-pst02/README.md)        |
 
+### 🧺 Appliances
+
+| Driver                     | Type  | Key Features                                                                 | Docs                                         |
+| -------------------------- | ----- | ---------------------------------------------------------------------------- | -------------------------------------------- |
+| **Generic Appliance** | App | Ready/Running/Finished status for washer, dryer, dishwasher • Power-meter or vibration run detection • Finish debounce • Door-contact reset | [Docs](apps/generic-appliance/README.md) |
+
 ## Available Apps
 
 | App | Key Features | Docs |
@@ -55,6 +61,7 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
 | **Auto Away Mode** | Home/Away decisions from selected presence + motion + contact sensors • Simple inactivity thresholds (Home 0 / Away 20 default) • Optional lock/unlock actions on mode changes • Event-driven, debounced evaluation • Presence/motion/contact changes count as activity • Presence not-present has its own timer • Decision explainability | [Docs](apps/auto-away-mode/README.md) |
 | **Away Lights** | Simulates occupancy in Away mode • Configurable on/off time window • Debounced mode-change trigger • Optional push notification • Optional auto-off on return home | [Docs](apps/away-lights/README.md) |
 | **Climate Advisor** | Predictive "close the windows" alerts • Monitors indoor/outdoor temperature trends • Window/door and air quality integration • SharpTools-ready per-zone alerts | [Docs](apps/climate-advisor/README.md) |
+| **Generic Appliance** | Ready/Running/Finished status for washers, dryers, dishwashers • Power-meter or vibration/acceleration run detection • Configurable finish debounce • Door-contact "unloaded" reset • Per-appliance child devices • Manual override commands | [Docs](apps/generic-appliance/README.md) |
 
 ## Quick Start
 
@@ -90,6 +97,7 @@ Community Hubitat Elevation drivers and apps by Mads Kristensen.
     Touchstone:       https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/packageManifest.json
     Auto Away Mode:   https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/auto-away-mode/packageManifest.json
     Away Lights:      https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/away-lights/packageManifest.json
+    Generic Appliance: https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/generic-appliance/packageManifest.json
     ```
 
 3. **Follow** the prompts
