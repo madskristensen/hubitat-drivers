@@ -14,15 +14,17 @@
  *   • Power meter   — Running while watts ≥ the Running threshold; heading to
  *                     Finished once watts fall to ≤ the Finished threshold
  *                     (hysteresis deadband prevents fluttering)
- *   • Acceleration  — Running while the vibration sensor is "active"
+ *   • Acceleration  — Running once the vibration sensor stays "active" for the
+ *                     configured number of sustained minutes
  *
- * A short "quiet" debounce keeps a mid-cycle pause from prematurely flipping to
- * Finished. An optional door contact sensor is mirrored onto the child and, when
- * held open for 15 seconds after a cycle, resets the appliance to Ready ("you
- * unloaded it"); a quick peek that re-closes the door does not reset it.
+ * A cycle can only enter Running while the door is closed, and a short "quiet"
+ * debounce keeps a mid-cycle pause from prematurely flipping to Finished. An
+ * optional door contact sensor is mirrored onto the child and, when held open
+ * for 15 seconds after a cycle, resets the appliance to Ready ("you unloaded
+ * it"); a quick peek that re-closes the door does not reset it.
  *
  * Changelog:
- *   0.1.0 — 2026-05-29 — Initial release: parent app + child driver, power (with hysteresis) / acceleration run detection, finish debounce, 15s door-hold-open reset, manual status override API.
+ *   0.1.0 — 2026-05-29 — Initial release: parent app + child driver, power (with hysteresis) / acceleration run detection, door-closed start gate, sustained-vibration delay, finish debounce, 15s door-hold-open reset, manual status override API.
  */
 
 import groovy.transform.Field
@@ -35,6 +37,7 @@ import groovy.transform.Field
 @Field static final BigDecimal DEFAULT_POWER_THRESHOLD          = 5.0   // watts — at/above = Running
 @Field static final BigDecimal DEFAULT_POWER_FINISHED_THRESHOLD = 2.0   // watts — at/below = heading to Finished
 @Field static final Integer DEFAULT_FINISH_DELAY_MIN    = 3
+@Field static final Integer DEFAULT_ACCEL_SUSTAIN_MIN   = 2    // vibration must stay active this long before a cycle counts as Running
 @Field static final Integer DOOR_OPEN_READY_SECONDS      = 15   // door must stay open this long after a cycle before resetting to Ready
 
 definition(
@@ -99,6 +102,9 @@ private void applianceSection(int i) {
         } else if (src == "accel") {
             input "accelDevice_${i}", "capability.accelerationSensor",
                 title: "Acceleration / vibration sensor", required: true
+            input "accelSustainMin_${i}", "number",
+                title: "Sustained vibration minutes before Running", range: "0..120",
+                defaultValue: DEFAULT_ACCEL_SUSTAIN_MIN, required: true
         }
 
         input "finishDelayMin_${i}", "number",
@@ -158,7 +164,7 @@ private void reconcileChildren() {
             child.setLabel(label)
         }
         if (state.appliances[dni] == null) {
-            state.appliances[dni] = [status: "Unknown", runningSince: null, pendingFinishAt: null, pendingReadyAt: null]
+            state.appliances[dni] = [status: "Unknown", runningSince: null, pendingFinishAt: null, pendingReadyAt: null, pendingRunAt: null]
         }
     }
 
@@ -249,7 +255,7 @@ private String runSignal(int i) {
 private void evaluateRun(int i) {
     String dni = childDni(i)
     def st = state.appliances[dni]
-    if (st == null) { st = [status: "Unknown", runningSince: null, pendingFinishAt: null, pendingReadyAt: null]; state.appliances[dni] = st }
+    if (st == null) { st = [status: "Unknown", runningSince: null, pendingFinishAt: null, pendingReadyAt: null, pendingRunAt: null]; state.appliances[dni] = st }
 
     String sig = runSignal(i)
     if (sig == "hold") { return }   // deadband — keep current state, no work
@@ -263,14 +269,35 @@ private void evaluateRun(int i) {
             if (st.pendingFinishAt != null) { st.pendingFinishAt = null }
             return
         }
-        st.status = "Running"
-        st.runningSince = now()
-        st.pendingFinishAt = null
-        getChildDevice(dni)?.applyRunStarted(nowIso())
-        pushState(i)
-        logInfo "${settings["applianceName_${i}"]}: Running"
+
+        // A cycle can only START when the door is closed. (Once Running, opening
+        // the door mid-cycle does not stop it — that's handled by the early
+        // return above for the steady-state case.)
+        if (currentContact(i) == "open") {
+            if (st.pendingRunAt != null) { st.pendingRunAt = null }
+            return
+        }
+
+        // Vibration sources must show sustained activity before we trust the
+        // reading. Start a confirmation timer; checkTimers() promotes to Running
+        // only if the vibration is still active when it elapses.
+        int sustainMin = sustainMinutes(i)
+        if (sustainMin > 0) {
+            if (st.pendingRunAt == null) {
+                st.pendingRunAt = now() + (sustainMin * 60_000L)
+                scheduleNearestTimer()
+                logDebug "${settings["applianceName_${i}"]}: vibration detected — Running in ${sustainMin} min if it persists"
+            }
+            return
+        }
+
+        startRunning(i, st)
     } else {
-        // Source went quiet. Only meaningful while a cycle is in progress.
+        // Source went quiet.
+        // Cancel any in-flight sustain timer — the vibration didn't last.
+        if (st.pendingRunAt != null) { st.pendingRunAt = null }
+
+        // Only meaningful while a cycle is in progress.
         if (st.status == "Running") {
             // Start the finish countdown once per quiet period — don't reschedule
             // on every sub-threshold report.
@@ -288,6 +315,24 @@ private void evaluateRun(int i) {
     }
 }
 
+// Promote an appliance to Running and notify its child device.
+private void startRunning(int i, def st) {
+    st.status = "Running"
+    st.runningSince = now()
+    st.pendingFinishAt = null
+    st.pendingRunAt = null
+    getChildDevice(childDni(i))?.applyRunStarted(nowIso())
+    pushState(i)
+    logInfo "${settings["applianceName_${i}"]}: Running"
+}
+
+// Minutes of sustained vibration required before a cycle counts as Running.
+// Only applies to acceleration sources; power sources start immediately (0).
+private int sustainMinutes(int i) {
+    if (settings["runSourceType_${i}"] != "accel") { return 0 }
+    return (settings["accelSustainMin_${i}"] != null ? settings["accelSustainMin_${i}"] : DEFAULT_ACCEL_SUSTAIN_MIN) as int
+}
+
 // Single shared finish timer: scan all appliances, fire the due ones, reschedule
 // for the next-soonest. Avoids per-appliance schedule-name clobbering.
 // Single shared timer: scan all appliances, fire any due finish/ready transitions,
@@ -297,6 +342,16 @@ def checkTimers() {
     long nowMs = now()
     state.appliances.each { dni, st ->
         Integer i = indexForDni(dni)
+
+        // Pending Running: vibration has been active long enough. Confirm the
+        // source is still running AND the door is still closed before promoting.
+        if (st.pendingRunAt != null && nowMs >= (st.pendingRunAt as long)) {
+            if (st.status != "Running" && i && runSignal(i) == "running" && currentContact(i) == "closed") {
+                startRunning(i, st)
+            } else {
+                st.pendingRunAt = null
+            }
+        }
 
         // Pending Finished: a cycle went quiet long enough.
         if (st.pendingFinishAt != null && nowMs >= (st.pendingFinishAt as long)) {
@@ -337,7 +392,7 @@ private void scheduleNearestTimer() {
     long nowMs = now()
     Long nearest = null
     state.appliances.each { dni, st ->
-        [st.pendingFinishAt, st.pendingReadyAt].each { v ->
+        [st.pendingFinishAt, st.pendingReadyAt, st.pendingRunAt].each { v ->
             if (v != null) {
                 long due = v as long
                 if (nearest == null || due < nearest) { nearest = due }
@@ -379,6 +434,15 @@ private void handleContact(int i, String contactState) {
         // Status changed out from under a pending reset (e.g. a new cycle began).
         st.pendingReadyAt = null
     }
+
+    // Door just closed: a run that the open-door gate was blocking may now begin.
+    if (contactState == "closed") {
+        evaluateRun(i)
+    } else if (st.status != "Running" && st.pendingRunAt != null) {
+        // Door opened before a pending start confirmed — cancel it.
+        st.pendingRunAt = null
+    }
+
     pushState(i)
 }
 
@@ -442,6 +506,7 @@ def applyManualStatus(String dni, String status) {
     st.status = status
     st.pendingFinishAt = null
     st.pendingReadyAt = null
+    st.pendingRunAt = null
     if (status == "Running") {
         st.runningSince = nowMs
         getChildDevice(dni)?.applyRunStarted(nowIso())

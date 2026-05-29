@@ -17,7 +17,9 @@ The app watches one **run-detection source** per appliance and flips the status 
 | Source | "Running" when | "Finished" when |
 | ------ | -------------- | --------------- |
 | **Power meter** | Watts rise to ≥ the Running threshold | Watts fall to ≤ the Finished threshold, then stay quiet for the debounce |
-| **Acceleration / vibration sensor** | Sensor reports `active` | Sensor goes `inactive`, then stays quiet for the debounce |
+| **Acceleration / vibration sensor** | Sensor stays `active` for the configured sustained minutes | Sensor goes `inactive`, then stays quiet for the debounce |
+
+In every case a cycle can only **enter** `Running` while the **door is closed**. Opening the door mid-cycle never stops a run that is already in progress; it only prevents a new cycle from starting (and, after a cycle, drives the unload reset described below).
 
 ### Power thresholds (hysteresis)
 
@@ -30,6 +32,10 @@ Readings **between** the two values hold the current state. This deadband absorb
 
 When the source drops into the "finished" range, the app waits a configurable **debounce** ("quiet minutes") before declaring the cycle `Finished`. This stops a mid-cycle pause (a dishwasher between phases, a washer mid-spin lull) from flipping the status prematurely.
 
+### Sustained vibration (acceleration source)
+
+Vibration sensors can twitch from a door bump or a passing footstep. To avoid false starts, an acceleration-based appliance only becomes `Running` once the sensor has stayed `active` for a configurable number of **sustained minutes**. If the vibration stops before that window elapses, the pending start is cancelled. Set it to `0` to treat any `active` reading as an immediate start.
+
 An optional **door contact sensor** is mirrored onto the child device. Opening the door **after** a cycle and **holding it open for 15 seconds** is treated as "I unloaded it" and resets the appliance back to `Ready`. A quick peek that re-closes the door before the 15 seconds elapse leaves the status at `Finished`.
 
 ## Status lifecycle
@@ -37,7 +43,7 @@ An optional **door contact sensor** is mirrored onto the child device. Opening t
 | Status | Meaning | Entered when |
 | ------ | ------- | ------------ |
 | `Ready` | Idle and empty, ready for a new load | App start (idle source), or door held open 15s after `Finished` |
-| `Running` | A cycle is in progress | Watts ≥ Running threshold, or acceleration `active` |
+| `Running` | A cycle is in progress | Door closed **and** watts ≥ Running threshold, or vibration sustained for the configured minutes |
 | `Finished` | Cycle done, waiting to be unloaded | Source in the finished range for the full debounce window |
 | `Unknown` | No reading yet / no source configured | Before the first source event |
 
@@ -82,6 +88,7 @@ For manual control or Rule Machine / webCoRE automations:
    - **Run detection source** — Power meter or Acceleration / vibration sensor
    - The **source device**
    - For power meters: the **Running when watts rise to ≥** and **Finished when watts fall to ≤** thresholds
+   - For vibration sensors: the **Sustained vibration minutes before Running** (default `2`)
    - **Quiet minutes before Finished** (default `3`)
    - An optional **door contact sensor**
 
@@ -91,4 +98,5 @@ The child devices appear both in your **Devices** list and nested under the app 
 
 - **Threshold tuning:** Set the *Running* threshold above the appliance's standby draw but below its lowest active draw, and the *Finished* threshold at or just above standby. Many smart plugs idle at 0–2 W; a washer or dryer pulls tens to hundreds of watts while running.
 - **Debounce tuning:** Increase "quiet minutes" for machines with long pauses between phases (some dishwashers and front-loaders) to avoid a premature `Finished`.
-- **No door sensor?** The appliance still cycles `Ready → Running → Finished`; just use `reset()` (or `markReady()`) from an automation when you unload it.
+- **Sustained vibration tuning:** Increase the sustained minutes for sensors that twitch easily, or lower it (even to `0`) for sensors with a built-in inactivity timeout that already report `active` steadily during a cycle.
+- **No door sensor?** The appliance still cycles `Ready → Running → Finished`; just use `reset()` (or `markReady()`) from an automation when you unload it. Note that without a door sensor the door is always treated as closed, so the door-closed start gate never blocks a cycle.
