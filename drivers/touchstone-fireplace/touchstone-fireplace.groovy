@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.32
+ * Version: 0.1.33
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.33 — 2026-06-01 — stop heartbeat ACKs from clearing the in-flight command and cancelling its response timeout; a command (e.g. off) that was sent but never reached the device now keeps its retry/timeout safety net instead of being silently dropped
  *   0.1.32 — 2026-05-19 — recycle the TCP socket on each command timeout so retries reopen a fresh connection instead of reusing a stale one
  *   0.1.31 — 2026-05-19 — cap command retries after 10 consecutive timeouts; only reset retry backoff on DP-bearing responses so heartbeat ACKs no longer mask a dead command path
  *   0.1.30 — 2026-05-18 — fix sandbox-blocked System.arraycopy in concatBytes/sliceBytes/protocol33HeaderBytes (revert perf todo #7 — Hubitat blocklist)
@@ -95,7 +96,7 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.32"
+@Field static final String DRIVER_VERSION = "0.1.33"
 @Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.32"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
@@ -856,6 +857,7 @@ def parse(String message) {
         String buffer = safeStr(state.rxBuffer) ?: ""
         buffer += chunk
         state.frameHadDpData = false
+        state.frameWasResponse = false
         if (buffer.size() > 32768) {
             int keepFrom = Math.max(buffer.lastIndexOf("000055AA"), buffer.size() - 8192)
             buffer = keepFrom > 0 ? buffer.substring(keepFrom) : buffer
@@ -866,15 +868,25 @@ def parse(String message) {
             if (state.discoveryMode == true) {
                 // discoveryHandleResponse() has already handled routing; skip normal post-processing.
                 state.remove("frameHadDpData")
+                state.remove("frameWasResponse")
                 return
             }
-            unschedule("responseTimeout")
-            state.awaitingResponse = false
-            state.inFlight = null
+            // Only a genuine command/status response should fulfil the in-flight request and
+            // cancel its timeout. Heartbeat ACKs arrive every ~20s independently of command
+            // flow; letting one clear awaitingResponse/inFlight (and unschedule responseTimeout)
+            // destroys the retry safety net for a command — e.g. off() — that was sent but never
+            // reached the device, leaving the fireplace on with no retry. (Intermittent: only when
+            // a heartbeat ACK lands in the window between sending a command and its real ACK.)
+            if (state.frameWasResponse == true && state.awaitingResponse == true) {
+                unschedule("responseTimeout")
+                state.awaitingResponse = false
+                state.inFlight = null
+            }
             if (state.frameHadDpData == true) {
                 resetCommandRetryState()
             }
             state.remove("frameHadDpData")
+            state.remove("frameWasResponse")
             updateOnlineStatus("online", "Device responded")
             pumpQueue()
             // Persistent socket: do NOT close after response — stay open for push frames.
@@ -1673,6 +1685,9 @@ private Boolean processFrame(String frameHex) {
         traceLog "Received Tuya cmd ${cmd} retcode=${retcode} payloadLen=${payload.length}"
         return true
     }
+    // Any non-heartbeat frame is a real device response (control ACK, status push, etc.) and is
+    // allowed to fulfil the in-flight request; heartbeat ACKs above intentionally do not.
+    state.frameWasResponse = true
     debugLog "Received Tuya cmd ${cmd} retcode=${retcode} payloadLen=${payload.length}"
 
     Map inFlightRequest = state.inFlight instanceof Map ? (Map) state.inFlight : [:]
