@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.33
+ * Version: 0.1.34
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.1.34 — 2026-06-08 — move power control to DP-confirmed state transitions (no optimistic switch on/off), add commandStatus/lastCommandError attributes, and retry power commands when status responses show state mismatch
  *   0.1.33 — 2026-06-01 — stop heartbeat ACKs from clearing the in-flight command and cancelling its response timeout; a command (e.g. off) that was sent but never reached the device now keeps its retry/timeout safety net instead of being silently dropped
  *   0.1.32 — 2026-05-19 — recycle the TCP socket on each command timeout so retries reopen a fresh connection instead of reusing a stale one
  *   0.1.31 — 2026-05-19 — cap command retries after 10 consecutive timeouts; only reset retry backoff on DP-bearing responses so heartbeat ACKs no longer mask a dead command path
@@ -96,8 +97,8 @@ import groovy.json.JsonSlurper
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-@Field static final String DRIVER_VERSION = "0.1.33"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.32"
+@Field static final String DRIVER_VERSION = "0.1.34"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.34"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -221,6 +222,8 @@ metadata {
         attribute "tempUnit",         "enum",   ["F", "C"]
         attribute "healthStatus",     "enum",   ["online", "offline", "unknown"]
         attribute "lastActivity",     "string"
+        attribute "commandStatus",    "enum",   ["idle", "pending", "success", "failed"]
+        attribute "lastCommandError", "string"
     }
 
     preferences {
@@ -339,6 +342,9 @@ def updated() {
     state.seqNo = 0L
     state.pingPending = false
     state.remove("dpBaseline")
+    state.remove("desiredPower")
+    state.remove("desiredPowerRequestedAt")
+    state.remove("deferredRetryRequest")
 
     // Close existing socket before re-initializing; intentionalCloseAt suppresses the
     // socketStatus() disconnect callback that fires after rawSocket.close().
@@ -373,6 +379,9 @@ def initialize() {
     state.reconnectAttempts = 0
     state.pingPending = false
     state.pingRequestedAt = 0L
+    state.remove("desiredPower")
+    state.remove("desiredPowerRequestedAt")
+    state.remove("deferredRetryRequest")
 
     if (!preferencesReady()) {
         updateOnlineStatus("unknown", "Waiting for device IP, device ID, and a 16-character local key")
@@ -409,40 +418,42 @@ def traceOff() {
 def on() {
     Integer powerDp = dpFor("power")
     if (powerDp == null) {
-        log.warn "[Touchstone] Power is not mapped for profile '${activeDeviceProfile()}'"
+        String message = "Power is not mapped for profile '${activeDeviceProfile()}'"
+        log.warn "[Touchstone] ${message}"
+        emitCommandStatus("failed", message)
         return
     }
 
-    if (device.currentValue("switch") == "on") {
+    if (device.currentValue("switch") == "on" && safeStr(state.desiredPower) != "on") {
         debugLog "on(): device already on — skipping DP write"
+        emitCommandStatus("success", "Power is already on")
         return
     }
 
     infoLog "${device.displayName} switch → on"
-    markPowerTransitionIfChanged(true)
-    applySwitchState(true, "digital")
+    beginPowerCommand(true)
     unschedule("applyOnPowerOnDefaults")
     cancelQueuedPowerOnDefaultWrites()
     sendDpWrite(powerDp.toString(), true, "power on", POWER_REFRESH_DELAY_SECONDS)
-    // DP 14 can revert during off → on; give the firmware a beat before pushing optional defaults.
-    runInMillis(POWER_ON_DEFAULTS_DELAY_MILLIS, "applyOnPowerOnDefaults")
 }
 
 def off() {
     Integer powerDp = dpFor("power")
     if (powerDp == null) {
-        log.warn "[Touchstone] Power is not mapped for profile '${activeDeviceProfile()}'"
+        String message = "Power is not mapped for profile '${activeDeviceProfile()}'"
+        log.warn "[Touchstone] ${message}"
+        emitCommandStatus("failed", message)
         return
     }
 
-    if (device.currentValue("switch") == "off") {
+    if (device.currentValue("switch") == "off" && safeStr(state.desiredPower) != "off") {
         debugLog "off(): device already off — skipping DP write"
+        emitCommandStatus("success", "Power is already off")
         return
     }
 
     infoLog "${device.displayName} switch → off"
-    markPowerTransitionIfChanged(false)
-    applySwitchState(false, "digital")
+    beginPowerCommand(false)
     unschedule("applyOnPowerOnDefaults")
     cancelQueuedPowerOnDefaultWrites()
     sendDpWrite(powerDp.toString(), false, "power off", POWER_REFRESH_DELAY_SECONDS)
@@ -882,7 +893,7 @@ def parse(String message) {
                 state.awaitingResponse = false
                 state.inFlight = null
             }
-            if (state.frameHadDpData == true) {
+            if (state.frameHadDpData == true && shouldResetCommandRetryStateAfterDpFrame()) {
                 resetCommandRetryState()
             }
             state.remove("frameHadDpData")
@@ -1028,6 +1039,7 @@ def retryPendingRequests() {
     debugLog "retryPendingRequests()"
     state.awaitingResponse = false
     state.inFlight = null
+    enqueueDeferredRetryRequest()
     pumpQueue()
 }
 
@@ -1062,6 +1074,12 @@ private void terminateRetryCycle(String reason, Integer retryCount) {
     state.awaitingResponse = false
     state.inFlight = null
     state.pendingRequests = []
+    state.remove("deferredRetryRequest")
+    if (safeStr(state.desiredPower)) {
+        emitCommandStatus("failed", "Power command failed after ${retryCount} retries")
+        state.remove("desiredPower")
+        state.remove("desiredPowerRequestedAt")
+    }
     resetCommandRetryState()
     updateOnlineStatus("offline", "Device unreachable after ${retryCount} retries")
     if (state.socketOpen == true) {
@@ -1389,6 +1407,21 @@ private void cancelQueuedPowerOnDefaultWrites() {
     if (filtered.size() != queue.size()) {
         state.pendingRequests = filtered
         debugLog "Dropped ${queue.size() - filtered.size()} queued power-on default write(s)"
+    }
+}
+
+private void cancelQueuedPowerCommandWrites() {
+    List<Map> queue = pendingRequestQueue()
+    if (!queue) {
+        return
+    }
+
+    List<Map> filtered = queue.findAll { Map request ->
+        !(safeStr(request.reason)?.startsWith("power "))
+    }
+    if (filtered.size() != queue.size()) {
+        state.pendingRequests = filtered
+        debugLog "Dropped ${queue.size() - filtered.size()} queued power write(s)"
     }
 }
 
@@ -1750,6 +1783,7 @@ private void applyDps(Map<String, Object> dps) {
         if (isOn != null) {
             markPowerTransitionIfChanged(isOn)
             applySwitchState(isOn, "physical")
+            handlePowerCommandProgress(isOn)
         }
     }
 
@@ -2001,11 +2035,120 @@ private void ensureDefaultAttributes() {
     if (device.currentValue("lastActivity") == null) {
         sendEvent(name: "lastActivity", value: "", descriptionText: "${device.displayName} no activity yet")
     }
+    if (device.currentValue("commandStatus") == null) {
+        emitAttribute("commandStatus", "idle", "${device.displayName} command status is idle")
+    }
+    if (device.currentValue("lastCommandError") == null) {
+        emitAttribute("lastCommandError", "", "${device.displayName} last command error cleared")
+    }
 }
 
 private void applySwitchState(Boolean isOn, String eventType) {
     String switchValue = isOn ? "on" : "off"
     emitAttribute("switch", switchValue, "${device.displayName} was turned ${switchValue}", eventType)
+}
+
+private void beginPowerCommand(Boolean requestedOn) {
+    String desired = requestedOn ? "on" : "off"
+    resetCommandRetryState()
+    state.desiredPower = desired
+    state.desiredPowerRequestedAt = now()
+    state.remove("deferredRetryRequest")
+    cancelQueuedPowerCommandWrites()
+    emitCommandStatus("pending", "Power command pending (${desired})")
+}
+
+private void handlePowerCommandProgress(Boolean isOn) {
+    String desired = safeStr(state.desiredPower)
+    if (!desired) {
+        return
+    }
+
+    String actual = isOn ? "on" : "off"
+    if (actual == desired) {
+        state.remove("desiredPower")
+        state.remove("desiredPowerRequestedAt")
+        state.remove("deferredRetryRequest")
+        resetCommandRetryState()
+        emitCommandStatus("success", "Power command confirmed (${actual})")
+        if (actual == "on") {
+            // DP 14 can revert during off → on; give firmware a beat before optional defaults.
+            unschedule("applyOnPowerOnDefaults")
+            runInMillis(POWER_ON_DEFAULTS_DELAY_MILLIS, "applyOnPowerOnDefaults")
+        }
+        return
+    }
+
+    queuePowerStateRetry(actual, desired)
+}
+
+private void queuePowerStateRetry(String actual, String desired) {
+    if (state.deferredRetryRequest instanceof Map) {
+        return
+    }
+
+    Integer powerDp = dpFor("power")
+    if (powerDp == null) {
+        emitCommandStatus("failed", "Power command failed: power DP is not mapped")
+        state.remove("desiredPower")
+        state.remove("desiredPowerRequestedAt")
+        state.remove("deferredRetryRequest")
+        resetCommandRetryState()
+        return
+    }
+
+    Integer currentCount = safeInt(state.retryCount, 0)
+    if (currentCount >= MAX_COMMAND_RETRY_ATTEMPTS) {
+        emitCommandStatus("failed", "Power command failed: device remained ${actual}")
+        state.remove("desiredPower")
+        state.remove("desiredPowerRequestedAt")
+        state.remove("deferredRetryRequest")
+        resetCommandRetryState()
+        return
+    }
+
+    Map payload = [
+        devId: deviceIdValue(),
+        uid:   deviceIdValue(),
+        t:     currentEpochSecondsString(),
+        dps:   [(powerDp.toString()): (desired == "on")]
+    ]
+    state.deferredRetryRequest = [
+        cmd: TUYA_CMD_CONTROL,
+        payloadJson: JsonOutput.toJson(payload),
+        reason: "power ${desired} (state-mismatch retry)"
+    ]
+    emitCommandStatus("pending", "Power command not yet confirmed (${desired}); retrying")
+    scheduleRetry("Power state is ${actual} while waiting for ${desired}.")
+}
+
+private void enqueueDeferredRetryRequest() {
+    Map deferred = state.deferredRetryRequest instanceof Map ? (Map) state.deferredRetryRequest : null
+    if (!deferred) {
+        return
+    }
+
+    List<Map> queue = pendingRequestQueue()
+    queue.add(0, [cmd: deferred.cmd, payloadJson: deferred.payloadJson, reason: deferred.reason])
+    state.pendingRequests = queue
+    state.remove("deferredRetryRequest")
+    queueDelayedRefresh(POWER_REFRESH_DELAY_SECONDS)
+}
+
+private Boolean shouldResetCommandRetryStateAfterDpFrame() {
+    return !safeStr(state.desiredPower)
+}
+
+private void emitCommandStatus(String status, String detail = null) {
+    String normalized = status in ["idle", "pending", "success", "failed"] ? status : "idle"
+    String description = detail ? "${device.displayName} command status ${normalized}: ${detail}" : "${device.displayName} command status is ${normalized}"
+    emitAttribute("commandStatus", normalized, description)
+
+    if (normalized == "failed") {
+        emitAttribute("lastCommandError", safeStr(detail), "${device.displayName} last command error: ${safeStr(detail)}")
+    } else if (safeStr(device.currentValue("lastCommandError"))) {
+        emitAttribute("lastCommandError", "", "${device.displayName} last command error cleared")
+    }
 }
 
 private void updateOnlineStatus(String value, String detail = null) {

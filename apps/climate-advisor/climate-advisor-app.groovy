@@ -2,10 +2,11 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.15
+ * Version:   0.4.16
  *
  * Changelog:
- *   0.4.15 — 2026-05-29 — Idle status: fold today's rain into the Today segment ("Today ☀️ high 88°, rain 61% within 1h") so it no longer dangles ahead of the word "Today"; falls back to a standalone rain segment after 4pm.
+ *   0.4.16 — 2026-06-10 — Speaker announcements can now be restricted to selected location modes (new "announceModes" input). Leave empty to allow all modes; otherwise speakers stay silent outside the chosen modes (e.g. avoid blasting alerts overnight).
+ *   0.4.15 — 2026-05-29 —
  *   0.4.14 — 2026-05-28 — Idle status: prefix today's high segment with the current condition emoji to mirror the Tomorrow styling ("Today ☀️ high 88°").
  *   0.4.13 — 2026-05-25 — Idle status: restyle tomorrow segment to "Tomorrow ☁️ ↓49° ↑63°" — emoji replaces the condition word; up/down arrows make low/high scannable.
  *   0.4.12 — 2026-05-25 — Idle status: capitalize "Tomorrow" segment so it reads consistently regardless of position in the line.
@@ -35,7 +36,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.15"
+@Field static final String  APP_VERSION        = "0.4.16"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -164,6 +165,9 @@ def notificationsPage() {
             input "announceSeverityThreshold", "number",
                 title: "Minimum severity for speaker announcements (1=info, 2=warning/pre-alerts, 3=danger/breaches)",
                 range: "1..3", defaultValue: 2, required: true
+            input "announceModes", "mode",
+                title: "Location modes in which speaker announcements are enabled (leave empty to allow all modes)",
+                multiple: true, required: false
         }
     }
 }
@@ -834,6 +838,8 @@ private void handleNotifications(List allMessages, List zones) {
     Long throttleMs = ((settings.throttleMinutes ?: 60) as Integer) * 60 * 1000L
     Long nowMs = now()
     Integer minSeverity = (settings.announceSeverityThreshold ?: 2) as Integer
+    List announceModes = (settings.announceModes ?: []) as List
+    boolean speakAllowed = !announceModes || announceModes.contains(location.mode)
 
     allMessages.each { msg ->
         int sev = msg.severity as Integer
@@ -863,7 +869,7 @@ private void handleNotifications(List allMessages, List zones) {
             try { d.deviceNotification(msg.text as String) } catch (Exception e) { log.warn "notify error: ${e.message}" }
         }
 
-        if (sev >= minSeverity) {
+        if (sev >= minSeverity && speakAllowed) {
             // Global speakers
             (settings.globalSpeakers ?: []).each { spk ->
                 try { spk.speak(msg.text as String) } catch (Exception e) { log.warn "speak error: ${e.message}" }

@@ -4,7 +4,7 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: v0.1.32 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
+> **Status: v0.1.34 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
 >
 > **Killer feature:** Works out-of-the-box for Touchstone Sideline Elite; adapts to other Touchstone models (Steel, Forte, Onyx, etc.) and generic Tuya WiFi fireplaces via configurable Device Profiles and in-driver discovery — no Python, no manual tinytuya wizard needed.
 
@@ -30,7 +30,7 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 ## Key Attributes
 
-- **`switch`** — Device power state (`on` / `off`) — canonical on/off attribute
+- **`switch`** — Device power state (`on` / `off`) from device-confirmed DP status (no optimistic local echo)
 - **`heatLevel`** — Heat setting (`off` / `low` / `high`)
 - **`heatingSetpoint`** — Target room temperature (°F or °C, depending on preference)
 - **`temperature`** — Current room temperature (from device sensor)
@@ -43,6 +43,8 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 - **`socketState`** — Persistent socket state (`open` / `closed` / `reconnecting` / `error`); visible on dashboards for at-a-glance connectivity health
 - **`healthStatus`** — HealthCheck status (`online` / `offline` / `unknown`); updated by `ping()` probes and on every inbound push frame
 - **`lastActivity`** — ISO 8601 timestamp of the last successful inbound frame (heartbeat ack, push frame, or command response)
+- **`commandStatus`** — Last power-command outcome (`idle` / `pending` / `success` / `failed`)
+- **`lastCommandError`** — Error detail for the most recent failed command attempt (blank when clear)
 - **`childLock`** — Physical button lock state (`on` / `off`); `on` means physical buttons on the unit are locked (Sideline Elite DP 108)
 - **`networkAddress`** — Last discovered IP address (set by the `discover` command when it finds the device at a new IP)
 
