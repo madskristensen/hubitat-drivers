@@ -19,11 +19,10 @@ Complete every item before running any test. Skipping these is the most common s
 - [ ] **Device IP is reachable from the Hubitat hub:**
   - From a computer on the same LAN, run `ping 192.168.1.38` (substitute your device IP). Four consecutive replies = good.
   - If ping fails, check your router's DHCP leases and verify the fireplace got an IP. Set a DHCP reservation so the IP never changes.
-- [ ] **Local key is correct (16 characters, hex):**
-  - Obtained via Tuya IoT Cloud Portal + tinytuya wizard, or via Home Assistant tuya-local integration.
-  - Confirm `devices.json` from tinytuya shows `"local_key": "<16-char-string>"` for your device.
+- [ ] **Local key is available (16 characters, hex):**
+  - Either let the driver fetch it automatically (enter the Tuya Cloud Access ID + Access Secret + data center in Preferences), or enter it manually (e.g. via the Home Assistant tuya-local integration).
   - A wrong local key causes AES decryption failures — the driver will show `online = offline` with no clear auth error.
-- [ ] **Device ID matches the fireplace** (from `devices.json` or Tuya IoT portal).
+- [ ] **Device ID matches the fireplace** (the "Virtual ID" in the Tuya/Smart Life app, or the Tuya IoT portal).
 - [ ] **Driver code is saved** in Hubitat web UI → Drivers Code.
 - [ ] **Two browser tabs open:** device page in one, **Logs** page in the other.
 - [ ] **Debug logging is ON** for the duration of testing (Preferences → Enable debug logging).
@@ -45,7 +44,10 @@ Complete every item before running any test. Skipping these is the most common s
 3. Scroll to **Preferences** and verify these fields exist:
    - **Device IP address**
    - **Device ID**
-   - **Local key (16 chars)** (shown as a password field)
+   - **Local key (16 chars)** (shown as a password field; optional when cloud credentials are set)
+   - **Tuya IoT Access ID / Client ID**
+   - **Tuya IoT Access Secret / Client Secret** (password field)
+   - **Tuya Cloud data center**
    - **Device Profile** (default: Sideline Elite (tested))
    - **Preferred setpoint / temperature unit**
    - **Polling interval** (default: 60 seconds)
@@ -558,7 +560,7 @@ Known mappings (verify on hardware):
 
 **Expected:**
 
-- Logs show a message like `Waiting for device IP, device ID, and a 16-character local key` (the configuration-incomplete warning).
+- Logs show a message like `Waiting for device IP, device ID, and a local key` (the configuration-incomplete warning).
 - `online` changes to `unknown`.
 - No socket connection attempt is made; no TCP errors.
 - After restoring the correct IP and saving, the driver reinitializes and `online` returns to `online`.
@@ -1407,3 +1409,63 @@ Use this checklist to declare the driver "works" before recommending it to other
 - `online` attribute also transitions to `offline` (driven by existing logic).
 
 **Pass criteria:** `healthStatus = offline` after 2 consecutive reconnect failures; does NOT flip on the very first miss.
+
+## Test Area: Tuya Cloud Local-Key Auto-Recovery (v0.2.x)
+
+### Test 42: `testCloudConnection()` — Validate Credentials
+
+**What:** Confirm the Tuya Cloud Access ID, Access Secret, and data center are correct and that the device's local key can be read.
+
+**Pre-conditions:** Cloud Access ID + Access Secret entered, data center selected, and a valid Device ID (the app's "Virtual ID"). Debug logging on.
+
+**Steps:**
+
+1. Run the `testCloudConnection` command.
+2. Watch the `localKeyStatus` attribute and Logs.
+
+**Expected:**
+
+- `localKeyStatus` briefly shows `Testing Tuya Cloud connection…`, then either `Tuya Cloud OK — local key already current (…)` or `Local key updated from cloud (…)`.
+- No driver-thread stall: other commands remain responsive while the test runs (calls are async).
+- On bad credentials, `localKeyStatus` shows a specific hint (e.g. wrong secret/clock, wrong data center, device not linked) rather than a generic failure.
+
+**Pass criteria:** A success or a clearly actionable error message appears; the UI never freezes.
+
+### Test 43: Local-Key Rotation — Automatic Recovery
+
+**What:** Simulate the key rotating after a WiFi re-pair and verify the driver self-heals from the cloud.
+
+**Pre-conditions:** Working device with cloud credentials configured.
+
+**Steps:**
+
+1. Edit the **Local key** preference to a wrong (but 16-char) value and save, OR re-pair the device in the Tuya app so the key actually rotates.
+2. Send an `on()` or `off()` command and let it exhaust its retries.
+3. Watch Logs and `localKeyStatus`.
+
+**Expected:**
+
+- Commands time out and the retry cap is reached (`Retry cap reached …`).
+- Logs show `… attempting Tuya Cloud local-key recovery`.
+- The local key is fetched/updated, `localKeyStatus` shows `Local key updated from cloud (…)`, and the driver reconnects and recovers control.
+- Auto-recovery is throttled to at most once every 5 minutes.
+
+**Pass criteria:** Control is restored automatically without running any command-line tool; a stale failure message on `localKeyStatus` clears to `Local control OK` once the device responds again.
+
+### Test 44: Blank Local Key — Cloud Bootstrap on Save
+
+**What:** Verify the driver fetches the key automatically when the **Local key** field is left blank but cloud credentials are present.
+
+**Pre-conditions:** Device IP, Device ID, and cloud credentials set; **Local key** field empty.
+
+**Steps:**
+
+1. Save preferences with the **Local key** field blank.
+2. Watch Logs and `localKeyStatus`.
+
+**Expected:**
+
+- Logs show `No local key set — fetching it from the Tuya Cloud`.
+- The key is fetched, stored in the **Local key** preference, and the driver re-initializes and connects.
+
+**Pass criteria:** Device comes online without the user ever entering the local key by hand.

@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.1.34
+ * Version: 0.2.1
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,8 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.2.1 — 2026-06-11 — make all Tuya Cloud calls non-blocking (asynchttpGet) so the single driver thread is never stalled on the network; add access-token caching, automatic server clock-skew compensation, a testCloudConnection command, friendlier cloud error messages, and auto-clearing of stale localKeyStatus once local control recovers
+ *   0.2.0 — 2026-06-11 — add optional Tuya Cloud local-key auto-recovery: refreshLocalKey command + automatic key fetch (on startup when the local key is blank, and on the device becoming unreachable after exhausting retries) so the local key rotating after a WiFi re-pair self-heals automatically. Local key preference is now optional; auto-recovery enables simply by entering the Tuya Cloud Access ID and Access Secret — no separate toggles.
  *   0.1.34 — 2026-06-08 — move power control to DP-confirmed state transitions (no optimistic switch on/off), add commandStatus/lastCommandError attributes, and retry power commands when status responses show state mismatch
  *   0.1.33 — 2026-06-01 — stop heartbeat ACKs from clearing the in-flight command and cancelling its response timeout; a command (e.g. off) that was sent but never reached the device now keeps its retry/timeout safety net instead of being silently dropped
  *   0.1.32 — 2026-05-19 — recycle the TCP socket on each command timeout so retries reopen a fresh connection instead of reusing a stale one
@@ -95,10 +97,12 @@ import groovy.transform.Field
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import javax.crypto.Cipher
+import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
+import java.security.MessageDigest
 
-@Field static final String DRIVER_VERSION = "0.1.34"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.1.34"
+@Field static final String DRIVER_VERSION = "0.2.1"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.2.1"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -126,6 +130,19 @@ import javax.crypto.spec.SecretKeySpec
 @Field static final String POWER_ON_DEFAULT_REASON_PREFIX = "power-on default "
 @Field static final List<Integer> RETRY_DELAYS_SECONDS = [5, 15, 30]
 @Field static final Integer MAX_COMMAND_RETRY_ATTEMPTS = 10
+// Tuya Cloud OpenAPI data-center base URLs.
+@Field static final Map<String, String> TUYA_CLOUD_ENDPOINTS = [
+    "us":  "https://openapi.tuyaus.com",
+    "us-e":"https://openapi-ueaz.tuyaus.com",
+    "eu":  "https://openapi.tuyaeu.com",
+    "eu-w":"https://openapi-weaz.tuyaeu.com",
+    "cn":  "https://openapi.tuyacn.com",
+    "in":  "https://openapi.tuyain.com"
+]
+@Field static final String TUYA_CLOUD_SIGN_METHOD = "HMAC-SHA256"
+@Field static final Integer TUYA_CLOUD_HTTP_TIMEOUT_SECONDS = 15
+// Don't hammer the cloud API when local control keeps failing for non-key reasons (e.g. device unplugged).
+@Field static final Long CLOUD_KEY_REFRESH_MIN_INTERVAL_MILLIS = 300000L
 @Field static final String PROFILE_SIDELINE = "Sideline Elite (tested)"
 @Field static final String PROFILE_GENERIC = "Generic Tuya Fireplace"
 @Field static final String PROFILE_CUSTOM = "Custom"
@@ -205,6 +222,8 @@ metadata {
         command "captureDiff"
         command "setChildLock", [[name: "state*", type: "ENUM", constraints: ["off", "on"]]]
         command "discover"
+        command "refreshLocalKey"
+        command "testCloudConnection"
 
         attribute "flameColor",       "string"
         attribute "flameBrightness",  "string"
@@ -224,6 +243,7 @@ metadata {
         attribute "lastActivity",     "string"
         attribute "commandStatus",    "enum",   ["idle", "pending", "success", "failed"]
         attribute "lastCommandError", "string"
+        attribute "localKeyStatus",   "string"
     }
 
     preferences {
@@ -234,13 +254,37 @@ metadata {
 
         input name: "deviceId", type: "text",
               title: "Device ID",
-              description: "Tuya device ID from tinytuya or another local-key extraction workflow.",
+              description: "Tuya device ID. Find it in the Tuya/Smart Life app under the device's settings as \"Virtual ID\", or in the Tuya IoT portal (Devices → Link Tuya App Account).",
               required: true
 
         input name: "localKey", type: "password",
-              title: "Local key (16 chars)",
-              description: "Never hardcode this. Enter the Tuya local key for this device.",
-              required: true
+              title: "Local key (16 chars) — optional if Access ID + Secret are set below",
+              description: "Never hardcode this. Leave blank and the driver will fetch it automatically from the Tuya Cloud using the Access ID and Access Secret below. Only required if you don't provide those cloud credentials.",
+              required: false
+
+        input name: "cloudClientId", type: "text",
+              title: "Tuya IoT Access ID / Client ID (optional)",
+              description: "From your Tuya IoT Platform Cloud project. When the Access ID and Secret are both set, the driver automatically fetches the local key from the cloud and refreshes it whenever local control fails — so you never need to extract the key by hand, even after the device re-pairs to WiFi.",
+              required: false
+
+        input name: "cloudSecret", type: "password",
+              title: "Tuya IoT Access Secret / Client Secret (optional)",
+              description: "From your Tuya IoT Platform Cloud project. Stored as a password preference. Required together with the Access ID to enable automatic local-key recovery.",
+              required: false
+
+        input name: "cloudRegion", type: "enum",
+              title: "Tuya Cloud data center",
+              description: "Only used when the Access ID/Secret above are set. Must match the data center your Tuya IoT project uses.",
+              options: [
+                  "us":   "US — Western America (openapi.tuyaus.com)",
+                  "us-e": "US — Eastern America (openapi-ueaz.tuyaus.com)",
+                  "eu":   "Central Europe (openapi.tuyaeu.com)",
+                  "eu-w": "Western Europe (openapi-weaz.tuyaeu.com)",
+                  "cn":   "China (openapi.tuyacn.com)",
+                  "in":   "India (openapi.tuyain.com)"
+              ],
+              defaultValue: "us",
+              required: false
 
         input name: "deviceProfile", type: "enum",
               title: "Device Profile",
@@ -345,6 +389,11 @@ def updated() {
     state.remove("desiredPower")
     state.remove("desiredPowerRequestedAt")
     state.remove("deferredRetryRequest")
+    // Drop any cached cloud token/clock offset — credentials or region may have just changed.
+    state.remove("cloudToken")
+    state.remove("cloudTokenExpiresAt")
+    state.remove("cloudServerTimeOffset")
+    state.remove("lastCloudKeyRefreshAt")
 
     // Close existing socket before re-initializing; intentionalCloseAt suppresses the
     // socketStatus() disconnect callback that fires after rawSocket.close().
@@ -383,8 +432,19 @@ def initialize() {
     state.remove("desiredPowerRequestedAt")
     state.remove("deferredRetryRequest")
 
+    // No local key yet but cloud creds are present → bootstrap it from the cloud so the user
+    // never has to extract the key by hand (the Device ID can be copied straight from the app/portal).
+    // The fetch is asynchronous; its callback re-enters initialize() once the key is stored.
+    if (!hasUsableLocalKey() && deviceIpValue() && deviceIdValue() && cloudCredentialsReady()) {
+        infoLog "No local key set — fetching it from the Tuya Cloud"
+        updateOnlineStatus("unknown", "Fetching the local key from the Tuya Cloud…")
+        updateSocketState("closed")
+        startCloudKeyRefresh("initial bootstrap", "bootstrap")
+        return
+    }
+
     if (!preferencesReady()) {
-        updateOnlineStatus("unknown", "Waiting for device IP, device ID, and a 16-character local key")
+        updateOnlineStatus("unknown", "Waiting for device IP, device ID, and a local key (enter a key, or set Tuya Cloud credentials to fetch it automatically)")
         updateSocketState("closed")
         return
     }
@@ -898,7 +958,11 @@ def parse(String message) {
             }
             state.remove("frameHadDpData")
             state.remove("frameWasResponse")
+            Boolean wasOffline = safeStr(device.currentValue("online")) != "online"
             updateOnlineStatus("online", "Device responded")
+            if (wasOffline) {
+                clearStaleLocalKeyStatus()
+            }
             pumpQueue()
             // Persistent socket: do NOT close after response — stay open for push frames.
             // Throttle lastActivity emit to ≥60s: every inbound frame (heartbeat ACK, push,
@@ -1084,6 +1148,11 @@ private void terminateRetryCycle(String reason, Integer retryCount) {
     updateOnlineStatus("offline", "Device unreachable after ${retryCount} retries")
     if (state.socketOpen == true) {
         closeSocket(false)
+    }
+    // A rotated local key (after the device re-pairs to WiFi) looks exactly like this:
+    // the socket connects but every command times out. Try a cloud key refresh before reconnecting.
+    if (maybeAutoRefreshLocalKey("device unreachable after ${retryCount} retries")) {
+        return
     }
     scheduleReconnect()
 }
@@ -2197,11 +2266,362 @@ private void markPowerTransitionIfChanged(Boolean requestedPower) {
 }
 
 // ---------------------------------------------------------------------------
+// Tuya Cloud local-key recovery
+// ---------------------------------------------------------------------------
+
+def refreshLocalKey() {
+    if (!cloudCredentialsReady()) {
+        emitLocalKeyStatus("Set the Tuya Cloud Access ID, Access Secret, and Device ID first")
+        return
+    }
+    emitLocalKeyStatus("Refreshing local key from the Tuya Cloud…")
+    startCloudKeyRefresh("manual refresh", "manual")
+}
+
+def testCloudConnection() {
+    if (!cloudCredentialsReady()) {
+        emitLocalKeyStatus("Set the Tuya Cloud Access ID, Access Secret, and Device ID first")
+        return
+    }
+    // Force a fresh token so the test actually exercises the credentials end to end.
+    state.remove("cloudToken")
+    state.remove("cloudTokenExpiresAt")
+    emitLocalKeyStatus("Testing Tuya Cloud connection…")
+    startCloudKeyRefresh("connection test", "manual")
+}
+
+// Returns true when an async refresh was kicked off (so the caller skips its own reconnect —
+// the refresh callback reconnects instead). All HTTP is asynchronous so the single driver
+// thread is never blocked waiting on the cloud.
+private Boolean maybeAutoRefreshLocalKey(String trigger) {
+    if (!cloudCredentialsReady()) {
+        debugLog "Cloud auto-refresh skipped (${trigger}): Tuya Cloud credentials not configured"
+        return false
+    }
+
+    Long last = safeLong(state.lastCloudKeyRefreshAt, 0L)
+    long elapsed = now() - last
+    if (last > 0L && elapsed < CLOUD_KEY_REFRESH_MIN_INTERVAL_MILLIS) {
+        debugLog "Cloud auto-refresh throttled (${trigger}); last attempt ${Math.round(elapsed / 1000)}s ago"
+        return false
+    }
+
+    log.warn "[Touchstone] ${trigger}: attempting Tuya Cloud local-key recovery"
+    startCloudKeyRefresh("auto recovery", "auto")
+    return true
+}
+
+private Boolean cloudCredentialsReady() {
+    return safeStr(settings.cloudClientId)?.trim() && safeStr(settings.cloudSecret)?.trim() && deviceIdValue()
+}
+
+private String cloudBaseUrl() {
+    String regionCode = safeStr(settings.cloudRegion)?.trim() ?: "us"
+    return TUYA_CLOUD_ENDPOINTS[regionCode]
+}
+
+// Entry point for every cloud key refresh. mode ∈ "bootstrap" | "auto" | "manual".
+private void startCloudKeyRefresh(String reason, String mode) {
+    state.lastCloudKeyRefreshAt = now()
+    if (!cloudCredentialsReady()) {
+        emitLocalKeyStatus("Missing Tuya Cloud Access ID/Secret or device ID")
+        finishCloudKeyRefresh(mode, "failed")
+        return
+    }
+    String baseUrl = cloudBaseUrl()
+    if (!baseUrl) {
+        emitLocalKeyStatus("Unknown Tuya Cloud data center '${safeStr(settings.cloudRegion)}'")
+        finishCloudKeyRefresh(mode, "failed")
+        return
+    }
+
+    Map data = [reason: reason, mode: mode, baseUrl: baseUrl, retried: false]
+
+    // Reuse a cached, unexpired access token when we have one (saves a round-trip).
+    String cachedToken = safeStr(state.cloudToken)
+    Long tokenExpiry = safeLong(state.cloudTokenExpiresAt, 0L)
+    if (cachedToken && tokenExpiry > now()) {
+        data.token = cachedToken
+        requestCloudDevice(data)
+        return
+    }
+    requestCloudToken(data)
+}
+
+private void requestCloudToken(Map data) {
+    String path = "/v1.0/token?grant_type=1"
+    String t = cloudTimestamp()
+    String sign = cloudSign(safeStr(settings.cloudClientId).trim() + t + cloudStringToSign("GET", "", path))
+    Map params = [
+        uri: data.baseUrl + path,
+        headers: [
+            "client_id":   safeStr(settings.cloudClientId).trim(),
+            "sign":        sign,
+            "t":           t,
+            "sign_method": TUYA_CLOUD_SIGN_METHOD
+        ],
+        contentType: "application/json",
+        timeout: TUYA_CLOUD_HTTP_TIMEOUT_SECONDS
+    ]
+    try {
+        asynchttpGet("cloudTokenCallback", params, data)
+    } catch (Exception e) {
+        emitLocalKeyStatus("Cloud token request error: ${e.message}")
+        finishCloudKeyRefresh(data.mode, "failed")
+    }
+}
+
+def cloudTokenCallback(resp, Map data) {
+    Map body = parseCloudResponse(resp)
+    if (body == null) {
+        emitLocalKeyStatus("Tuya Cloud token request failed (HTTP ${cloudStatus(resp)})")
+        finishCloudKeyRefresh(data.mode, "failed")
+        return
+    }
+    captureServerTimeOffset(body)
+
+    if (body.success == false) {
+        // Clock-skew recovery: re-sign with the freshly captured server time and retry once.
+        if (isTimeError(body) && data.retried != true) {
+            debugLog "Token request rejected for clock skew; retrying with server time offset"
+            data.retried = true
+            requestCloudToken(data)
+            return
+        }
+        emitLocalKeyStatus(cloudErrorMessage("token request", body))
+        finishCloudKeyRefresh(data.mode, "failed")
+        return
+    }
+
+    String token = safeStr(body.result?.access_token)?.trim()
+    if (!token) {
+        emitLocalKeyStatus("Tuya Cloud returned no access token (check the Access ID/Secret and data center)")
+        finishCloudKeyRefresh(data.mode, "failed")
+        return
+    }
+
+    // Cache the token (expire_time is in seconds); refresh a minute early to avoid edge expiry.
+    Long expireSeconds = safeLong(body.result?.expire_time, 7200L)
+    state.cloudToken = token
+    state.cloudTokenExpiresAt = now() + ((expireSeconds - 60L) * 1000L)
+    data.token = token
+    requestCloudDevice(data)
+}
+
+private void requestCloudDevice(Map data) {
+    String token = data.token
+    String path = "/v1.0/devices/${deviceIdValue()}"
+    String t = cloudTimestamp()
+    String sign = cloudSign(safeStr(settings.cloudClientId).trim() + token + t + cloudStringToSign("GET", "", path))
+    Map params = [
+        uri: data.baseUrl + path,
+        headers: [
+            "client_id":    safeStr(settings.cloudClientId).trim(),
+            "access_token": token,
+            "sign":         sign,
+            "t":            t,
+            "sign_method":  TUYA_CLOUD_SIGN_METHOD
+        ],
+        contentType: "application/json",
+        timeout: TUYA_CLOUD_HTTP_TIMEOUT_SECONDS
+    ]
+    try {
+        asynchttpGet("cloudDeviceCallback", params, data)
+    } catch (Exception e) {
+        emitLocalKeyStatus("Cloud device request error: ${e.message}")
+        finishCloudKeyRefresh(data.mode, "failed")
+    }
+}
+
+def cloudDeviceCallback(resp, Map data) {
+    Map body = parseCloudResponse(resp)
+    if (body == null) {
+        emitLocalKeyStatus("Tuya Cloud device query failed (HTTP ${cloudStatus(resp)})")
+        finishCloudKeyRefresh(data.mode, "failed")
+        return
+    }
+    captureServerTimeOffset(body)
+
+    if (body.success == false) {
+        // The cached token may have been revoked/expired — drop it and retry once from scratch.
+        if (isTokenError(body) && data.retried != true) {
+            debugLog "Device query rejected (token invalid); clearing cached token and retrying"
+            data.retried = true
+            state.remove("cloudToken")
+            state.remove("cloudTokenExpiresAt")
+            requestCloudToken(data)
+            return
+        }
+        emitLocalKeyStatus(cloudErrorMessage("device query", body))
+        finishCloudKeyRefresh(data.mode, "failed")
+        return
+    }
+
+    String newKey = safeStr(body.result?.local_key)?.trim()
+    if (!newKey) {
+        emitLocalKeyStatus("Cloud returned no local key for device ${deviceIdValue()} (is the Device ID correct?)")
+        finishCloudKeyRefresh(data.mode, "failed")
+        return
+    }
+    if (newKey.size() != 16) {
+        emitLocalKeyStatus("Cloud returned a ${newKey.size()}-char key (expected 16); ignoring")
+        finishCloudKeyRefresh(data.mode, "failed")
+        return
+    }
+
+    if (newKey == localKeyValue()) {
+        emitLocalKeyStatus("Tuya Cloud OK — local key already current (${data.reason})")
+        finishCloudKeyRefresh(data.mode, "unchanged")
+        return
+    }
+
+    device.updateSetting("localKey", [value: newKey, type: "password"])
+    emitLocalKeyStatus("Local key updated from cloud (${data.reason})")
+    log.warn "[Touchstone] Local key updated from Tuya Cloud (${data.reason})"
+    finishCloudKeyRefresh(data.mode, "updated")
+}
+
+// Decide what to do once a refresh finishes, based on how it was triggered.
+// result ∈ "updated" | "unchanged" | "failed".
+private void finishCloudKeyRefresh(String mode, String result) {
+    switch (mode) {
+        case "bootstrap":
+            if (result == "updated") {
+                runIn(1, "initialize")
+            } else {
+                updateOnlineStatus("unknown", "Could not fetch the local key from the Tuya Cloud — see localKeyStatus")
+                updateSocketState("closed")
+            }
+            break
+        case "auto":
+            // We reached here mid-failure with the socket already closed; reconnect either way.
+            if (result == "updated") {
+                runIn(1, "initialize")
+            } else {
+                scheduleReconnect()
+            }
+            break
+        default: // manual / connection test — only disturb a live socket if the key actually changed.
+            if (result == "updated") {
+                runIn(1, "initialize")
+            }
+            break
+    }
+}
+
+private Map parseCloudResponse(resp) {
+    try {
+        if (resp?.hasError()) {
+            debugLog "Cloud HTTP error: ${resp.getErrorMessage()}"
+            try {
+                def errJson = resp.getErrorJson()
+                if (errJson instanceof Map) {
+                    return (Map) errJson
+                }
+            } catch (Exception ignored) { }
+            return null
+        }
+        def json = resp?.getJson()
+        return json instanceof Map ? (Map) json : null
+    } catch (Exception e) {
+        debugLog "Cloud response parse error: ${e.message}"
+        return null
+    }
+}
+
+private Integer cloudStatus(resp) {
+    try {
+        return resp?.getStatus()
+    } catch (Exception e) {
+        return null
+    }
+}
+
+// Tuya rejects requests whose timestamp drifts too far from server time. We learn the server
+// clock from the `t` field every response carries and sign subsequent requests with that offset.
+private void captureServerTimeOffset(Map body) {
+    Long serverT = safeLong(body?.t, 0L)
+    if (serverT > 0L) {
+        state.cloudServerTimeOffset = serverT - now()
+    }
+}
+
+private String cloudTimestamp() {
+    return (now() + safeLong(state.cloudServerTimeOffset, 0L)).toString()
+}
+
+private Boolean isTimeError(Map body) {
+    Integer code = safeInt(body?.code, null)
+    String msg = safeStr(body?.msg)?.toLowerCase()
+    return code == 1013 || (msg != null && msg.contains("time"))
+}
+
+private Boolean isTokenError(Map body) {
+    Integer code = safeInt(body?.code, null)
+    String msg = safeStr(body?.msg)?.toLowerCase()
+    return code in [1010, 1011, 1012] || (msg != null && msg.contains("token"))
+}
+
+private String cloudErrorMessage(String action, Map body) {
+    String msg = safeStr(body?.msg) ?: "unknown error"
+    Integer code = safeInt(body?.code, null)
+    String hint = ""
+    if (code in [1004, 1013]) {
+        hint = " — check the Access Secret and that the hub clock is accurate"
+    } else if (code in [1010, 1011, 1012]) {
+        hint = " — access token problem"
+    } else if (code == 1106 || msg.toLowerCase().contains("permission")) {
+        hint = " — confirm the device is linked to this Cloud project and the data center matches"
+    } else if (code == 2007 || code == 2009 || code == 2017) {
+        hint = " — confirm the selected data center matches your Tuya project"
+    }
+    return "Tuya Cloud ${action} failed: ${msg} (code ${code})${hint}"
+}
+
+// Tuya OpenAPI v2 signature string: METHOD\nContent-SHA256\nHeaders\nUrl
+private String cloudStringToSign(String method, String body, String path) {
+    String contentHash = sha256Hex(body ?: "")
+    return method + "\n" + contentHash + "\n" + "" + "\n" + path
+}
+
+private String cloudSign(String message) {
+    Mac mac = Mac.getInstance("HmacSHA256")
+    mac.init(new SecretKeySpec(safeStr(settings.cloudSecret).trim().getBytes("UTF-8"), "HmacSHA256"))
+    byte[] raw = mac.doFinal(message.getBytes("UTF-8"))
+    return hubitat.helper.HexUtils.byteArrayToHexString(raw).toUpperCase()
+}
+
+private String sha256Hex(String input) {
+    MessageDigest digest = MessageDigest.getInstance("SHA-256")
+    byte[] hash = digest.digest(input.getBytes("UTF-8"))
+    return hubitat.helper.HexUtils.byteArrayToHexString(hash).toLowerCase()
+}
+
+private void emitLocalKeyStatus(String message) {
+    sendEvent(name: "localKeyStatus", value: message)
+    debugLog "localKeyStatus: ${message}"
+}
+
+// Once local control is healthy again, retire a lingering cloud-failure message so the
+// localKeyStatus attribute doesn't keep showing an error that no longer applies.
+private void clearStaleLocalKeyStatus() {
+    String current = safeStr(device.currentValue("localKeyStatus"))
+    if (current && current.toLowerCase().contains("fail")) {
+        emitLocalKeyStatus("Local control OK")
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Conversion / validation helpers
 // ---------------------------------------------------------------------------
 
 private Boolean preferencesReady() {
-    return deviceIpValue() && deviceIdValue() && localKeyValue() && localKeyValue().size() == 16
+    return deviceIpValue() && deviceIdValue() && hasUsableLocalKey()
+}
+
+private Boolean hasUsableLocalKey() {
+    String key = localKeyValue()
+    return key != null && key.size() == 16
 }
 
 private String deviceIpValue() {

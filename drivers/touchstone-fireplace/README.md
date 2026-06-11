@@ -4,9 +4,9 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: v0.1.34 — beta. Hardware-tested LAN control of the Touchstone Sideline Elite. Generalizable to other Tuya WiFi fireplace models via Device Profile selection and in-driver DP discovery.**
+> **Status: v0.2.1 — beta.
 >
-> **Killer feature:** Works out-of-the-box for Touchstone Sideline Elite; adapts to other Touchstone models (Steel, Forte, Onyx, etc.) and generic Tuya WiFi fireplaces via configurable Device Profiles and in-driver discovery — no Python, no manual tinytuya wizard needed.
+> **Killer feature:** Works out-of-the-box for Touchstone Sideline Elite; adapts to other Touchstone models (Steel, Forte, Onyx, etc.) and generic Tuya WiFi fireplaces via configurable Device Profiles and in-driver discovery. The local key is fetched and refreshed automatically from the Tuya Cloud — no Python, no manual key extraction.
 
 ## Supported Devices
 
@@ -45,6 +45,7 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 - **`lastActivity`** — ISO 8601 timestamp of the last successful inbound frame (heartbeat ack, push frame, or command response)
 - **`commandStatus`** — Last power-command outcome (`idle` / `pending` / `success` / `failed`)
 - **`lastCommandError`** — Error detail for the most recent failed command attempt (blank when clear)
+- **`localKeyStatus`** — Result of the most recent Tuya Cloud local-key refresh (see [Local Key Auto-Recovery](#local-key-auto-recovery))
 - **`childLock`** — Physical button lock state (`on` / `off`); `on` means physical buttons on the unit are locked (Sideline Elite DP 108)
 - **`networkAddress`** — Last discovered IP address (set by the `discover` command when it finds the device at a new IP)
 
@@ -116,6 +117,8 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 | **`captureDiff()`** | none | Log which DPs changed since `captureBaseline()`; helps identify unmapped remote commands |
 | **`setRawDP(dpId, value)`** | dpId (number), value (string) | Advanced: write a raw DP value directly; used for experimentation and custom DP discovery |
 | **`discover()`** | none | Scan the local /24 subnet for the fireplace (active TCP probe on port 6668). Use after a DHCP lease renewal changes the fireplace IP. Tries ±20 IPs around the last known address first; falls back to a full sweep. Updates the Device IP preference automatically on match. |
+| **`refreshLocalKey()`** | none | Fetch the current local key from the Tuya Cloud and update the **Local key** preference. Requires [Local Key Auto-Recovery](#local-key-auto-recovery) to be configured. Use after re-pairing the device in the Tuya app. |
+| **`testCloudConnection()`** | none | Verify your Tuya Cloud credentials by forcing a fresh token and key fetch. The result (success, "unchanged", or a specific error hint) is reported on the `localKeyStatus` attribute. Use after first entering your Access ID / Secret / data center. |
 
 ### Verified palette labels
 
@@ -178,13 +181,9 @@ If the IP did change (before you set up a reservation), use the `discover` comma
 
 ## Setup
 
-### Step 1: Get Your Tuya Local Key
+### Step 1: Get Your Tuya Cloud Credentials & Device ID
 
-Your Tuya device requires a **local key** (16-character password) to enable LAN control. This is a one-time extraction. Choose one of these paths:
-
-#### Method A: Via Tuya IoT Cloud Portal (Durable — Recommended)
-
-This method is the most reliable and does not depend on third-party integrations.
+The driver fetches the **local key** (the 16-character password that enables LAN control) from the Tuya Cloud for you, so all you need to provide is your **Tuya IoT Cloud Access ID + Access Secret**, the **data center**, and your device's **Device ID**. Set up a free Tuya IoT Cloud project once and you'll never have to extract a key by hand — even after the device re-pairs to WiFi.
 
 1. **Create a free Tuya IoT developer account** (no credit card required):
    - Go to [iot.tuya.com](https://iot.tuya.com) → **Register** → select **Western America DC** if you're in the US
@@ -203,37 +202,25 @@ This method is the most reliable and does not depend on third-party integrations
    - In the Cloud Project → **Services** → **Link Devices** → scan the QR code with the **Smart Life app**
    - Tap **Confirm** in the app
 
-4. **Extract keys using tinytuya**:
-   - Install Python 3.7+ on your computer (if not already installed)
-   - Open a terminal and run:
-     ```bash
-     pip install tinytuya
-     python -m tinytuya wizard
-     ```
-   - Follow the wizard prompts; it will read your Tuya IoT project credentials from the portal
-   - The wizard outputs a `devices.json` file with your fireplace's `deviceId`, `ip`, and `local_key`
-
-5. **Copy your device's credentials from `devices.json`** and save them — you'll use them in Step 2 below
+4. **Collect what you'll enter in the driver**:
+   - **Access ID / Client ID** and **Access Secret / Client Secret** — from the project's **Overview** tab
+   - **Data center** — the region your project uses (e.g. *Western America*, *Central Europe*)
+   - **Device ID** — the **"Virtual ID"** shown in the **Tuya/Smart Life app** under the device's settings (⋯ / pencil icon), or in the portal under **Devices → Link Tuya App Account**
 
 For detailed guidance, see `.squad/skills/tuya-cloud-key-extraction/SKILL.md` in this repository.
 
-#### Method B: Via Home Assistant + tuya-local (Fast, HA-dependent)
+#### Optional: enter the local key manually instead
 
-If you already run **Home Assistant** and have the `tuya-local` integration installed:
-
-1. Open Home Assistant → **Settings** → **Devices & Services** → **Tuya Local** → **Create Config**
-2. Scan the QR code from the **Smart Life app** (QR button in app settings)
-3. The integration automatically extracts your local key and displays it
-
-**Caveat:** This method relies on a Tuya-issued hardcoded client_id that Tuya can revoke unilaterally. Method A is more durable.
+If you'd rather not store cloud credentials, you can supply the local key yourself and leave the Access ID/Secret blank. If you run **Home Assistant** with the `tuya-local` integration, it can extract the key for you: **Settings → Devices & Services → Tuya Local → Create Config**, then scan the QR code from the **Smart Life app**. (This relies on a Tuya-issued hardcoded client_id that Tuya can revoke; the cloud-credentials path above is more durable.)
 
 ### Step 2: Configure the Driver
 
 1. Open the **Touchstone / Tuya Fireplace** device in Hubitat
 2. Scroll to **Preferences** and fill in:
    - **Device IP address:** Static LAN IP of your fireplace (e.g., `192.168.1.38`). Recommended: set a DHCP reservation on your router so the IP doesn't change.
-   - **Device ID:** Tuya Device ID from your `devices.json` (e.g., `70223053e8db84d10b53`)
-   - **Local key (16 chars):** Your 16-character Tuya local key from `devices.json` (shown as a password field; never logged or displayed in cleartext)
+   - **Device ID:** Tuya Device ID — the **"Virtual ID"** in the **Tuya/Smart Life app** (device settings) or the Tuya IoT portal (**Cloud → Devices → Link Tuya App Account**), e.g. `70223053e8db84d10b53`
+   - **Local key (16 chars):** Leave **blank** to have the driver fetch it from the cloud (fill in the Access ID/Secret below), or paste your 16-character key manually. Shown as a password field; never logged in cleartext.
+   - **Tuya IoT Access ID / Secret + data center (optional):** Set these to enable automatic local-key fetch and recovery — see [Local Key Auto-Recovery](#local-key-auto-recovery)
    - **Device Profile:** Leave as **Sideline Elite (tested)** if you have a Sideline Elite; see [Got a Different Touchstone?](#got-a-different-touchstone-map-it-yourself) for other models
    - **Preferred setpoint / temperature unit:** `Fahrenheit` (recommended for US Touchstone units) or `Celsius`
    - **Polling interval:** Default `60 seconds` — adjust if you want less frequent updates
@@ -247,13 +234,47 @@ A healthy first-time setup looks like:
 - No error messages in logs about connection refused or invalid key
 - `power`, `temperature`, and `heatLevel` attributes populate with real values
 
+## Local Key Auto-Recovery
+
+Tuya **local keys rotate whenever the device re-pairs** — for example, if the fireplace drops off WiFi and you re-add it in the Tuya/Smart Life app. The device ID stays the same, but the old 16‑character local key stops working and local LAN control silently breaks.
+
+With cloud credentials set you only need the **Device ID** (the **"Virtual ID"** shown in the Tuya/Smart Life app's device settings, or from the portal's **Devices → Link Tuya App Account** tab) — no Python, no manual key extraction.
+
+### One-time setup
+
+You already created a Tuya IoT Platform Cloud project when you ran the wizard. Reuse its credentials:
+
+1. Sign in at [iot.tuya.com](https://iot.tuya.com/) → **Cloud** → **Development** → open your project.
+2. From the **Overview** tab copy the **Access ID/Client ID** and **Access Secret/Client Secret**.
+3. Note the **Data Center** your project uses (e.g. *Western America*, *Central Europe*). It must match the region your devices are linked to.
+4. In the Hubitat driver Preferences:
+   - Paste the **Tuya IoT Access ID / Client ID** and **Access Secret / Client Secret**
+   - Pick the matching **Tuya Cloud data center**
+5. Click **Save Preferences**.
+
+> The Access Secret is stored as a Hubitat password preference and is only sent to Tuya's signed OpenAPI endpoints — never logged in cleartext.
+
+### How it behaves
+
+- **Initial fetch:** If the **Local key** field is blank when you save (and the Access ID/Secret are set), the driver fetches the key from the cloud on startup and stores it. Just provide the Device ID (the app's "Virtual ID").
+- **Automatic recovery:** Whenever both the Access ID and Secret are set, the driver auto-recovers. When the fireplace becomes unreachable after exhausting its command retries (the classic "key rotated" symptom), it pulls a fresh key from the cloud, updates the **Local key** preference, and reconnects. This is throttled to at most once every 5 minutes so a genuinely offline/unplugged device doesn't hammer the API.
+- **Manual:** Run the **refreshLocalKey** command anytime to force a fetch (handy right after you re-add the device in the Tuya app).
+- **Connection test:** Run **testCloudConnection** after entering your credentials to confirm they work — it forces a fresh token and key fetch and reports the outcome on `localKeyStatus`.
+- **Feedback:** The **localKeyStatus** attribute reports the outcome (`Local key updated from cloud…`, `Local key already current…`, or a specific error hint). A stale failure message is cleared automatically once local control recovers.
+- **Non-blocking:** All cloud calls run asynchronously, so they never stall command or socket handling. The driver caches the access token, reuses it until it nears expiry, and compensates automatically for clock skew between Hubitat and Tuya's servers.
+
+If you'd rather not store cloud credentials, enter the local key manually and leave the Access ID/Secret blank.
+
 ## Preferences Reference
 
 | Preference | Type | Default | Description |
 |---|---|---|---|
 | **Device IP address** | text | (required) | Static LAN IP of the fireplace's Tuya WiFi module |
-| **Device ID** | text | (required) | Tuya device identifier (from tinytuya or HA integration) |
-| **Local key (16 chars)** | password | (required) | 16-character Tuya local key (never hardcoded; stored securely) |
+| **Device ID** | text | (required) | Tuya device identifier (the "Virtual ID" in the Tuya/Smart Life app, or the Tuya IoT portal's Link Tuya App Account tab) |
+| **Local key (16 chars)** | password | (optional) | 16-character Tuya local key. Leave blank to have the driver fetch it from the cloud (requires Access ID/Secret) |
+| **Tuya IoT Access ID / Client ID** | text | (blank) | Cloud project Access ID. Set together with the Secret to enable automatic local-key fetch and recovery |
+| **Tuya IoT Access Secret / Client Secret** | password | (blank) | Cloud project Access Secret. Set together with the Access ID to enable automatic local-key recovery |
+| **Tuya Cloud data center** | enum | US — Western America | Which Tuya OpenAPI region your IoT project lives in (only used when the Access ID/Secret are set) |
 | **Device Profile** | enum | Sideline Elite (tested) | `Sideline Elite (tested)` / `Generic Tuya Fireplace` / `Custom` |
 | **Preferred setpoint / temperature unit** | enum | Fahrenheit | `Fahrenheit` (°F) or `Celsius` (°C) |
 | **Polling interval** | enum | 60 seconds | How often to query device status; 0 disables polling |
@@ -306,7 +327,7 @@ If you want the heater to come on at a specific time or condition, create an exp
 
 ## Got a Different Touchstone? Map It Yourself
 
-Your Touchstone model (Sideline Steel, Forte, Onyx, etc.) likely uses the same Tuya WiFi module as the Sideline Elite but with different DP assignments for lighting effects. **The driver includes built-in discovery commands — no Python or manual tinytuya needed.**
+Your Touchstone model (Sideline Steel, Forte, Onyx, etc.) likely uses the same Tuya WiFi module as the Sideline Elite but with different DP assignments for lighting effects. **The driver includes built-in discovery commands — no Python or external tools needed.**
 
 ### Step-by-Step Discovery
 
@@ -401,10 +422,20 @@ Some remote buttons (log brightness, flame tempo, remote timer) don't map to Tuy
 1. Confirm the device IP is correct: open a terminal and ping `192.168.1.38` (or your configured IP)
    - If ping fails, the device is off the network — check WiFi and router
    - If ping succeeds but Hubitat still can't connect, move on to step 2
-2. Confirm the device ID and local key are correct (copy/paste from `devices.json` or Smart Life app settings)
+2. Confirm the device ID and local key are correct (the device ID is the "Virtual ID" in the Tuya/Smart Life app; the local key is fetched from the cloud or entered manually)
 3. **Close the Smart Life app** — it may be holding the only TCP slot
 4. Open the Hubitat device page and click **Refresh**
 5. Check the logs — if you still see "error 901," wait 30 seconds and try again
+
+### Local Control Stopped After Re-adding the Device in the Tuya App
+
+**Symptom:** Everything worked, then the fireplace lost WiFi. After re-connecting it through the Tuya/Smart Life app, Hubitat can no longer control it — commands time out and `online` flips to `offline`, even though the IP and device ID are unchanged.
+
+**Root cause:** Re-pairing the device rotates its Tuya **local key**. The stored 16‑character key no longer decrypts the device's traffic.
+
+**Fix:**
+- *Hands-off (recommended):* configure [Local Key Auto-Recovery](#local-key-auto-recovery) once, then either let the driver recover automatically or run the **refreshLocalKey** command. The new key is pulled from the Tuya Cloud and applied for you.
+- *Manual:* extract the new key yourself (e.g. via the Home Assistant `tuya-local` integration) and paste it into the **Local key** preference.
 
 ### "Importing [java.util.zip.CRC32] is not allowed"
 
@@ -450,12 +481,13 @@ Some remote buttons (log brightness, flame tempo, remote timer) don't map to Tuy
 
 ## Credits
 
-- **Tuya v3.3 protocol & local encryption:** Pattern sourced from kkossev's Hubitat community drivers and the `jasonacox/tinytuya` project
-- **tinytuya:** Python local key extraction tool by Jason Cox ([@jasonacox](https://github.com/jasonacox))
+- **Tuya v3.3 protocol & local encryption:** Pattern sourced from kkossev's Hubitat community drivers and other open-source Tuya local-control projects
 - **Empirical DP mapping & testing:** Mads Kristensen
 
 ## Changelog
 
+- **v0.2.1 (2026-06-11):** Hardened the Tuya Cloud integration. All cloud calls are now **non-blocking** (async), so they never stall command or socket handling on the single driver thread. Added access-token caching, automatic **clock-skew compensation** (a common cause of `sign invalid` errors), clearer error messages mapped from Tuya API codes, and a new **`testCloudConnection()`** command to verify credentials on demand. A stale `localKeyStatus` failure message now clears automatically once local control recovers.
+- **v0.2.0 (2026-06-11):** Added **Tuya Cloud local-key management**, so the local key never has to be extracted by hand. New `refreshLocalKey()` command plus automatic key fetch — on startup when the **Local key** field is blank, and again whenever the device becomes unreachable after exhausting retries (handles the key rotating after a WiFi re-pair). With cloud credentials set you only need the Device ID (the "Virtual ID" from the Tuya/Smart Life app). The **Local key** preference is now optional. Auto-recovery turns on simply by entering the Access ID + Access Secret (with data center); no separate enable/auto-refresh toggles. Adds the `localKeyStatus` attribute. The secret is stored as a password preference and only sent to Tuya's signed OpenAPI endpoints.
 - **v0.1.17 (2026-05-17):** Renamed `setLogColor` → `setCharcoalColor`, `logColor` → `charcoalColor`, `defaultLogColor` → `defaultCharcoalColor` to match the Tuya app's "Charcoal" terminology. Converted from NUMBER input (v0.1.14) to named ENUM dropdown with 12 verified labels from the Tuya app palette picker: Orange / Red / Blue / Yellow / Green / Purple / Cyan / Magenta / White / Pink / Rainbow / Spotlight (DP 104 values 1–12 in app order). ⚠️ **Breaking**: `setLogColor(N)` automations must migrate to `setCharcoalColor("LabelName")` — no backward-compat alias. "Spotlight" (DP 12) is a best-guess label pending confirmation. Diagnostic `debugLog` in `setCharcoalColor` and `applyDps` DP 104 is gated behind `logEnable` (flame-color precedent).
 - **v0.1.15 (2026-05-17):** Restored named ENUM for `setFlameColor` with authoritative labels from the Tuya mobile app (Orange/Blue/White/Orange+Blue/Orange+White/Blue+White). DP 101 value `"1"` = Orange (the app's default). v0.1.13's invented labels (Red/Orange/…) were wrong — picking "Orange" sent DP=2 which is actually Blue, explaining the "doesn't do anything" report. Added unconditional `log.info` diagnostic lines in both `setFlameColor` (write path) and `applyDps` DP 101 (echo path) so you can verify wire values and device echo in Hubitat logs.
 - **v0.1.14 (2026-05-17):** Reverted `setFlameColor` and `setLogColor` from v0.1.13's named ENUM back to NUMBER input (ranges 1–6 and 1–12). The invented color label placeholders (Red/Orange/etc., Crimson/Coral/etc.) were unverified guesses; numeric input is honest until hardware mapping is confirmed. `setFlameBrightness` keeps its named ENUM (Dimmest/Dim/Medium/Brighter/Brightest — universally meaningful). Removed legacy `setDpRaw` command alias; use `setRawDP` instead.
