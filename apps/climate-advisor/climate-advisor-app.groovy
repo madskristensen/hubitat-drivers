@@ -2,9 +2,11 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.16
+ * Version:   0.4.18
  *
  * Changelog:
+ *   0.4.18 — 2026-06-22 — Symmetric heating counterpart to 0.4.17: new close-windows warning for the windows-open/heat-off case. When the thermostat isn't actively heating (e.g. turned off because windows are open), warn (severity 2) once indoor is within the heating pre-alert offset of the heat setpoint AND it's colder outside than that setpoint.
+ *   0.4.17 — 2026-06-22 — New close-windows warning for the windows-open/AC-off case: when the thermostat isn't actively cooling (e.g. turned off because windows are open), warn (severity 2) once indoor is within the cooling pre-alert offset of the cool setpoint AND it's hotter outside than that setpoint. Previously every cooling alert required thermostatMode cool/auto, so an "off" thermostat produced no status message.
  *   0.4.16 — 2026-06-10 — Speaker announcements can now be restricted to selected location modes (new "announceModes" input). Leave empty to allow all modes; otherwise speakers stay silent outside the chosen modes (e.g. avoid blasting alerts overnight).
  *   0.4.15 — 2026-05-29 —
  *   0.4.14 — 2026-05-28 — Idle status: prefix today's high segment with the current condition emoji to mirror the Tomorrow styling ("Today ☀️ high 88°").
@@ -36,7 +38,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.16"
+@Field static final String  APP_VERSION        = "0.4.18"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -557,10 +559,13 @@ private Map evaluateZone(Map zone, BigDecimal outdoorTemp, Map outdoorTrend, boo
     m = evaluateCoolBreach(zone, indoorTemp, outdoorTemp)
     if (m) { candidates << m }
 
+    m = evaluateCoolingWindowOpen(zone, indoorTemp, outdoorTemp, windowGatePasses, noSensorNote)
+    if (m) { candidates << m }
+
     m = evaluateHeatBreach(zone, indoorTemp, outdoorTemp)
     if (m) { candidates << m }
 
-    m = evaluateAqi(zone, aqiVal)
+    m = evaluateHeatingWindowOpen(zone, indoorTemp, outdoorTemp, windowGatePasses, noSensorNote)
     if (m) { candidates << m }
 
     m = evaluateComfortOpen(zone, indoorTemp, outdoorTemp, outdoorTrend, rainDetected, openContacts, aqiVal)
@@ -644,6 +649,36 @@ private Map evaluateCoolBreach(Map zone, BigDecimal indoorTemp, BigDecimal outdo
     return buildCandidate("zone-${zone.id}-setpoint-breach-cool", 3, zone.name, "setpointBreachCool", text, zone.id as String)
 }
 
+// Windows-open / AC-off close-windows warning. Fires when the thermostat is NOT
+// actively cooling (e.g. turned off because windows are open) yet the room is
+// approaching the cool setpoint and it's hotter outside than that setpoint — the
+// active-cooling pre-alert/breach evaluators skip this because they require
+// thermostatMode cool/auto. Independent of trend so it warns whenever the
+// conditions hold.
+private Map evaluateCoolingWindowOpen(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp,
+                                       boolean windowGatePasses, String noSensorNote) {
+    if (!windowGatePasses)   { return null }
+    if (outdoorTemp == null) { return null }
+
+    List qualifying = []
+    (zone.thermostats ?: []).each { t ->
+        String mode = t.currentValue("thermostatMode")
+        // Active cooling is covered by evaluateCoolingPreAlert / evaluateCoolBreach.
+        if (mode in ["cool", "auto"]) { return }
+        BigDecimal coolSP = safeCurrentBD(t, "coolingSetpoint")
+        if (coolSP == null) { return }
+        BigDecimal offset = zone.coolingPreAlertOffset ?: 3.0G
+        if (indoorTemp >= (coolSP - offset) && outdoorTemp > coolSP) {
+            qualifying << [setpoint: coolSP]
+        }
+    }
+    if (qualifying.isEmpty()) { return null }
+
+    Map best = qualifying.min { Math.abs((it.setpoint as BigDecimal) - indoorTemp) }
+    String text = "${zone.name} ${indoorTemp}°F nearing ${best.setpoint}°F cool setpoint, outside ${outdoorTemp}°F is hotter \u2014 close windows${noSensorNote}"
+    return buildCandidate("zone-${zone.id}-cooling-windowopen", 2, zone.name, "coolingWindowOpen", text, zone.id as String)
+}
+
 private Map evaluateHeatBreach(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp) {
     if ((zone.thermostats ?: []).isEmpty()) { return null }
     List qualifying = []
@@ -660,6 +695,36 @@ private Map evaluateHeatBreach(Map zone, BigDecimal indoorTemp, BigDecimal outdo
     Map best = qualifying.min { Math.abs((it.setpoint as BigDecimal) - indoorTemp) }
     String text = "${zone.name} ${indoorTemp}°F has breached ${best.setpoint}°F heat setpoint \u2014 close windows"
     return buildCandidate("zone-${zone.id}-setpoint-breach-heat", 3, zone.name, "setpointBreachHeat", text, zone.id as String)
+}
+
+// Windows-open / heat-off close-windows warning. Mirror of evaluateCoolingWindowOpen
+// for heating season: fires when the thermostat is NOT actively heating (e.g. turned
+// off because windows are open) yet the room is approaching the heat setpoint and it's
+// colder outside than that setpoint — the active-heating pre-alert/breach evaluators
+// skip this because they require thermostatMode heat/auto/emergency heat. Independent
+// of trend so it warns whenever the conditions hold.
+private Map evaluateHeatingWindowOpen(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp,
+                                       boolean windowGatePasses, String noSensorNote) {
+    if (!windowGatePasses)   { return null }
+    if (outdoorTemp == null) { return null }
+
+    List qualifying = []
+    (zone.thermostats ?: []).each { t ->
+        String mode = t.currentValue("thermostatMode")
+        // Active heating is covered by evaluateHeatingPreAlert / evaluateHeatBreach.
+        if (mode in ["heat", "auto", "emergency heat"]) { return }
+        BigDecimal heatSP = safeCurrentBD(t, "heatingSetpoint")
+        if (heatSP == null) { return }
+        BigDecimal offset = zone.heatingPreAlertOffset ?: 3.0G
+        if (indoorTemp <= (heatSP + offset) && outdoorTemp < heatSP) {
+            qualifying << [setpoint: heatSP]
+        }
+    }
+    if (qualifying.isEmpty()) { return null }
+
+    Map best = qualifying.min { Math.abs((it.setpoint as BigDecimal) - indoorTemp) }
+    String text = "${zone.name} ${indoorTemp}°F nearing ${best.setpoint}°F heat setpoint, outside ${outdoorTemp}°F is colder \u2014 close windows${noSensorNote}"
+    return buildCandidate("zone-${zone.id}-heating-windowopen", 2, zone.name, "heatingWindowOpen", text, zone.id as String)
 }
 
 private Map evaluateAqi(Map zone, BigDecimal aqiVal) {
