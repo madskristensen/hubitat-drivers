@@ -10,7 +10,8 @@
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
  *  Changelog:
- *    0.6.1 — 2026-05-23 — setLevel(1) and setLevel(2) now pass through as raw FKB brightness values (1/255, 2/255) so users can reach FKB's true minimum brightness; levels 0 and 3-100 still use the 0-100→0-255 conversion as before.
+ *    0.6.2 — 2026-06-27 — Add setStartURL(url) command to set the Fully Kiosk start page (FKB startURL string setting); complements loadURL() (load now) and loadStartURL() (reload start page).
+ *    0.6.1
  *    0.6.0 — 2026-05-21 — Perf improvements
  *    0.5.0 — 2026-05-18 — Removed MQTT support: reverted to local REST polling after broker compatibility issues; cleaner, simpler, more reliable.
  *    0.4.2 — 2026-05-18 — Add clearOverlayMessage() command to dismiss an active overlay popup on the tablet (calls FKB's setOverlayMessage with empty text); complements setOverlayMessage(text) and deviceNotification(text) — both show, this one clears.
@@ -22,7 +23,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.6.1"
+@Field static final String VERSION = "0.6.2"
 
 metadata {
     definition (name: "Fully Kiosk Browser", namespace: "mads", author: "Mads Kristensen",
@@ -56,6 +57,7 @@ metadata {
         command "launchAppPackage", ["String"]
         command "loadStartURL"
         command "loadURL", ["String"]
+        command "setStartURL", [[name:"url*", type:"STRING", description:"URL to set as the Fully Kiosk start page."]]
         command "playSound", ["String"]
         command "restartApp"
         command "screenOn"
@@ -426,6 +428,15 @@ def loadURL(url) {
         return
     }
     sendCommandPost("cmd=loadURL&url=${java.net.URLEncoder.encode(url, "UTF-8")}")
+}
+def setStartURL(url) {
+    def logprefix = "[setStartURL] "
+    logger(logprefix + "url:${url}", "trace")
+    if (!url?.trim()) {
+        logger(logprefix + "ERROR: url cannot be null or empty", "error")
+        return
+    }
+    sendCommandPost("cmd=setStringSetting&key=startURL&value=${java.net.URLEncoder.encode(url, "UTF-8")}")
 }
 def loadStartURL() {
     logger("[loadStartURL] ", "trace")

@@ -114,7 +114,8 @@ Fork maintained by **Mads Kristensen** — https://github.com/madskristensen
 
 | Version | Date       | Notes |
 |---------|------------|-------|
-| 0.6.1   | 2026-05-23 | `setLevel(1)` and `setLevel(2)` now pass through as raw FKB brightness values (1/255 and 2/255), letting users reach FKB's true minimum brightness. Levels 0 and 3–100 still use the 0–100 → 0–255 conversion as in 0.3.0. Without this special case, `setLevel(1)` rounded to 3/255 and `setLevel(2)` to 5/255, making the lowest two raw brightness steps unreachable. |
+| 0.6.2   | 2026-06-27 | New command: `setStartURL(url)` — sets the Fully Kiosk **start page** (persists via FKB's `startURL` string setting). Complements `loadURL(url)` (loads a URL right now, without changing the start page) and `loadStartURL()` (reloads the configured start page). |
+| 0.6.1   | 2026-05-23 |
 | 0.5.0   | 2026-05-18 |
 | 0.4.2   | 2026-05-18 | New command: `clearOverlayMessage()` — clears any active overlay message popup on the tablet. Calls FKB's `setOverlayMessage` REST endpoint with empty `text` parameter (the documented dismiss pattern). Complements `setOverlayMessage(text)` and `deviceNotification(text)` — both show overlays, `clearOverlayMessage()` dismisses them. |
 | 0.4.1   | 2026-05-18 | **BUG: NPE guard in `beep()`**— when `toneFile` preference is unset, logs a `warn` instead of throwing NPE. **Transient HTTP errors demoted:** 408 (timeout) and 5xx responses in all HTTP callbacks now log at `warn` instead of `error` (tablet sleeping or network blip is normal transient behavior). **⚠️ BREAKING: `setScreenBrightness(N)` command removed.** This command accepted raw 0–255 values and was confusing alongside `setLevel(0-100)` (SwitchLevel capability). **Migrate any Rule Machine rules that call `setScreenBrightness(N)` to use `setLevel(N)` with N in the 0–100 range instead.** |
