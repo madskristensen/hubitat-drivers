@@ -1,6 +1,6 @@
 # Climate Advisor
 
-Predictive "close the windows" alerts for Hubitat — per-zone, SharpTools-ready.
+Predictive "open or close the windows" advice for Hubitat — per-zone, SharpTools-ready.
 
 ## Advisory-only model
 
@@ -12,19 +12,20 @@ Climate Advisor monitors indoor and outdoor temperatures, outdoor trend (heating
 
 | Alert family | Severity | Trigger |
 |---|---|---|
-| Comfort-open suggestion | INFO (1) | All contacts closed AND outdoor in comfort band AND not raining AND AQI ok |
-| Free cooling opportunity | INFO (1) | Indoor at/near cooling setpoint AND outdoor cooler than indoor AND contacts closed AND not raining AND AQI ok |
+| Close for warming weather | WARNING (2) | Windows open, outdoor heating up, and indoor/outdoor have reached the cooling anticipation thresholds |
+| Close for cooling weather | WARNING (2) | Windows open, outdoor cooling down, and indoor/outdoor have reached the heating anticipation thresholds |
+| Open for cooling | WARNING (2) | Windows closed, outdoor cooling down within the cooling offset, indoor near the cooling setpoint, outdoor cooler than indoor, and rain/AQI safe |
+| Open for warming | WARNING (2) | Windows closed, outdoor heating up within the heating offset, indoor near the heating setpoint, outdoor warmer than indoor, and rain/AQI safe |
+| Window action escalation | DANGER (3) | The same window action remains useful after indoor crosses the applicable setpoint |
+| AQI moderate | WARNING (2) | AQI > warn threshold (default 51) |
+| AQI hazardous | DANGER (3) | AQI > danger threshold (default 101) |
+| Rain + windows open | DANGER (3) | Weather attribute contains rain keyword AND any contact open |
+
+Only one window action is active per zone. Its message is intentionally short, and it is announced once when the action changes plus once if it escalates from warning to danger.
 
 ## Idle dashboard line
 
 When no advisories are active, the `latestMessage` attribute shows a contextual one-line ambient status instead of a plain "all clear." Format: `☀️ Sunny · 72°F · AQI 38 (good) · House comfortable`. Segments are omitted gracefully when data is unavailable (no weather device → temp only; no AQI device → AQI omitted). Weather emoji switches to 🌙 after sunset.
-| Cooling pre-alert | WARNING (2) | Indoor ≥ (cooling SP − offset) AND outdoor > indoor AND outdoor heating up |
-| Heating pre-alert | WARNING (2) | Indoor ≤ (heating SP + offset) AND outdoor < indoor AND outdoor cooling down |
-| AQI moderate | WARNING (2) | AQI > warn threshold (default 51) |
-| AQI hazardous | DANGER (3) | AQI > danger threshold (default 101) |
-| Rain + windows open | DANGER (3) | Weather attribute contains rain keyword AND any contact open |
-| Cool setpoint breach | DANGER (3) | Indoor ≥ cooling setpoint AND outdoor > indoor |
-| Heat setpoint breach | DANGER (3) | Indoor ≤ heating setpoint AND outdoor < indoor |
 
 ## Architecture
 
@@ -66,10 +67,10 @@ The [**Open-Meteo Weather Enhanced**](../../drivers/open-meteo/open-meteo-weathe
 
 ### Per zone
 - Zone name, thermostats (optional), indoor temp sensors (optional — falls back to thermostat temp), contact sensors (optional), speakers, notification devices
-- Cooling/heating pre-alert offsets (default 3°F)
+- Cooling/heating anticipation offsets for both indoor and outdoor proximity (default 3°F)
 
 ### Notifications
-- Global notification devices, global speakers (optional), throttle (default 60 min)
+- Global notification devices and global speakers (optional); window actions are announced once when changed and once more only when escalating to danger
 - Announcement severity threshold (default 2 = warnings+; 3 = danger only)
 
 ## Changelog

@@ -2,9 +2,13 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.19
+ * Version:   0.4.23
  *
  * Changelog:
+ *   0.4.23 — 2026-07-21 — Unify opening/closing advice into one action per zone. Use indoor and outdoor proximity plus outdoor trend for predictive warnings, escalate when indoor crosses the setpoint, shorten messages, and notify only for a new action or escalation.
+ *   0.4.22 — 2026-07-21 — Normalize device inputs so a single optional indoor temperature sensor is used reliably instead of being skipped when Hubitat returns a scalar device selection.
+ *   0.4.21 — 2026-07-21 — Restrict AC-off and heat-off close-windows fallbacks to thermostatMode off. Previously cooling mode could produce a contradictory heating warning (and heating mode could produce a cooling warning).
+ *   0.4.20 — 2026-07-20 — Close-windows alerts now require an open contact when contact sensors are configured, pre-alerts stop at the setpoint so they do not overlap breach alerts, and alert text remains stable for each active episode so SharpTools and speakers trigger only once. Global/per-zone duplicate speaker selections are also deduplicated.
  *   0.4.19 — 2026-07-20 — Use thermostat temperature when a zone has no dedicated indoor temperature sensors. Previously these zones were skipped entirely, leaving SharpTools on the idle forecast instead of showing applicable close-windows warnings.
  *   0.4.18 — 2026-06-22 — Symmetric heating counterpart to 0.4.17: new close-windows warning for the windows-open/heat-off case. When the thermostat isn't actively heating (e.g. turned off because windows are open), warn (severity 2) once indoor is within the heating pre-alert offset of the heat setpoint AND it's colder outside than that setpoint.
  *   0.4.17 — 2026-06-22 — New close-windows warning for the windows-open/AC-off case: when the thermostat isn't actively cooling (e.g. turned off because windows are open), warn (severity 2) once indoor is within the cooling pre-alert offset of the cool setpoint AND it's hotter outside than that setpoint. Previously every cooling alert required thermostatMode cool/auto, so an "off" thermostat produced no status message.
@@ -39,7 +43,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.19"
+@Field static final String  APP_VERSION        = "0.4.23"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -55,7 +59,7 @@ definition(
     name:           "Climate Advisor",
     namespace:      "mads",
     author:         "Mads Kristensen",
-    description:    "Per-zone predictive close-windows alerts, indoor/outdoor trend detection, and aggregate house status for SharpTools + Rule Machine.",
+    description:    "Per-zone predictive open/close window advice, indoor/outdoor trend detection, and aggregate house status for SharpTools + Rule Machine.",
     category:       "Convenience",
     singleInstance: false,
     iconUrl:        "https://github.githubassets.com/favicons/favicon.png",
@@ -163,8 +167,6 @@ def notificationsPage() {
                 title: "Global notification devices (all zones)", multiple: true, required: false
             input "globalSpeakers", "capability.speechSynthesis",
                 title: "Global speakers for announcements (all zones, optional)", multiple: true, required: false
-            input "throttleMinutes", "number",
-                title: "Minimum minutes between repeated notifications", defaultValue: 60, required: true
             input "announceSeverityThreshold", "number",
                 title: "Minimum severity for speaker announcements (1=info, 2=warning/pre-alerts, 3=danger/breaches)",
                 range: "1..3", defaultValue: 2, required: true
@@ -197,9 +199,9 @@ def zonesPage() {
                 input "zone${i}Speakers", "capability.speechSynthesis",
                     title: "Speakers for zone announcements (optional)", multiple: true, required: false
                 input "zone${i}CoolingPreAlertOffset", "decimal",
-                    title: "Cooling pre-alert offset (°F)", defaultValue: 3.0, required: true
+                    title: "Cooling anticipation offset for indoor/outdoor temperatures (°F)", defaultValue: 3.0, required: true
                 input "zone${i}HeatingPreAlertOffset", "decimal",
-                    title: "Heating pre-alert offset (°F)", defaultValue: 3.0, required: true
+                    title: "Heating anticipation offset for indoor/outdoor temperatures (°F)", defaultValue: 3.0, required: true
                 input "zone${i}NotificationDevices", "capability.notification",
                     title: "Notification devices for this zone (optional)", multiple: true, required: false
             }
@@ -506,9 +508,9 @@ def evaluateAll() {
     }
 }
 
-// Reconcile candidate messages against previous-pass cache.
-// Candidates have no ts field. If text unchanged from cache → reuse cached entry (stable ts).
-// If new or text changed → assign nowMs. Populates newActive map.
+// Reconcile candidate messages against the previous pass. Keep an active episode's
+// timestamp and text stable so changing sensor values do not retrigger dashboards
+// or speakers. A cleared/reappearing or escalating alert gets a fresh entry.
 private List resolveMessages(List candidates, Map prevActive, Map newActive, Long nowMs) {
     List resolved = []
     (candidates ?: []).each { candidate ->
@@ -516,8 +518,9 @@ private List resolveMessages(List candidates, Map prevActive, Map newActive, Lon
         String id = candidate.id as String
         Map prev  = prevActive[id] as Map
         Map entry
-        if (prev && prev.text == candidate.text) {
-            entry = prev  // unchanged — reuse with original ts
+        if (prev && (prev.severity as Integer) == (candidate.severity as Integer) &&
+                prev.family == candidate.family && prev.text == candidate.text) {
+            entry = prev
         } else {
             entry = candidate + [ts: nowMs]
         }
@@ -541,39 +544,14 @@ private Map evaluateZone(Map zone, BigDecimal outdoorTemp, Map outdoorTrend, boo
 
     List contacts = zone.contactSensors ?: []
     List openContacts = contacts.findAll { it.currentValue("contact") == "open" }
-    boolean anyOpen = !openContacts.isEmpty()
-    boolean noContactsConfigured = contacts.isEmpty()
-    boolean windowGatePasses = noContactsConfigured || anyOpen
-    String noSensorNote = noContactsConfigured ? " (no window sensors configured)" : ""
 
     // House-wide AQI passed in from evaluateAll (one read per cycle)
     BigDecimal aqiVal = houseAqi
 
     List candidates = []
-    def m
-    m = evaluateCoolingPreAlert(zone, indoorTemp, outdoorTemp, outdoorTrend, windowGatePasses, noSensorNote)
-    if (m) { candidates << m }
-
-    m = evaluateHeatingPreAlert(zone, indoorTemp, outdoorTemp, outdoorTrend, windowGatePasses, noSensorNote)
-    if (m) { candidates << m }
-
-    m = evaluateCoolBreach(zone, indoorTemp, outdoorTemp)
-    if (m) { candidates << m }
-
-    m = evaluateCoolingWindowOpen(zone, indoorTemp, outdoorTemp, windowGatePasses, noSensorNote)
-    if (m) { candidates << m }
-
-    m = evaluateHeatBreach(zone, indoorTemp, outdoorTemp)
-    if (m) { candidates << m }
-
-    m = evaluateHeatingWindowOpen(zone, indoorTemp, outdoorTemp, windowGatePasses, noSensorNote)
-    if (m) { candidates << m }
-
-    m = evaluateComfortOpen(zone, indoorTemp, outdoorTemp, outdoorTrend, rainDetected, openContacts, aqiVal)
-    if (m) { candidates << m }
-
-    m = evaluateFreeCooling(zone, indoorTemp, outdoorTemp, outdoorTrend, openContacts, !noContactsConfigured, aqiVal, rainDetected)
-    if (m) { candidates << m }
+    Map windowAction = evaluateWindowAction(zone, indoorTemp, outdoorTemp, outdoorTrend,
+            rainDetected, openContacts, contacts.isEmpty(), aqiVal)
+    if (windowAction) { candidates << windowAction }
 
     return [
         candidates: candidates,
@@ -586,146 +564,81 @@ private Map evaluateZone(Map zone, BigDecimal outdoorTemp, Map outdoorTrend, boo
     ]
 }
 
-private Map evaluateCoolingPreAlert(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp,
-                                     Map outdoorTrend, boolean windowGatePasses, String noSensorNote) {
-    if (!windowGatePasses)              { return null }
-    if (outdoorTrend.trend == "unknown") { return null }
-    if (outdoorTrend.trend != "heating up")  { return null }
-    if (outdoorTemp == null || outdoorTemp <= indoorTemp) { return null }
+// Produces at most one window action per zone. Medium severity anticipates a
+// boundary using indoor/outdoor proximity plus trend; high severity means the
+// indoor temperature has crossed the applicable setpoint.
+private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp,
+                                 Map outdoorTrend, boolean rainDetected, List openContacts,
+                                 boolean noContactsConfigured, BigDecimal aqiVal) {
+    if (outdoorTemp == null || (zone.thermostats ?: []).isEmpty()) { return null }
 
-    List qualifying = []
+    boolean closeAllowed = noContactsConfigured || !openContacts.isEmpty()
+    boolean openAllowed = noContactsConfigured || openContacts.isEmpty()
+    Integer warnThreshold = (settings.aqiWarnThreshold ?: AQI_WARN_DEFAULT) as Integer
+    boolean openingSafe = !rainDetected && (aqiVal == null || aqiVal < warnThreshold)
+    String trend = outdoorTrend?.trend as String
+    List options = []
+
     (zone.thermostats ?: []).each { t ->
         String mode = t.currentValue("thermostatMode")
-        if (!(mode in ["cool", "auto"])) { return }
         BigDecimal coolSP = safeCurrentBD(t, "coolingSetpoint")
-        if (coolSP == null) { return }
-        BigDecimal offset = zone.coolingPreAlertOffset ?: 3.0G
-        if (indoorTemp >= (coolSP - offset)) { qualifying << [setpoint: coolSP] }
-    }
-    if (qualifying.isEmpty()) { return null }
-
-    Map best = qualifying.min { Math.abs((it.setpoint as BigDecimal) - indoorTemp) }
-    String text = "${zone.name} ${indoorTemp}°F approaching ${best.setpoint}°F cool setpoint, outside ${outdoorTemp}°F heating up \u2014 close windows${noSensorNote}"
-    return buildCandidate("zone-${zone.id}-cooling-prealert", 2, zone.name, "coolingPreAlert", text, zone.id as String)
-}
-
-private Map evaluateHeatingPreAlert(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp,
-                                     Map outdoorTrend, boolean windowGatePasses, String noSensorNote) {
-    if (!windowGatePasses)               { return null }
-    if (outdoorTrend.trend == "unknown")  { return null }
-    if (outdoorTrend.trend != "cooling down")  { return null }
-    if (outdoorTemp == null || outdoorTemp >= indoorTemp) { return null }
-
-    List qualifying = []
-    (zone.thermostats ?: []).each { t ->
-        String mode = t.currentValue("thermostatMode")
-        if (!(mode in ["heat", "auto", "emergency heat"])) { return }
         BigDecimal heatSP = safeCurrentBD(t, "heatingSetpoint")
-        if (heatSP == null) { return }
-        BigDecimal offset = zone.heatingPreAlertOffset ?: 3.0G
-        if (indoorTemp <= (heatSP + offset)) { qualifying << [setpoint: heatSP] }
-    }
-    if (qualifying.isEmpty()) { return null }
 
-    Map best = qualifying.min { Math.abs((it.setpoint as BigDecimal) - indoorTemp) }
-    String text = "${zone.name} ${indoorTemp}°F approaching ${best.setpoint}°F heat setpoint, outside ${outdoorTemp}°F cooling down \u2014 close windows${noSensorNote}"
-    return buildCandidate("zone-${zone.id}-heating-prealert", 2, zone.name, "heatingPreAlert", text, zone.id as String)
-}
+        if (coolSP != null && (mode in ["cool", "auto", "off"])) {
+            BigDecimal offset = zone.coolingPreAlertOffset ?: 3.0G
+            boolean indoorNear = indoorTemp >= (coolSP - offset)
+            boolean breached = indoorTemp >= coolSP
+            boolean anticipateClose = trend == "heating up" && indoorNear && outdoorTemp >= (coolSP - offset)
+            boolean urgentClose = breached && outdoorTemp >= indoorTemp
+            if (closeAllowed && (anticipateClose || urgentClose)) {
+                options << [severity: breached ? 3 : 2, family: "windowCloseWarm",
+                            text: "It's getting warm outside \u2014 close the windows",
+                            distance: Math.abs(indoorTemp - coolSP) + Math.abs(outdoorTemp - coolSP)]
+            }
 
-private Map evaluateCoolBreach(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp) {
-    if ((zone.thermostats ?: []).isEmpty()) { return null }
-    List qualifying = []
-    (zone.thermostats ?: []).each { t ->
-        String mode = t.currentValue("thermostatMode")
-        if (!(mode in ["cool", "auto"])) { return }
-        BigDecimal coolSP = safeCurrentBD(t, "coolingSetpoint")
-        if (coolSP == null) { return }
-        if (indoorTemp >= coolSP && outdoorTemp != null && outdoorTemp > indoorTemp) {
-            qualifying << [setpoint: coolSP]
+            boolean comfortableOutside = heatSP == null || outdoorTemp > heatSP
+            boolean anticipateOpen = trend == "cooling down" && indoorNear &&
+                    outdoorTemp <= (coolSP + offset) && outdoorTemp < indoorTemp && comfortableOutside
+            boolean urgentOpen = breached && outdoorTemp < indoorTemp && comfortableOutside
+            if ((mode in ["cool", "auto"]) && openAllowed && openingSafe && (anticipateOpen || urgentOpen)) {
+                options << [severity: breached ? 3 : 2, family: "windowOpenCool",
+                            text: "It's getting cooler outside \u2014 open the windows",
+                            distance: Math.abs(indoorTemp - coolSP) + Math.abs(outdoorTemp - coolSP)]
+            }
+        }
+
+        if (heatSP != null && (mode in ["heat", "auto", "emergency heat", "off"])) {
+            BigDecimal offset = zone.heatingPreAlertOffset ?: 3.0G
+            boolean indoorNear = indoorTemp <= (heatSP + offset)
+            boolean breached = indoorTemp <= heatSP
+            boolean anticipateClose = trend == "cooling down" && indoorNear && outdoorTemp <= (heatSP + offset)
+            boolean urgentClose = breached && outdoorTemp <= indoorTemp
+            if (closeAllowed && (anticipateClose || urgentClose)) {
+                options << [severity: breached ? 3 : 2, family: "windowCloseCold",
+                            text: "It's getting cold outside \u2014 close the windows",
+                            distance: Math.abs(indoorTemp - heatSP) + Math.abs(outdoorTemp - heatSP)]
+            }
+
+            boolean comfortableOutside = coolSP == null || outdoorTemp < coolSP
+            boolean anticipateOpen = trend == "heating up" && indoorNear &&
+                    outdoorTemp >= (heatSP - offset) && outdoorTemp > indoorTemp && comfortableOutside
+            boolean urgentOpen = breached && outdoorTemp > indoorTemp && comfortableOutside
+            if ((mode in ["heat", "auto", "emergency heat"]) && openAllowed && openingSafe && (anticipateOpen || urgentOpen)) {
+                options << [severity: breached ? 3 : 2, family: "windowOpenWarm",
+                            text: "It's getting warmer outside \u2014 open the windows",
+                            distance: Math.abs(indoorTemp - heatSP) + Math.abs(outdoorTemp - heatSP)]
+            }
         }
     }
-    if (qualifying.isEmpty()) { return null }
-    Map best = qualifying.min { Math.abs((it.setpoint as BigDecimal) - indoorTemp) }
-    String text = "${zone.name} ${indoorTemp}°F has breached ${best.setpoint}°F cool setpoint \u2014 close windows"
-    return buildCandidate("zone-${zone.id}-setpoint-breach-cool", 3, zone.name, "setpointBreachCool", text, zone.id as String)
-}
 
-// Windows-open / AC-off close-windows warning. Fires when the thermostat is NOT
-// actively cooling (e.g. turned off because windows are open) yet the room is
-// approaching the cool setpoint and it's hotter outside than that setpoint — the
-// active-cooling pre-alert/breach evaluators skip this because they require
-// thermostatMode cool/auto. Independent of trend so it warns whenever the
-// conditions hold.
-private Map evaluateCoolingWindowOpen(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp,
-                                       boolean windowGatePasses, String noSensorNote) {
-    if (!windowGatePasses)   { return null }
-    if (outdoorTemp == null) { return null }
-
-    List qualifying = []
-    (zone.thermostats ?: []).each { t ->
-        String mode = t.currentValue("thermostatMode")
-        // Active cooling is covered by evaluateCoolingPreAlert / evaluateCoolBreach.
-        if (mode in ["cool", "auto"]) { return }
-        BigDecimal coolSP = safeCurrentBD(t, "coolingSetpoint")
-        if (coolSP == null) { return }
-        BigDecimal offset = zone.coolingPreAlertOffset ?: 3.0G
-        if (indoorTemp >= (coolSP - offset) && outdoorTemp > coolSP) {
-            qualifying << [setpoint: coolSP]
-        }
-    }
-    if (qualifying.isEmpty()) { return null }
-
-    Map best = qualifying.min { Math.abs((it.setpoint as BigDecimal) - indoorTemp) }
-    String text = "${zone.name} ${indoorTemp}°F nearing ${best.setpoint}°F cool setpoint, outside ${outdoorTemp}°F is hotter \u2014 close windows${noSensorNote}"
-    return buildCandidate("zone-${zone.id}-cooling-windowopen", 2, zone.name, "coolingWindowOpen", text, zone.id as String)
-}
-
-private Map evaluateHeatBreach(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp) {
-    if ((zone.thermostats ?: []).isEmpty()) { return null }
-    List qualifying = []
-    (zone.thermostats ?: []).each { t ->
-        String mode = t.currentValue("thermostatMode")
-        if (!(mode in ["heat", "auto", "emergency heat"])) { return }
-        BigDecimal heatSP = safeCurrentBD(t, "heatingSetpoint")
-        if (heatSP == null) { return }
-        if (indoorTemp <= heatSP && outdoorTemp != null && outdoorTemp < indoorTemp) {
-            qualifying << [setpoint: heatSP]
-        }
-    }
-    if (qualifying.isEmpty()) { return null }
-    Map best = qualifying.min { Math.abs((it.setpoint as BigDecimal) - indoorTemp) }
-    String text = "${zone.name} ${indoorTemp}°F has breached ${best.setpoint}°F heat setpoint \u2014 close windows"
-    return buildCandidate("zone-${zone.id}-setpoint-breach-heat", 3, zone.name, "setpointBreachHeat", text, zone.id as String)
-}
-
-// Windows-open / heat-off close-windows warning. Mirror of evaluateCoolingWindowOpen
-// for heating season: fires when the thermostat is NOT actively heating (e.g. turned
-// off because windows are open) yet the room is approaching the heat setpoint and it's
-// colder outside than that setpoint — the active-heating pre-alert/breach evaluators
-// skip this because they require thermostatMode heat/auto/emergency heat. Independent
-// of trend so it warns whenever the conditions hold.
-private Map evaluateHeatingWindowOpen(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp,
-                                       boolean windowGatePasses, String noSensorNote) {
-    if (!windowGatePasses)   { return null }
-    if (outdoorTemp == null) { return null }
-
-    List qualifying = []
-    (zone.thermostats ?: []).each { t ->
-        String mode = t.currentValue("thermostatMode")
-        // Active heating is covered by evaluateHeatingPreAlert / evaluateHeatBreach.
-        if (mode in ["heat", "auto", "emergency heat"]) { return }
-        BigDecimal heatSP = safeCurrentBD(t, "heatingSetpoint")
-        if (heatSP == null) { return }
-        BigDecimal offset = zone.heatingPreAlertOffset ?: 3.0G
-        if (indoorTemp <= (heatSP + offset) && outdoorTemp < heatSP) {
-            qualifying << [setpoint: heatSP]
-        }
-    }
-    if (qualifying.isEmpty()) { return null }
-
-    Map best = qualifying.min { Math.abs((it.setpoint as BigDecimal) - indoorTemp) }
-    String text = "${zone.name} ${indoorTemp}°F nearing ${best.setpoint}°F heat setpoint, outside ${outdoorTemp}°F is colder \u2014 close windows${noSensorNote}"
-    return buildCandidate("zone-${zone.id}-heating-windowopen", 2, zone.name, "heatingWindowOpen", text, zone.id as String)
+    if (options.isEmpty()) { return null }
+    Map best = options.sort { a, b ->
+        int severityOrder = (b.severity as Integer) <=> (a.severity as Integer)
+        severityOrder != 0 ? severityOrder : (a.distance as BigDecimal) <=> (b.distance as BigDecimal)
+    }.first()
+    String text = "${zone.name}: ${best.text}"
+    return buildCandidate("zone-${zone.id}-window-action", best.severity as Integer,
+            zone.name, best.family as String, text, zone.id as String)
 }
 
 private Map evaluateAqi(Map zone, BigDecimal aqiVal) {
@@ -741,80 +654,6 @@ private Map evaluateAqi(Map zone, BigDecimal aqiVal) {
         return buildCandidate("zone-${zone.id}-aqi-warn", 2, zone.name, "aqiWarn", text, zone.id as String)
     }
     return null
-}
-
-// Open-windows comfort suggestion: outdoor is comfortable relative to setpoints,
-// contacts are closed, not raining, AQI ok, outdoor not rising into heat range.
-// Severity = 1 (info) — the only code path that produces the "info" ENUM value.
-private Map evaluateComfortOpen(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp,
-                                 Map outdoorTrend, boolean rainDetected,
-                                 List openContacts, BigDecimal aqiVal) {
-    if (outdoorTemp == null)          { return null }
-    if (rainDetected)                 { return null }
-    if (!openContacts.isEmpty())      { return null }  // windows already open — no need to suggest
-    if ((zone.contactSensors ?: []).isEmpty()) { return null }  // no contacts to open
-
-    // Suppress if AQI is at warning level or above
-    Integer warnThreshold = (settings.aqiWarnThreshold ?: AQI_WARN_DEFAULT) as Integer
-    if (aqiVal != null && aqiVal >= warnThreshold) { return null }
-
-    // Need thermostats with setpoints to define the comfort band
-    List qualifying = []
-    (zone.thermostats ?: []).each { t ->
-        String mode = t.currentValue("thermostatMode")
-        if (mode in ["off", "fan only"]) { return }
-        BigDecimal coolSP = safeCurrentBD(t, "coolingSetpoint")
-        BigDecimal heatSP = safeCurrentBD(t, "heatingSetpoint")
-        if (coolSP == null || heatSP == null) { return }
-        BigDecimal comfortBuffer = 2.0G
-        BigDecimal lowerBound = heatSP + comfortBuffer
-        BigDecimal upperBound = coolSP - comfortBuffer
-        if (upperBound <= lowerBound) { return }  // setpoints too close for a comfort band
-        if (outdoorTemp >= lowerBound && outdoorTemp <= upperBound) {
-            qualifying << [coolSP: coolSP, heatSP: heatSP]
-        }
-    }
-    if (qualifying.isEmpty()) { return null }
-
-    // Don't suggest if outdoor temp is heating up toward the cooling band
-    if (outdoorTrend.trend == "heating up") { return null }
-
-    String text = "${zone.name} outdoor ${outdoorTemp}°F is comfortable \u2014 consider opening windows for fresh air"
-    return buildCandidate("zone-${zone.id}-comfort-open", 1, zone.name, "comfortOpen", text, zone.id as String)
-}
-
-// Free cooling opportunity: outdoor cooler than indoor and indoor at/near cooling setpoint.
-// Ventilation displaces AC run without spending comfort — the gap evaluateComfortOpen misses
-// because outdoor is below the comfort band but still cooler than the overheated interior.
-// Severity = 1 (info) — positive opportunity, not a warning.
-private Map evaluateFreeCooling(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp,
-                                 Map outdoorTrend, List openContacts, boolean contactsConfigured,
-                                 BigDecimal aqiVal, boolean rainDetected) {
-    if (outdoorTemp == null)            { return null }
-    if (rainDetected)                   { return null }
-    if (!contactsConfigured)            { return null }  // no contacts to open
-    if (!openContacts.isEmpty())        { return null }  // windows already open — suggestion redundant
-    if (outdoorTemp >= indoorTemp)      { return null }  // outdoor not cooler than indoor
-    if (outdoorTrend.trend == "heating up") { return null }  // temp trending up — opportunity closing
-
-    Integer warnThreshold = (settings.aqiWarnThreshold ?: AQI_WARN_DEFAULT) as Integer
-    if (aqiVal != null && aqiVal >= warnThreshold) { return null }
-
-    List qualifying = []
-    (zone.thermostats ?: []).each { t ->
-        String mode = t.currentValue("thermostatMode")
-        if (!(mode in ["cool", "auto"])) { return }
-        BigDecimal coolSP = safeCurrentBD(t, "coolingSetpoint")
-        if (coolSP == null) { return }
-        BigDecimal offset = zone.coolingPreAlertOffset ?: 3.0G
-        if (indoorTemp >= (coolSP - offset)) { qualifying << [coolSP: coolSP] }
-    }
-    if (qualifying.isEmpty()) { return null }
-
-    Map best = qualifying.min { Math.abs((it.coolSP as BigDecimal) - indoorTemp) }
-    BigDecimal delta = (indoorTemp - outdoorTemp).setScale(1, java.math.RoundingMode.HALF_UP)
-    String text = "${zone.name} outdoor ${outdoorTemp}°F is ${delta}°F cooler than indoor ${indoorTemp}°F \u2014 consider opening windows for free cooling (cool setpoint ${best.coolSP}°F)"
-    return buildCandidate("zone-${zone.id}-free-cooling", 1, zone.name, "freeCooling", text, zone.id as String)
 }
 
 private List evaluateHouseRain(boolean rainDetected, List zones) {
@@ -899,9 +738,14 @@ def clearExternalMessage(String key) {
 // ── Notifications ─────────────────────────────────────────────────────────────
 
 private void handleNotifications(List allMessages, List zones) {
-    if (!allMessages) { return }
     Map lastNotif = (state.lastNotificationAt ?: [:]) as Map
-    Long throttleMs = ((settings.throttleMinutes ?: 60) as Integer) * 60 * 1000L
+    Set activeIds = (allMessages ?: []).collect { it.id as String } as Set
+    lastNotif = lastNotif.findAll { id, ignored -> activeIds.contains(id as String) }
+    if (!allMessages) {
+        state.lastNotificationAt = lastNotif
+        return
+    }
+
     Long nowMs = now()
     Integer minSeverity = (settings.announceSeverityThreshold ?: 2) as Integer
     List announceModes = (settings.announceModes ?: []) as List
@@ -913,17 +757,15 @@ private void handleNotifications(List allMessages, List zones) {
 
         String msgId = msg.id as String
         def lastEntry = lastNotif[msgId]
-        Long lastTs   = 0L
         int  lastSev  = -1
+        String lastText = null
         if (lastEntry instanceof Map) {
-            lastTs  = (lastEntry.ts  ?: 0L) as Long
             lastSev = (lastEntry.sev ?: -1) as Integer
-        } else if (lastEntry != null) {
-            lastTs = lastEntry as Long
+            lastText = lastEntry.text as String
         }
 
-        // Skip if within throttle window AND severity hasn't risen
-        if ((nowMs - lastTs) < throttleMs && sev <= lastSev) { return }
+        // Announce a new action once; allow one escalation of that same action.
+        if (lastEntry != null && lastText == (msg.text as String) && sev <= lastSev) { return }
 
         String msgZoneId = msg.zoneId as String
         List notifDevices = (settings.globalNotificationDevices ?: []) as List
@@ -936,20 +778,17 @@ private void handleNotifications(List allMessages, List zones) {
         }
 
         if (sev >= minSeverity && speakAllowed) {
-            // Global speakers
-            (settings.globalSpeakers ?: []).each { spk ->
-                try { spk.speak(msg.text as String) } catch (Exception e) { log.warn "speak error: ${e.message}" }
-            }
-            // Zone speakers
+            List speakers = (settings.globalSpeakers ?: []) as List
             if (msgZoneId) {
                 Map zone = zones.find { it.id == msgZoneId }
-                (zone?.speakers ?: []).each { spk ->
-                    try { spk.speak(msg.text as String) } catch (Exception e) { log.warn "speak error: ${e.message}" }
-                }
+                speakers = speakers + (zone?.speakers ?: [])
+            }
+            speakers.unique().each { spk ->
+                try { spk.speak(msg.text as String) } catch (Exception e) { log.warn "speak error: ${e.message}" }
             }
         }
 
-        lastNotif[msgId] = [ts: nowMs, sev: sev]
+        lastNotif[msgId] = [ts: nowMs, sev: sev, text: msg.text as String]
     }
     state.lastNotificationAt = lastNotif
 }
@@ -972,20 +811,25 @@ private List<Map> configuredZones() {
             id                   : "zone${i}",
             index                : i,
             name                 : name,
-            thermostats          : settings["zone${i}Thermostats"]            ?: [],
-            indoorTempSensors    : settings["zone${i}IndoorTempSensors"]      ?: [],
-            contactSensors       : settings["zone${i}ContactSensors"]         ?: [],
-            speakers             : settings["zone${i}Speakers"]               ?: [],
+            thermostats          : deviceList(settings["zone${i}Thermostats"]),
+            indoorTempSensors    : deviceList(settings["zone${i}IndoorTempSensors"]),
+            contactSensors       : deviceList(settings["zone${i}ContactSensors"]),
+            speakers             : deviceList(settings["zone${i}Speakers"]),
             coolingPreAlertOffset: (settings["zone${i}CoolingPreAlertOffset"] ?: 3.0) as BigDecimal,
             heatingPreAlertOffset: (settings["zone${i}HeatingPreAlertOffset"] ?: 3.0) as BigDecimal,
-            notificationDevices  : settings["zone${i}NotificationDevices"]    ?: []
+            notificationDevices  : deviceList(settings["zone${i}NotificationDevices"])
         ]
     }.findAll { it != null }
 }
 
+private List deviceList(def selection) {
+    if (!selection) { return [] }
+    return selection instanceof Collection ? selection as List : [selection]
+}
+
 private List temperatureDevicesForZone(Map zone) {
-    List sensors = zone.indoorTempSensors ?: []
-    return sensors ?: (zone.thermostats ?: [])
+    List sensors = deviceList(zone.indoorTempSensors)
+    return sensors ?: deviceList(zone.thermostats)
 }
 
 private BigDecimal currentHouseAqi() {
