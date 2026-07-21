@@ -2,9 +2,10 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.18
+ * Version:   0.4.19
  *
  * Changelog:
+ *   0.4.19 — 2026-07-20 — Use thermostat temperature when a zone has no dedicated indoor temperature sensors. Previously these zones were skipped entirely, leaving SharpTools on the idle forecast instead of showing applicable close-windows warnings.
  *   0.4.18 — 2026-06-22 — Symmetric heating counterpart to 0.4.17: new close-windows warning for the windows-open/heat-off case. When the thermostat isn't actively heating (e.g. turned off because windows are open), warn (severity 2) once indoor is within the heating pre-alert offset of the heat setpoint AND it's colder outside than that setpoint.
  *   0.4.17 — 2026-06-22 — New close-windows warning for the windows-open/AC-off case: when the thermostat isn't actively cooling (e.g. turned off because windows are open), warn (severity 2) once indoor is within the cooling pre-alert offset of the cool setpoint AND it's hotter outside than that setpoint. Previously every cooling alert required thermostatMode cool/auto, so an "off" thermostat produced no status message.
  *   0.4.16 — 2026-06-10 — Speaker announcements can now be restricted to selected location modes (new "announceModes" input). Leave empty to allow all modes; otherwise speakers stay silent outside the chosen modes (e.g. avoid blasting alerts overnight).
@@ -38,7 +39,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.18"
+@Field static final String  APP_VERSION        = "0.4.19"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -272,8 +273,8 @@ private void subscribeAll(List zones) {
     }
 
     zones.each { zone ->
-        // Indoor temp sensors get a dedicated handler that appends trend samples
-        zone.indoorTempSensors?.each { sensor ->
+        // Effective indoor temperature devices get a dedicated handler that appends trend samples.
+        temperatureDevicesForZone(zone).each { sensor ->
             subscribe(sensor, "temperature", indoorTempHandler)
         }
         zone.thermostats?.each { t ->
@@ -310,7 +311,7 @@ def indoorTempHandler(evt) {
         Long ts = now()
         String evtDevId = evt.device?.id as String
         configuredZones().each { zone ->
-            if (zone.indoorTempSensors?.any { (it.id as String) == evtDevId }) {
+            if (temperatureDevicesForZone(zone).any { (it.id as String) == evtDevId }) {
                 appendIndoorSample(zone.id as String, temp, ts)
             }
         }
@@ -532,7 +533,7 @@ private List resolveMessages(List candidates, Map prevActive, Map newActive, Lon
 private Map evaluateZone(Map zone, BigDecimal outdoorTemp, Map outdoorTrend, boolean rainDetected, BigDecimal houseAqi) {
     Map emptyMeta = [indoorTemp: null, openContactCount: 0, openContactNames: "", aqi: null]
 
-    BigDecimal indoorTemp = averageTemps(zone.indoorTempSensors)
+    BigDecimal indoorTemp = averageTemps(temperatureDevicesForZone(zone))
     if (indoorTemp == null) {
         logDebug "Zone ${zone.name}: no indoor temp — skipping"
         return [candidates: [], meta: emptyMeta]
@@ -980,6 +981,11 @@ private List<Map> configuredZones() {
             notificationDevices  : settings["zone${i}NotificationDevices"]    ?: []
         ]
     }.findAll { it != null }
+}
+
+private List temperatureDevicesForZone(Map zone) {
+    List sensors = zone.indoorTempSensors ?: []
+    return sensors ?: (zone.thermostats ?: [])
 }
 
 private BigDecimal currentHouseAqi() {
