@@ -2,9 +2,10 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.23
+ * Version:   0.4.24
  *
  * Changelog:
+ *   0.4.24 — 2026-07-21 — Add a configurable window/door open qualification delay (default 60 seconds) so brief contact openings do not change status; closing still clears immediately.
  *   0.4.23 — 2026-07-21 — Unify opening/closing advice into one action per zone. Use indoor and outdoor proximity plus outdoor trend for predictive warnings, escalate when indoor crosses the setpoint, shorten messages, and notify only for a new action or escalation.
  *   0.4.22 — 2026-07-21 — Normalize device inputs so a single optional indoor temperature sensor is used reliably instead of being skipped when Hubitat returns a scalar device selection.
  *   0.4.21 — 2026-07-21 — Restrict AC-off and heat-off close-windows fallbacks to thermostatMode off. Previously cooling mode could produce a contradictory heating warning (and heating mode could produce a cooling warning).
@@ -43,7 +44,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.23"
+@Field static final String  APP_VERSION        = "0.4.24"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -143,6 +144,11 @@ def globalPage() {
             input "indoorTrendEnabled", "bool",
                 title: "Track indoor trend per zone", defaultValue: true, required: true
         }
+        section("Window / Door Contacts") {
+            input "contactOpenDelaySeconds", "number",
+                title: "Seconds a window or door must remain open before status changes",
+                range: "0..3600", defaultValue: 60, required: true
+        }
         section("Dashboard Devices") {
             input "createDashboardDevices", "bool",
                 title: "Create dashboard child device (one house-wide device for SharpTools / Hubitat Dashboard)",
@@ -214,6 +220,7 @@ def zonesPage() {
 def installed() {
     state.outdoorSamples     = []
     state.indoorSamples      = [:]
+    state.contactOpenedAt    = [:]
     state.lastNotificationAt = [:]
     state.activeMessages     = [:]
     state.externalMessages   = [:]
@@ -236,6 +243,7 @@ def initialize() {
     reconcileChildren()
     List zones = configuredZones()
     subscribeAll(zones)
+    schedulePendingContactEvaluations(zones)
     runIn(SEED_DELAY_SECONDS, "evaluateAll")
 }
 
@@ -285,7 +293,7 @@ private void subscribeAll(List zones) {
             subscribe(t, "heatingSetpoint",   debounceHandler)
         }
         zone.contactSensors?.each { c ->
-            subscribe(c, "contact", debounceHandler)
+            subscribe(c, "contact", contactHandler)
         }
     }
 }
@@ -321,6 +329,45 @@ def indoorTempHandler(evt) {
         log.warn "indoorTempHandler sample error: ${e.message}"
     }
     runIn(DEBOUNCE_SECONDS, "evaluateAll", [overwrite: true])
+}
+
+// Brief contact openings should not change status. Record when each contact
+// opened and evaluate after the configured delay; closing takes effect promptly.
+def contactHandler(evt) {
+    Map openedAt = (state.contactOpenedAt ?: [:]) as Map
+    String deviceId = evt.device?.id as String
+    if (evt.value == "open") {
+        openedAt[deviceId] = now()
+        state.contactOpenedAt = openedAt
+        Integer delaySeconds = configuredContactOpenDelaySeconds()
+        runIn(Math.max(DEBOUNCE_SECONDS, delaySeconds), "contactDelayElapsed", [overwrite: false])
+    } else {
+        openedAt.remove(deviceId)
+        state.contactOpenedAt = openedAt
+        runIn(DEBOUNCE_SECONDS, "evaluateAll", [overwrite: true])
+    }
+}
+
+def contactDelayElapsed() {
+    evaluateAll()
+}
+
+private void schedulePendingContactEvaluations(List zones) {
+    Map openedAt = (state.contactOpenedAt ?: [:]) as Map
+    Long delayMs = configuredContactOpenDelaySeconds() * 1000L
+    Long nowMs = now()
+    zones.each { zone ->
+        (zone.contactSensors ?: []).each { contact ->
+            Long opened = openedAt[contact.id as String] as Long
+            if (contact.currentValue("contact") == "open" && opened != null) {
+                Long remainingMs = delayMs - (nowMs - opened)
+                if (remainingMs > 0) {
+                    Integer remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000G) as Integer)
+                    runIn(remainingSeconds, "contactDelayElapsed", [overwrite: false])
+                }
+            }
+        }
+    }
 }
 
 // All other handlers: schedule the debounced evaluation
@@ -543,7 +590,7 @@ private Map evaluateZone(Map zone, BigDecimal outdoorTemp, Map outdoorTrend, boo
     }
 
     List contacts = zone.contactSensors ?: []
-    List openContacts = contacts.findAll { it.currentValue("contact") == "open" }
+    List openContacts = qualifiedOpenContacts(contacts)
 
     // House-wide AQI passed in from evaluateAll (one read per cycle)
     BigDecimal aqiVal = houseAqi
@@ -591,7 +638,7 @@ private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal out
             boolean anticipateClose = trend == "heating up" && indoorNear && outdoorTemp >= (coolSP - offset)
             boolean urgentClose = breached && outdoorTemp >= indoorTemp
             if (closeAllowed && (anticipateClose || urgentClose)) {
-                options << [severity: breached ? 3 : 2, family: "windowCloseWarm",
+                options << [severity: urgentClose ? 3 : 2, family: "windowCloseWarm",
                             text: "It's getting warm outside \u2014 close the windows",
                             distance: Math.abs(indoorTemp - coolSP) + Math.abs(outdoorTemp - coolSP)]
             }
@@ -614,7 +661,7 @@ private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal out
             boolean anticipateClose = trend == "cooling down" && indoorNear && outdoorTemp <= (heatSP + offset)
             boolean urgentClose = breached && outdoorTemp <= indoorTemp
             if (closeAllowed && (anticipateClose || urgentClose)) {
-                options << [severity: breached ? 3 : 2, family: "windowCloseCold",
+                options << [severity: urgentClose ? 3 : 2, family: "windowCloseCold",
                             text: "It's getting cold outside \u2014 close the windows",
                             distance: Math.abs(indoorTemp - heatSP) + Math.abs(outdoorTemp - heatSP)]
             }
@@ -659,7 +706,7 @@ private Map evaluateAqi(Map zone, BigDecimal aqiVal) {
 private List evaluateHouseRain(boolean rainDetected, List zones) {
     if (!rainDetected) { return [] }
     boolean anyZoneOpen = zones.any { zone ->
-        (zone.contactSensors ?: []).any { it.currentValue("contact") == "open" }
+        !qualifiedOpenContacts(zone.contactSensors ?: []).isEmpty()
     }
     if (!anyZoneOpen) { return [] }
     return [buildCandidate("house-rain-windows-open", 3, "House", "rainWindowsOpen",
@@ -825,6 +872,22 @@ private List<Map> configuredZones() {
 private List deviceList(def selection) {
     if (!selection) { return [] }
     return selection instanceof Collection ? selection as List : [selection]
+}
+
+private List qualifiedOpenContacts(List contacts) {
+    Map openedAt = (state.contactOpenedAt ?: [:]) as Map
+    Long delayMs = configuredContactOpenDelaySeconds() * 1000L
+    Long nowMs = now()
+    return (contacts ?: []).findAll { contact ->
+        if (contact.currentValue("contact") != "open") { return false }
+        Long opened = openedAt[contact.id as String] as Long
+        // An already-open contact with no recorded event predates this app run.
+        return opened == null || (nowMs - opened) >= delayMs
+    }
+}
+
+private Integer configuredContactOpenDelaySeconds() {
+    return Math.max(0, settings.contactOpenDelaySeconds == null ? 60 : settings.contactOpenDelaySeconds as Integer)
 }
 
 private List temperatureDevicesForZone(Map zone) {

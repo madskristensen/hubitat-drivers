@@ -23,6 +23,8 @@ Climate Advisor monitors indoor and outdoor temperatures, outdoor trend (heating
 
 Only one window action is active per zone. Its message is intentionally short, and it is announced once when the action changes plus once if it escalates from warning to danger.
 
+Window and door openings must remain open for the configured qualification delay (default 60 seconds) before they affect status. Closing takes effect immediately.
+
 ## Idle dashboard line
 
 When no advisories are active, the `latestMessage` attribute shows a contextual one-line ambient status instead of a plain "all clear." Format: `☀️ Sunny · 72°F · AQI 38 (good) · House comfortable`. Segments are omitted gracefully when data is unavailable (no weather device → temp only; no AQI device → AQI omitted). Weather emoji switches to 🌙 after sunset.
@@ -63,6 +65,7 @@ The [**Open-Meteo Weather Enhanced**](../../drivers/open-meteo/open-meteo-weathe
 - **AQI warning threshold** (default 51), **AQI danger threshold** (default 101)
 - **Trend window** (default 30 min), heating up / cooling down thresholds (default ±0.2°F/10 min)
 - **Indoor trend enabled** (default true)
+- **Window/door open qualification delay** (default 60 seconds)
 - **Create dashboard child device** (default false — opt in for SharpTools/dashboard users)
 
 ### Per zone
