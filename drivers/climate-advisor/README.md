@@ -10,8 +10,8 @@ Virtual child driver for the [Climate Advisor](../apps/climate-advisor/README.md
 | `severity` | NUMBER | 0=clear, 1=info, 2=warning, 3=danger |
 | `severityText` | ENUM | clear / info / warning / danger |
 | `latestMessage` | STRING | Human-readable top alert |
-| `messages` | STRING | JSON array of all active messages |
-| `houseStatus` | STRING | Compact summary ("House — all clear" or "N active alerts") |
+| `messages` | STRING | JSON array of up to 20 highest-priority active messages |
+| `houseStatus` | STRING | Compact summary (`House comfortable` or `N active alerts`) |
 | `contact` | ENUM | open (alerts active) / closed (all clear) — HomeKit-friendly |
 | `acknowledged` | ENUM | false / true — user-controlled dismissal flag |
 
@@ -19,7 +19,7 @@ Virtual child driver for the [Climate Advisor](../apps/climate-advisor/README.md
 | Attribute | Type | Notes |
 |---|---|---|
 | `outdoorTrend` | ENUM | heating up / cooling down / steady / unknown |
-| `outdoorTempSlope10min` | NUMBER | °F change per 10 min |
+| `outdoorTempSlope10min` | NUMBER | Temperature change per 10 min in the hub's local scale; 0 when trend is unknown |
 
 ### Counters
 | Attribute | Type | Notes |

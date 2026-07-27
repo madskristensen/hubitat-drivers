@@ -2,9 +2,13 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.24
+ * Version:   0.4.28
  *
  * Changelog:
+ *   0.4.28 — 2026-07-26 — Require indoor temperature to fall below the heating setpoint before advising that windows be closed for cold outdoor air; outdoor temperature/trend alone no longer triggers the warning.
+ *   0.4.27 — 2026-07-26 — Make window-advice wording trend-aware: say “getting cooler/warmer” only when the measured trend agrees; setpoint-breach advice without that trend uses neutral “cooler/warmer outside” wording.
+ *   0.4.26 — 2026-07-26 — Restore AQI alerts, honor AQI/trend threshold boundaries, constrain trend calculations to the configured window, keep all temperature-driven window advice at warning severity, reset acknowledgments for external alerts, remove unused indoor-trend tracking, and harden optional weather/device handling.
+ *   0.4.25 — 2026-07-26 — Suppress open-window advice immediately when any configured contact is physically open, while retaining the qualification delay before open contacts trigger close-window advice.
  *   0.4.24 — 2026-07-21 — Add a configurable window/door open qualification delay (default 60 seconds) so brief contact openings do not change status; closing still clears immediately.
  *   0.4.23 — 2026-07-21 — Unify opening/closing advice into one action per zone. Use indoor and outdoor proximity plus outdoor trend for predictive warnings, escalate when indoor crosses the setpoint, shorten messages, and notify only for a new action or escalation.
  *   0.4.22 — 2026-07-21 — Normalize device inputs so a single optional indoor temperature sensor is used reliably instead of being skipped when Hubitat returns a scalar device selection.
@@ -44,7 +48,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.24"
+@Field static final String  APP_VERSION        = "0.4.28"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -53,14 +57,13 @@ import groovy.transform.Field
 @Field static final Integer AQI_DANGER_DEFAULT = 101    // EPA Unhealthy for Sensitive Groups
 @Field static final Integer DEBOUNCE_SECONDS   = 1
 @Field static final Integer SEED_DELAY_SECONDS = 5
-@Field static final Integer MIN_TREND_SAMPLES  = 10     // retain at least this many samples regardless of age (sparse outdoor sensors)
-@Field static final Integer STALENESS_MULTIPLE = 4      // newest sample must be within N × trendWindow to be considered fresh
+@Field static final Integer MIN_TREND_SAMPLES  = 10     // retain enough history if the configured window is later enlarged
 
 definition(
     name:           "Climate Advisor",
     namespace:      "mads",
     author:         "Mads Kristensen",
-    description:    "Per-zone predictive open/close window advice, indoor/outdoor trend detection, and aggregate house status for SharpTools + Rule Machine.",
+    description:    "Per-zone predictive open/close window advice, outdoor trend detection, and aggregate house status for SharpTools + Rule Machine.",
     category:       "Convenience",
     singleInstance: false,
     iconUrl:        "https://github.githubassets.com/favicons/favicon.png",
@@ -91,6 +94,7 @@ def mainPage() {
 }
 
 def globalPage() {
+    String tempScale = location?.temperatureScale ?: "F"
     dynamicPage(name: "globalPage", title: "Global Settings") {
         section("Outdoor Conditions") {
             input "outdoorTempDevice", "capability.temperatureMeasurement",
@@ -130,23 +134,21 @@ def globalPage() {
         }
         section("AQI Thresholds") {
             input "aqiWarnThreshold", "number",
-                title: "AQI warning threshold (default 51 — EPA Moderate)", defaultValue: 51, required: true
+                title: "AQI warning threshold (default 51 — EPA Moderate)", range: "0..500", defaultValue: 51, required: true
             input "aqiDangerThreshold", "number",
-                title: "AQI danger threshold (default 101 — EPA Unhealthy for Sensitive Groups)", defaultValue: 101, required: true
+                title: "AQI danger threshold (default 101 — EPA Unhealthy for Sensitive Groups)", range: "0..500", defaultValue: 101, required: true
         }
         section("Trend Detection") {
             input "trendWindowMinutes", "number",
-                title: "Outdoor trend window (minutes)", defaultValue: 30, required: true
+                title: "Outdoor trend window (minutes)", range: "5..1440", defaultValue: 30, required: true
             input "outdoorTrendRisingThreshold10min", "decimal",
-                title: "Rising threshold (°F per 10 min)", defaultValue: 0.2, required: true
+                title: "Rising threshold (°${tempScale} per 10 min)", defaultValue: 0.2, required: true
             input "outdoorTrendFallingThreshold10min", "decimal",
-                title: "Falling threshold (°F per 10 min)", defaultValue: -0.2, required: true
-            input "indoorTrendEnabled", "bool",
-                title: "Track indoor trend per zone", defaultValue: true, required: true
+                title: "Falling threshold (°${tempScale} per 10 min)", defaultValue: -0.2, required: true
         }
         section("Window / Door Contacts") {
             input "contactOpenDelaySeconds", "number",
-                title: "Seconds a window or door must remain open before status changes",
+                title: "Seconds before an open window or door triggers close/rain status",
                 range: "0..3600", defaultValue: 60, required: true
         }
         section("Dashboard Devices") {
@@ -184,6 +186,7 @@ def notificationsPage() {
 }
 
 def zonesPage() {
+    String tempScale = location?.temperatureScale ?: "F"
     dynamicPage(name: "zonesPage", title: "Zones") {
         section("Zone Count") {
             input "zoneCount", "number",
@@ -205,9 +208,9 @@ def zonesPage() {
                 input "zone${i}Speakers", "capability.speechSynthesis",
                     title: "Speakers for zone announcements (optional)", multiple: true, required: false
                 input "zone${i}CoolingPreAlertOffset", "decimal",
-                    title: "Cooling anticipation offset for indoor/outdoor temperatures (°F)", defaultValue: 3.0, required: true
+                    title: "Cooling anticipation offset for indoor/outdoor temperatures (°${tempScale})", range: "0..20", defaultValue: 3.0, required: true
                 input "zone${i}HeatingPreAlertOffset", "decimal",
-                    title: "Heating anticipation offset for indoor/outdoor temperatures (°F)", defaultValue: 3.0, required: true
+                    title: "Heating anticipation offset for indoor/outdoor temperatures (°${tempScale})", range: "0..20", defaultValue: 3.0, required: true
                 input "zone${i}NotificationDevices", "capability.notification",
                     title: "Notification devices for this zone (optional)", multiple: true, required: false
             }
@@ -219,11 +222,11 @@ def zonesPage() {
 
 def installed() {
     state.outdoorSamples     = []
-    state.indoorSamples      = [:]
     state.contactOpenedAt    = [:]
     state.lastNotificationAt = [:]
     state.activeMessages     = [:]
     state.externalMessages   = [:]
+    state.presentedMessages  = [:]
     initialize()
 }
 
@@ -283,7 +286,6 @@ private void subscribeAll(List zones) {
     }
 
     zones.each { zone ->
-        // Effective indoor temperature devices get a dedicated handler that appends trend samples.
         temperatureDevicesForZone(zone).each { sensor ->
             subscribe(sensor, "temperature", indoorTempHandler)
         }
@@ -313,26 +315,13 @@ def outdoorTempHandler(evt) {
     runIn(DEBOUNCE_SECONDS, "evaluateAll", [overwrite: true])
 }
 
-// Indoor temp handler: append sample to per-zone trend buffer, then debounce eval.
-// Appends only on actual temperature events (not every evaluation pass) for slope accuracy.
+// Indoor temperature changes only require a debounced reevaluation.
 def indoorTempHandler(evt) {
-    try {
-        BigDecimal temp = evt.value as BigDecimal
-        Long ts = now()
-        String evtDevId = evt.device?.id as String
-        configuredZones().each { zone ->
-            if (temperatureDevicesForZone(zone).any { (it.id as String) == evtDevId }) {
-                appendIndoorSample(zone.id as String, temp, ts)
-            }
-        }
-    } catch (Exception e) {
-        log.warn "indoorTempHandler sample error: ${e.message}"
-    }
     runIn(DEBOUNCE_SECONDS, "evaluateAll", [overwrite: true])
 }
 
-// Brief contact openings should not change status. Record when each contact
-// opened and evaluate after the configured delay; closing takes effect promptly.
+// Brief contact openings should not trigger close-window advice. Re-evaluate
+// immediately to clear stale open-window advice, then qualify close advice later.
 def contactHandler(evt) {
     Map openedAt = (state.contactOpenedAt ?: [:]) as Map
     String deviceId = evt.device?.id as String
@@ -340,6 +329,7 @@ def contactHandler(evt) {
         openedAt[deviceId] = now()
         state.contactOpenedAt = openedAt
         Integer delaySeconds = configuredContactOpenDelaySeconds()
+        runIn(DEBOUNCE_SECONDS, "evaluateAll", [overwrite: true])
         runIn(Math.max(DEBOUNCE_SECONDS, delaySeconds), "contactDelayElapsed", [overwrite: false])
     } else {
         openedAt.remove(deviceId)
@@ -378,45 +368,34 @@ def debounceHandler(evt) {
 // ── Trend computation (lazy — only called from evaluateAll) ───────────────────
 
 Map computeTrend(List samples, Integer windowMinutes, BigDecimal risingThreshold, BigDecimal fallingThreshold) {
-    Long nowTs = now()
-    List window = (samples ?: []).sort { it.now }
-
+    Long windowStart = now() - windowMinutes * 60 * 1000L
+    List window = (samples ?: []).findAll { it.now >= windowStart }.sort { it.now }
     if (window.size() < 2) { return [trend: "unknown", slope10min: null] }
 
     def oldest = window.first()
     def newest = window.last()
-
-    // Staleness guard: if the most recent sample is older than STALENESS_MULTIPLE × the
-    // trend window, the sensor has gone quiet and any computed slope is unreliable.
-    // 4× (default 2h for a 30-min window) tolerates Philio-class outdoor sensors that
-    // only report on threshold crossings.
-    BigDecimal ageMinutes = (nowTs - newest.now) / 60000G
-    if (ageMinutes > (windowMinutes * (STALENESS_MULTIPLE as BigDecimal))) { return [trend: "unknown", slope10min: null] }
-
     BigDecimal spanMinutes = (newest.now - oldest.now) / 60000G
     if (spanMinutes < 5G) { return [trend: "unknown", slope10min: null] }
 
     BigDecimal slopePerMinute = ((newest.t as BigDecimal) - (oldest.t as BigDecimal)) / spanMinutes
     BigDecimal slope10min = slopePerMinute * 10G
 
-    String trend = slope10min > risingThreshold ? "heating up" :
-                   slope10min < fallingThreshold ? "cooling down" :
+    String trend = slope10min >= risingThreshold ? "heating up" :
+                   slope10min <= fallingThreshold ? "cooling down" :
                    "steady"
     return [trend: trend, slope10min: slope10min]
 }
 
 private Map outdoorTrendResult() {
-    BigDecimal rising  = (settings.outdoorTrendRisingThreshold10min  ?: 0.2)  as BigDecimal
-    BigDecimal falling = (settings.outdoorTrendFallingThreshold10min ?: -0.2) as BigDecimal
-    return computeTrend((state.outdoorSamples ?: []) as List, (settings.trendWindowMinutes ?: 30) as Integer, rising, falling)
+    BigDecimal rising = settings.outdoorTrendRisingThreshold10min == null ? 0.2G : settings.outdoorTrendRisingThreshold10min as BigDecimal
+    BigDecimal falling = settings.outdoorTrendFallingThreshold10min == null ? -0.2G : settings.outdoorTrendFallingThreshold10min as BigDecimal
+    return computeTrend((state.outdoorSamples ?: []) as List, configuredTrendWindowMinutes(), rising, falling)
 }
 
 private List pruneSamples(List samples, Long nowTs) {
-    Integer windowMin = (settings.trendWindowMinutes ?: 30) as Integer
-    // Retain by time AND by count. Time-only pruning fails for sparse outdoor sensors
-    // (e.g. Philio PAT02) that can go 2+ hours between temperature events: the first
-    // event after the silence would evict all prior history, leaving a single sample
-    // and forcing the trend back to "unknown" for another full window.
+    Integer windowMin = configuredTrendWindowMinutes()
+    // Retain extra history so increasing the configured window does not immediately
+    // discard all prior context; computeTrend still uses only the active window.
     Long retainMin = Math.max(windowMin * 3L + 5L, 90L)
     Long cutoff = nowTs - retainMin * 60 * 1000L
     List sorted = (samples ?: []).sort { it.now }
@@ -425,23 +404,6 @@ private List pruneSamples(List samples, Long nowTs) {
     if (byTime.size() >= MIN_TREND_SAMPLES) { return byTime }
     // Fall back to the most recent MIN_TREND_SAMPLES samples regardless of age.
     return sorted[-MIN_TREND_SAMPLES..-1]
-}
-
-private void appendIndoorSample(String zoneId, BigDecimal avgTemp, Long ts = null) {
-    Long sampleTs = ts ?: now()
-    Map indoorSamples = (state.indoorSamples ?: [:]) as Map
-    List zoneSamples  = (indoorSamples[zoneId] ?: []) as List
-    zoneSamples = zoneSamples + [[now: sampleTs, t: avgTemp]]
-    indoorSamples[zoneId] = pruneSamples(zoneSamples, sampleTs)
-    state.indoorSamples = indoorSamples
-}
-
-private Map indoorTrendResult(String zoneId) {
-    // Indoor temperatures change more slowly; use a gentler threshold (0.1°F/10min default)
-    BigDecimal rising  = 0.1G
-    BigDecimal falling = -0.1G
-    Map indoorSamples = (state.indoorSamples ?: [:]) as Map
-    return computeTrend((indoorSamples[zoneId] ?: []) as List, (settings.trendWindowMinutes ?: 30) as Integer, rising, falling)
 }
 
 // ── Evaluation orchestrator ───────────────────────────────────────────────────
@@ -485,10 +447,11 @@ def evaluateAll() {
             ]
         }
 
-        // House-level rain+contact alert
-        List rainCandidates = evaluateHouseRain(rainDetected, zones)
-        List rainResolved   = resolveMessages(rainCandidates, prevActive, newActive, nowMs)
-        allMessages.addAll(rainResolved)
+        List houseCandidates = []
+        Map aqiAlert = evaluateHouseAqi(houseAqi)
+        if (aqiAlert) { houseCandidates << aqiAlert }
+        houseCandidates.addAll(evaluateHouseRain(rainDetected, zones))
+        allMessages.addAll(resolveMessages(houseCandidates, prevActive, newActive, nowMs))
 
         state.activeMessages = newActive
 
@@ -512,26 +475,35 @@ def evaluateAll() {
             ]
         }
 
-        // Sort: severity desc, ts desc; cap
         allMessages = allMessages.sort { a, b ->
             int sc = (b.severity as Integer) <=> (a.severity as Integer)
             sc != 0 ? sc : (b.ts as Long) <=> (a.ts as Long)
-        }.take(MAX_AGG_MSG)
+        }
+        List displayedMessages = allMessages.take(MAX_AGG_MSG)
 
         int    aggSeverity     = allMessages ? allMessages.collect { it.severity as Integer }.max() : 0
         String aggSeverityText = severityText(aggSeverity)
         String aggLatest       = allMessages ? allMessages[0].text : buildIdleStatus(outdoorTemp, rainDetected, houseAqi)
         int    alertCount      = allMessages.count { (it.severity as Integer) >= 1 }
-        int    totalOpenContacts = zoneResults.values().sum { (it.openContactCount ?: 0) as Integer } ?: 0
+        List uniqueContacts    = zones.collectMany { it.contactSensors ?: [] }.unique { it.id as String }
+        int    totalOpenContacts = qualifiedOpenContacts(uniqueContacts).size()
         String houseStatus     = alertCount > 0 ? "${alertCount} active alert${alertCount > 1 ? 's' : ''}" : "House comfortable"
-        String aggJson         = JsonOutput.toJson(allMessages)
+        String aggJson         = JsonOutput.toJson(displayedMessages)
+
+        Map previousPresented = (state.presentedMessages ?: [:]) as Map
+        Map currentPresented = allMessages.collectEntries { msg ->
+            [(msg.id as String): [severity: msg.severity as Integer, text: msg.text as String]]
+        }
+        boolean hasNewOrEscalated = currentPresented.any { id, entry ->
+            Map previous = previousPresented[id] as Map
+            int severity = entry.severity as Integer
+            int previousSeverity = (previous?.severity ?: 0) as Integer
+            !previous || severity > previousSeverity || (severity == previousSeverity && entry.text != previous.text)
+        }
+        state.presentedMessages = currentPresented
 
         def aggChild = lookupChild()
         if (aggChild) {
-            // Reset acknowledged flag when new or escalating alerts arrive
-            boolean hasNewOrEscalated = newActive.any { id, entry ->
-                !prevActive.containsKey(id) || ((prevActive[id]?.severity ?: 0) as Integer) < (entry.severity as Integer)
-            }
             if (hasNewOrEscalated) { sendEventIfChanged(aggChild, "acknowledged", "false") }
 
             sendEventIfChanged(aggChild, "severity",              aggSeverity)
@@ -541,7 +513,8 @@ def evaluateAll() {
             sendEventIfChanged(aggChild, "houseStatus",           houseStatus)
             sendEventIfChanged(aggChild, "contact",               aggSeverity >= 1 ? "open" : "closed")
             sendEventIfChanged(aggChild, "outdoorTrend",          outdoorTrend.trend ?: "unknown")
-            sendEventIfChanged(aggChild, "outdoorTempSlope10min", outdoorTrend.slope10min)
+            sendEventIfChanged(aggChild, "outdoorTempSlope10min", outdoorTrend.slope10min == null ? 0 : outdoorTrend.slope10min,
+                    "°${location?.temperatureScale ?: 'F'}/10 min")
             sendEventIfChanged(aggChild, "activeAlertCount",      alertCount)
             sendEventIfChanged(aggChild, "openContactCount",      totalOpenContacts)
             sendEventIfChanged(aggChild, "zoneCount",             zones.size())
@@ -581,48 +554,42 @@ private List resolveMessages(List candidates, Map prevActive, Map newActive, Lon
 
 // Returns a Map {candidates: List, meta: Map{indoorTemp, openContactCount, aqi}}
 private Map evaluateZone(Map zone, BigDecimal outdoorTemp, Map outdoorTrend, boolean rainDetected, BigDecimal houseAqi) {
-    Map emptyMeta = [indoorTemp: null, openContactCount: 0, openContactNames: "", aqi: null]
-
-    BigDecimal indoorTemp = averageTemps(temperatureDevicesForZone(zone))
-    if (indoorTemp == null) {
-        logDebug "Zone ${zone.name}: no indoor temp — skipping"
-        return [candidates: [], meta: emptyMeta]
-    }
-
     List contacts = zone.contactSensors ?: []
-    List openContacts = qualifiedOpenContacts(contacts)
-
-    // House-wide AQI passed in from evaluateAll (one read per cycle)
-    BigDecimal aqiVal = houseAqi
+    List physicallyOpenContacts = contacts.findAll { it.currentValue("contact") == "open" }
+    List qualifiedContacts = qualifiedOpenContacts(contacts)
+    Map meta = [
+        indoorTemp      : null,
+        openContactCount: qualifiedContacts.size(),
+        openContactNames: qualifiedContacts.collect { it.displayName }.join(", "),
+        aqi             : houseAqi
+    ]
 
     List candidates = []
+    BigDecimal indoorTemp = averageTemps(temperatureDevicesForZone(zone))
+    if (indoorTemp == null) {
+        logDebug "Zone ${zone.name}: no indoor temperature — skipping window advice"
+        return [candidates: candidates, meta: meta]
+    }
+    meta.indoorTemp = indoorTemp
+
     Map windowAction = evaluateWindowAction(zone, indoorTemp, outdoorTemp, outdoorTrend,
-            rainDetected, openContacts, contacts.isEmpty(), aqiVal)
+            rainDetected, qualifiedContacts, contacts.isEmpty(), physicallyOpenContacts.isEmpty(), houseAqi)
     if (windowAction) { candidates << windowAction }
 
-    return [
-        candidates: candidates,
-        meta: [
-            indoorTemp      : indoorTemp,
-            openContactCount: openContacts.size(),
-            openContactNames: openContacts.collect { it.displayName }.join(", "),
-            aqi             : aqiVal
-        ]
-    ]
+    return [candidates: candidates, meta: meta]
 }
 
-// Produces at most one window action per zone. Medium severity anticipates a
-// boundary using indoor/outdoor proximity plus trend; high severity means the
-// indoor temperature has crossed the applicable setpoint.
+// Produces at most one warning-level window action per zone using indoor/outdoor
+// proximity, setpoint breaches, and outdoor trend.
 private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp,
-                                 Map outdoorTrend, boolean rainDetected, List openContacts,
-                                 boolean noContactsConfigured, BigDecimal aqiVal) {
+                                 Map outdoorTrend, boolean rainDetected, List qualifiedOpenContacts,
+                                 boolean noContactsConfigured, boolean allContactsClosed, BigDecimal aqiVal) {
     if (outdoorTemp == null || (zone.thermostats ?: []).isEmpty()) { return null }
 
-    boolean closeAllowed = noContactsConfigured || !openContacts.isEmpty()
-    boolean openAllowed = noContactsConfigured || openContacts.isEmpty()
-    Integer warnThreshold = (settings.aqiWarnThreshold ?: AQI_WARN_DEFAULT) as Integer
-    boolean openingSafe = !rainDetected && (aqiVal == null || aqiVal < warnThreshold)
+    boolean closeAllowed = noContactsConfigured || !qualifiedOpenContacts.isEmpty()
+    boolean openAllowed = noContactsConfigured || allContactsClosed
+    Map aqiThresholds = configuredAqiThresholds()
+    boolean openingSafe = !rainDetected && (aqiVal == null || aqiVal < (aqiThresholds.warn as Integer))
     String trend = outdoorTrend?.trend as String
     List options = []
 
@@ -632,14 +599,15 @@ private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal out
         BigDecimal heatSP = safeCurrentBD(t, "heatingSetpoint")
 
         if (coolSP != null && (mode in ["cool", "auto", "off"])) {
-            BigDecimal offset = zone.coolingPreAlertOffset ?: 3.0G
+            BigDecimal offset = zone.coolingPreAlertOffset == null ? 3.0G : zone.coolingPreAlertOffset as BigDecimal
             boolean indoorNear = indoorTemp >= (coolSP - offset)
             boolean breached = indoorTemp >= coolSP
             boolean anticipateClose = trend == "heating up" && indoorNear && outdoorTemp >= (coolSP - offset)
             boolean urgentClose = breached && outdoorTemp >= indoorTemp
             if (closeAllowed && (anticipateClose || urgentClose)) {
-                options << [severity: urgentClose ? 3 : 2, family: "windowCloseWarm",
-                            text: "It's getting warm outside \u2014 close the windows",
+                String actionText = trend == "heating up" ? "It's getting warmer outside" : "It's warmer outside"
+                options << [severity: 2, family: "windowCloseWarm",
+                            text: "${actionText} \u2014 close the windows",
                             distance: Math.abs(indoorTemp - coolSP) + Math.abs(outdoorTemp - coolSP)]
             }
 
@@ -648,21 +616,22 @@ private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal out
                     outdoorTemp <= (coolSP + offset) && outdoorTemp < indoorTemp && comfortableOutside
             boolean urgentOpen = breached && outdoorTemp < indoorTemp && comfortableOutside
             if ((mode in ["cool", "auto"]) && openAllowed && openingSafe && (anticipateOpen || urgentOpen)) {
-                options << [severity: breached ? 3 : 2, family: "windowOpenCool",
-                            text: "It's getting cooler outside \u2014 open the windows",
+                String actionText = trend == "cooling down" ? "It's getting cooler outside" : "It's cooler outside"
+                options << [severity: 2, family: "windowOpenCool",
+                            text: "${actionText} \u2014 open the windows",
                             distance: Math.abs(indoorTemp - coolSP) + Math.abs(outdoorTemp - coolSP)]
             }
         }
 
         if (heatSP != null && (mode in ["heat", "auto", "emergency heat", "off"])) {
-            BigDecimal offset = zone.heatingPreAlertOffset ?: 3.0G
+            BigDecimal offset = zone.heatingPreAlertOffset == null ? 3.0G : zone.heatingPreAlertOffset as BigDecimal
             boolean indoorNear = indoorTemp <= (heatSP + offset)
-            boolean breached = indoorTemp <= heatSP
-            boolean anticipateClose = trend == "cooling down" && indoorNear && outdoorTemp <= (heatSP + offset)
-            boolean urgentClose = breached && outdoorTemp <= indoorTemp
-            if (closeAllowed && (anticipateClose || urgentClose)) {
-                options << [severity: urgentClose ? 3 : 2, family: "windowCloseCold",
-                            text: "It's getting cold outside \u2014 close the windows",
+            boolean breached = indoorTemp < heatSP
+            boolean urgentClose = breached && outdoorTemp < indoorTemp
+            if (closeAllowed && urgentClose) {
+                String actionText = trend == "cooling down" ? "It's getting colder outside" : "It's colder outside"
+                options << [severity: 2, family: "windowCloseCold",
+                            text: "${actionText} \u2014 close the windows",
                             distance: Math.abs(indoorTemp - heatSP) + Math.abs(outdoorTemp - heatSP)]
             }
 
@@ -671,8 +640,9 @@ private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal out
                     outdoorTemp >= (heatSP - offset) && outdoorTemp > indoorTemp && comfortableOutside
             boolean urgentOpen = breached && outdoorTemp > indoorTemp && comfortableOutside
             if ((mode in ["heat", "auto", "emergency heat"]) && openAllowed && openingSafe && (anticipateOpen || urgentOpen)) {
-                options << [severity: breached ? 3 : 2, family: "windowOpenWarm",
-                            text: "It's getting warmer outside \u2014 open the windows",
+                String actionText = trend == "heating up" ? "It's getting warmer outside" : "It's warmer outside"
+                options << [severity: 2, family: "windowOpenWarm",
+                            text: "${actionText} \u2014 open the windows",
                             distance: Math.abs(indoorTemp - heatSP) + Math.abs(outdoorTemp - heatSP)]
             }
         }
@@ -688,17 +658,18 @@ private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal out
             zone.name, best.family as String, text, zone.id as String)
 }
 
-private Map evaluateAqi(Map zone, BigDecimal aqiVal) {
+private Map evaluateHouseAqi(BigDecimal aqiVal) {
     if (aqiVal == null) { return null }
-    Integer dangerThreshold = (settings.aqiDangerThreshold ?: AQI_DANGER_DEFAULT) as Integer
-    Integer warnThreshold   = (settings.aqiWarnThreshold   ?: AQI_WARN_DEFAULT)   as Integer
-    if (aqiVal > dangerThreshold) {
-        String text = "${zone.name} air quality is hazardous (AQI ${aqiVal.toInteger()} > ${dangerThreshold}) \u2014 consider closing windows"
-        return buildCandidate("zone-${zone.id}-aqi-danger", 3, zone.name, "aqiDanger", text, zone.id as String)
+    Map thresholds = configuredAqiThresholds()
+    Integer warnThreshold = thresholds.warn as Integer
+    Integer dangerThreshold = thresholds.danger as Integer
+    if (aqiVal >= dangerThreshold) {
+        String text = "Air quality is ${aqiCategory(dangerThreshold)} or worse (AQI ${dangerThreshold}+) \u2014 limit outdoor air"
+        return buildCandidate("house-aqi", 3, "House", "aqiDanger", text)
     }
-    if (aqiVal > warnThreshold) {
-        String text = "${zone.name} air quality is moderate (AQI ${aqiVal.toInteger()} > ${warnThreshold}) \u2014 consider closing windows"
-        return buildCandidate("zone-${zone.id}-aqi-warn", 2, zone.name, "aqiWarn", text, zone.id as String)
+    if (aqiVal >= warnThreshold) {
+        String text = "Air quality is ${aqiCategory(warnThreshold)} or worse (AQI ${warnThreshold}+) \u2014 limit outdoor air"
+        return buildCandidate("house-aqi", 2, "House", "aqiWarn", text)
     }
     return null
 }
@@ -745,8 +716,9 @@ private void pushZoneAttributes(def aggChild, List zones, Map zoneResults) {
 
 def clearAllMessages() {
     logInfo "clearAllMessages()"
-    state.activeMessages   = [:]
-    state.externalMessages = [:]
+    state.activeMessages    = [:]
+    state.externalMessages  = [:]
+    state.presentedMessages = [:]
     runIn(DEBOUNCE_SECONDS, "evaluateAll", [overwrite: true])
 }
 
@@ -761,7 +733,7 @@ def pushExternalMessage(String key, def severity, String text) {
         return
     }
     Integer sev = ((severity ?: 1) as Integer)
-    if (sev < 0) { sev = 0 }
+    if (sev < 1) { sev = 1 }
     if (sev > 3) { sev = 3 }
     Map external = (state.externalMessages ?: [:]) as Map
     Map prev = external[key] as Map
@@ -795,7 +767,7 @@ private void handleNotifications(List allMessages, List zones) {
 
     Long nowMs = now()
     Integer minSeverity = (settings.announceSeverityThreshold ?: 2) as Integer
-    List announceModes = (settings.announceModes ?: []) as List
+    List announceModes = deviceList(settings.announceModes)
     boolean speakAllowed = !announceModes || announceModes.contains(location.mode)
 
     allMessages.each { msg ->
@@ -812,23 +784,28 @@ private void handleNotifications(List allMessages, List zones) {
         }
 
         // Announce a new action once; allow one escalation of that same action.
-        if (lastEntry != null && lastText == (msg.text as String) && sev <= lastSev) { return }
+        // Record de-escalation silently so a later escalation can announce again.
+        if (lastEntry != null && sev < lastSev) {
+            lastNotif[msgId] = [ts: nowMs, sev: sev, text: msg.text as String]
+            return
+        }
+        if (lastEntry != null && lastText == (msg.text as String) && sev == lastSev) { return }
 
         String msgZoneId = msg.zoneId as String
-        List notifDevices = (settings.globalNotificationDevices ?: []) as List
+        List notifDevices = deviceList(settings.globalNotificationDevices)
         if (msgZoneId) {
             Map zone = zones.find { it.id == msgZoneId }
-            if (zone) { notifDevices = notifDevices + (zone.notificationDevices ?: []) }
+            if (zone) { notifDevices = notifDevices + deviceList(zone.notificationDevices) }
         }
         notifDevices.unique().each { d ->
             try { d.deviceNotification(msg.text as String) } catch (Exception e) { log.warn "notify error: ${e.message}" }
         }
 
         if (sev >= minSeverity && speakAllowed) {
-            List speakers = (settings.globalSpeakers ?: []) as List
+            List speakers = deviceList(settings.globalSpeakers)
             if (msgZoneId) {
                 Map zone = zones.find { it.id == msgZoneId }
-                speakers = speakers + (zone?.speakers ?: [])
+                speakers = speakers + deviceList(zone?.speakers)
             }
             speakers.unique().each { spk ->
                 try { spk.speak(msg.text as String) } catch (Exception e) { log.warn "speak error: ${e.message}" }
@@ -862,8 +839,8 @@ private List<Map> configuredZones() {
             indoorTempSensors    : deviceList(settings["zone${i}IndoorTempSensors"]),
             contactSensors       : deviceList(settings["zone${i}ContactSensors"]),
             speakers             : deviceList(settings["zone${i}Speakers"]),
-            coolingPreAlertOffset: (settings["zone${i}CoolingPreAlertOffset"] ?: 3.0) as BigDecimal,
-            heatingPreAlertOffset: (settings["zone${i}HeatingPreAlertOffset"] ?: 3.0) as BigDecimal,
+            coolingPreAlertOffset: settings["zone${i}CoolingPreAlertOffset"] == null ? 3.0G : settings["zone${i}CoolingPreAlertOffset"] as BigDecimal,
+            heatingPreAlertOffset: settings["zone${i}HeatingPreAlertOffset"] == null ? 3.0G : settings["zone${i}HeatingPreAlertOffset"] as BigDecimal,
             notificationDevices  : deviceList(settings["zone${i}NotificationDevices"])
         ]
     }.findAll { it != null }
@@ -890,6 +867,16 @@ private Integer configuredContactOpenDelaySeconds() {
     return Math.max(0, settings.contactOpenDelaySeconds == null ? 60 : settings.contactOpenDelaySeconds as Integer)
 }
 
+private Integer configuredTrendWindowMinutes() {
+    return Math.max(5, settings.trendWindowMinutes == null ? 30 : settings.trendWindowMinutes as Integer)
+}
+
+private Map configuredAqiThresholds() {
+    Integer configuredWarn = settings.aqiWarnThreshold == null ? AQI_WARN_DEFAULT : settings.aqiWarnThreshold as Integer
+    Integer configuredDanger = settings.aqiDangerThreshold == null ? AQI_DANGER_DEFAULT : settings.aqiDangerThreshold as Integer
+    return [warn: Math.min(configuredWarn, configuredDanger), danger: Math.max(configuredWarn, configuredDanger)]
+}
+
 private List temperatureDevicesForZone(Map zone) {
     List sensors = deviceList(zone.indoorTempSensors)
     return sensors ?: deviceList(zone.thermostats)
@@ -905,8 +892,10 @@ private BigDecimal currentHouseAqi() {
 }
 
 private boolean checkRain() {
+    if (!settings.weatherDevice) { return false }
     try {
-        String val = settings.weatherDevice.currentValue(settings.weatherAttribute as String) as String
+        String attributeName = (settings.weatherAttribute ?: "weather") as String
+        String val = settings.weatherDevice.currentValue(attributeName) as String
         if (!val) { return false }
         String lower = val.toLowerCase()
         String raw   = (settings.rainKeyword ?: "rain") as String
@@ -1040,7 +1029,7 @@ def logsOff() {
 // Order (left to right):
 //   1. rain probability (1h ≥ 60% wins over 6h ≥ 30%)
 //   2. today's high — only before 4pm local (afternoon = high is historical)
-//   3. current feels-like — only when |feels − actual| ≥ 5°F
+//   3. current feels-like — only when |feels − actual| ≥ 5° in the local scale
 //   4. tomorrow's range/condition/rain — always when forecast available
 //   5. UV ≥ 8
 //   6. AQI > 50
@@ -1197,7 +1186,7 @@ private String conditionEmoji(String condition) {
 private String aqiCategory(int aqi) {
     if (aqi <= 50)  { return "good" }
     if (aqi <= 100) { return "moderate" }
-    if (aqi <= 150) { return "sensitive groups" }
+    if (aqi <= 150) { return "unhealthy for sensitive groups" }
     if (aqi <= 200) { return "unhealthy" }
     if (aqi <= 300) { return "very unhealthy" }
     return "hazardous"

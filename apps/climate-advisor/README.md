@@ -13,21 +13,21 @@ Climate Advisor monitors indoor and outdoor temperatures, outdoor trend (heating
 | Alert family | Severity | Trigger |
 |---|---|---|
 | Close for warming weather | WARNING (2) | Windows open, outdoor heating up, and indoor/outdoor have reached the cooling anticipation thresholds |
-| Close for cooling weather | WARNING (2) | Windows open, outdoor cooling down, and indoor/outdoor have reached the heating anticipation thresholds |
+| Close for cooling weather | WARNING (2) | Windows open, indoor has fallen below the heating setpoint, and outdoor is colder than indoor |
 | Open for cooling | WARNING (2) | Windows closed, outdoor cooling down within the cooling offset, indoor near the cooling setpoint, outdoor cooler than indoor, and rain/AQI safe |
 | Open for warming | WARNING (2) | Windows closed, outdoor heating up within the heating offset, indoor near the heating setpoint, outdoor warmer than indoor, and rain/AQI safe |
-| Window action escalation | DANGER (3) | The same window action remains useful after indoor crosses the applicable setpoint |
-| AQI moderate | WARNING (2) | AQI > warn threshold (default 51) |
-| AQI hazardous | DANGER (3) | AQI > danger threshold (default 101) |
+| Setpoint breach window action | WARNING (2) | Indoor crosses the setpoint and outdoor air is already beneficial/harmful in the advised direction |
+| AQI moderate | WARNING (2) | House AQI reaches the warning threshold (default 51) |
+| AQI unhealthy | DANGER (3) | House AQI reaches the danger threshold (default 101) |
 | Rain + windows open | DANGER (3) | Weather attribute contains rain keyword AND any contact open |
 
-Only one window action is active per zone. Its message is intentionally short, and it is announced once when the action changes plus once if it escalates from warning to danger.
+Only one window action is active per zone, and all temperature-driven window actions remain warning-level even after a setpoint breach. Messages say “getting cooler/warmer” only when the measured trend agrees; breach advice without a matching trend uses neutral “cooler/warmer outside” wording. AQI produces one house-wide advisory rather than duplicate alerts for every zone. Window-action messages are intentionally short and announced once when the action changes.
 
-Window and door openings must remain open for the configured qualification delay (default 60 seconds) before they affect status. Closing takes effect immediately.
+A physically open contact suppresses “open the windows” advice immediately. It must remain open for the configured qualification delay (default 60 seconds) before it contributes to close-window advice, rain alerts, or open-contact counts. Closing takes effect immediately.
 
 ## Idle dashboard line
 
-When no advisories are active, the `latestMessage` attribute shows a contextual one-line ambient status instead of a plain "all clear." Format: `☀️ Sunny · 72°F · AQI 38 (good) · House comfortable`. Segments are omitted gracefully when data is unavailable (no weather device → temp only; no AQI device → AQI omitted). Weather emoji switches to 🌙 after sunset.
+When no advisories are active, `latestMessage` shows a contextual one-line forecast summary. It can include today's high and rain chance, a materially different feels-like temperature, tomorrow's range and conditions, high UV, and AQI. Missing data is omitted; if nothing notable is available, it shows `No notable weather`.
 
 ## Architecture
 
@@ -62,19 +62,18 @@ The [**Open-Meteo Weather Enhanced**](../../drivers/open-meteo/open-meteo-weathe
 - **Outdoor temperature device** (required)
 - **Weather device** + attribute + rain keyword (optional)
 - **Air quality sensor** (optional — house-wide; single device for the whole house)
-- **AQI warning threshold** (default 51), **AQI danger threshold** (default 101)
-- **Trend window** (default 30 min), heating up / cooling down thresholds (default ±0.2°F/10 min)
-- **Indoor trend enabled** (default true)
+- **AQI warning threshold** (default 51), **AQI danger threshold** (default 101). If entered in reverse order, Climate Advisor treats the lower value as warning and the higher as danger.
+- **Trend window** (default 30 min), heating up / cooling down thresholds (default ±0.2° in local temperature units per 10 min). Trend remains `unknown` until two in-window samples span at least five minutes.
 - **Window/door open qualification delay** (default 60 seconds)
 - **Create dashboard child device** (default false — opt in for SharpTools/dashboard users)
 
 ### Per zone
 - Zone name, thermostats (optional), indoor temp sensors (optional — falls back to thermostat temp), contact sensors (optional), speakers, notification devices
-- Cooling/heating anticipation offsets for both indoor and outdoor proximity (default 3°F)
+- Cooling/heating anticipation offsets for both indoor and outdoor proximity (default 3° in local temperature units)
 
 ### Notifications
-- Global notification devices and global speakers (optional); window actions are announced once when changed and once more only when escalating to danger
-- Announcement severity threshold (default 2 = warnings+; 3 = danger only)
+- Global notification devices and global speakers (optional); window actions are announced once when changed
+- Announcement severity threshold (default 2 = warnings+; 3 = danger only). Selecting 3 suppresses all temperature-driven window announcements.
 
 ## Changelog
 
