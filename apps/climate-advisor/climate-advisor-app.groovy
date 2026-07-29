@@ -2,9 +2,11 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.28
+ * Version:   0.4.30
  *
  * Changelog:
+ *   0.4.30 — 2026-07-29 — Require outdoor temperature to be above the cooling setpoint for warm-weather close advice and below the heating setpoint for cold-weather close advice.
+ *   0.4.29 — 2026-07-27 — Make open-window advice conservative across multiple indoor sensors: cooling requires outdoor air cooler than every zone reading, and warming requires it warmer than every zone reading.
  *   0.4.28 — 2026-07-26 — Require indoor temperature to fall below the heating setpoint before advising that windows be closed for cold outdoor air; outdoor temperature/trend alone no longer triggers the warning.
  *   0.4.27 — 2026-07-26 — Make window-advice wording trend-aware: say “getting cooler/warmer” only when the measured trend agrees; setpoint-breach advice without that trend uses neutral “cooler/warmer outside” wording.
  *   0.4.26 — 2026-07-26 — Restore AQI alerts, honor AQI/trend threshold boundaries, constrain trend calculations to the configured window, keep all temperature-driven window advice at warning severity, reset acknowledgments for external alerts, remove unused indoor-trend tracking, and harden optional weather/device handling.
@@ -48,7 +50,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.28"
+@Field static final String  APP_VERSION        = "0.4.30"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -565,14 +567,15 @@ private Map evaluateZone(Map zone, BigDecimal outdoorTemp, Map outdoorTrend, boo
     ]
 
     List candidates = []
-    BigDecimal indoorTemp = averageTemps(temperatureDevicesForZone(zone))
-    if (indoorTemp == null) {
+    List<BigDecimal> indoorTemps = currentTemperatures(temperatureDevicesForZone(zone))
+    if (!indoorTemps) {
         logDebug "Zone ${zone.name}: no indoor temperature — skipping window advice"
         return [candidates: candidates, meta: meta]
     }
+    BigDecimal indoorTemp = averageTemperatureValues(indoorTemps)
     meta.indoorTemp = indoorTemp
 
-    Map windowAction = evaluateWindowAction(zone, indoorTemp, outdoorTemp, outdoorTrend,
+    Map windowAction = evaluateWindowAction(zone, indoorTemp, indoorTemps, outdoorTemp, outdoorTrend,
             rainDetected, qualifiedContacts, contacts.isEmpty(), physicallyOpenContacts.isEmpty(), houseAqi)
     if (windowAction) { candidates << windowAction }
 
@@ -581,11 +584,14 @@ private Map evaluateZone(Map zone, BigDecimal outdoorTemp, Map outdoorTrend, boo
 
 // Produces at most one warning-level window action per zone using indoor/outdoor
 // proximity, setpoint breaches, and outdoor trend.
-private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal outdoorTemp,
-                                 Map outdoorTrend, boolean rainDetected, List qualifiedOpenContacts,
-                                 boolean noContactsConfigured, boolean allContactsClosed, BigDecimal aqiVal) {
+private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, List<BigDecimal> indoorTemps,
+                                 BigDecimal outdoorTemp, Map outdoorTrend, boolean rainDetected,
+                                 List qualifiedOpenContacts, boolean noContactsConfigured,
+                                 boolean allContactsClosed, BigDecimal aqiVal) {
     if (outdoorTemp == null || (zone.thermostats ?: []).isEmpty()) { return null }
 
+    BigDecimal coolestIndoor = indoorTemps.min()
+    BigDecimal warmestIndoor = indoorTemps.max()
     boolean closeAllowed = noContactsConfigured || !qualifiedOpenContacts.isEmpty()
     boolean openAllowed = noContactsConfigured || allContactsClosed
     Map aqiThresholds = configuredAqiThresholds()
@@ -602,8 +608,10 @@ private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal out
             BigDecimal offset = zone.coolingPreAlertOffset == null ? 3.0G : zone.coolingPreAlertOffset as BigDecimal
             boolean indoorNear = indoorTemp >= (coolSP - offset)
             boolean breached = indoorTemp >= coolSP
-            boolean anticipateClose = trend == "heating up" && indoorNear && outdoorTemp >= (coolSP - offset)
-            boolean urgentClose = breached && outdoorTemp >= indoorTemp
+            boolean outdoorAboveSetpoint = outdoorTemp > coolSP
+            boolean anticipateClose = trend == "heating up" && indoorNear &&
+                    outdoorAboveSetpoint && outdoorTemp > indoorTemp
+            boolean urgentClose = breached && outdoorAboveSetpoint && outdoorTemp >= indoorTemp
             if (closeAllowed && (anticipateClose || urgentClose)) {
                 String actionText = trend == "heating up" ? "It's getting warmer outside" : "It's warmer outside"
                 options << [severity: 2, family: "windowCloseWarm",
@@ -612,9 +620,10 @@ private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal out
             }
 
             boolean comfortableOutside = heatSP == null || outdoorTemp > heatSP
+            boolean coolingUseful = outdoorTemp < coolestIndoor
             boolean anticipateOpen = trend == "cooling down" && indoorNear &&
-                    outdoorTemp <= (coolSP + offset) && outdoorTemp < indoorTemp && comfortableOutside
-            boolean urgentOpen = breached && outdoorTemp < indoorTemp && comfortableOutside
+                    outdoorTemp <= (coolSP + offset) && coolingUseful && comfortableOutside
+            boolean urgentOpen = breached && coolingUseful && comfortableOutside
             if ((mode in ["cool", "auto"]) && openAllowed && openingSafe && (anticipateOpen || urgentOpen)) {
                 String actionText = trend == "cooling down" ? "It's getting cooler outside" : "It's cooler outside"
                 options << [severity: 2, family: "windowOpenCool",
@@ -627,7 +636,8 @@ private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal out
             BigDecimal offset = zone.heatingPreAlertOffset == null ? 3.0G : zone.heatingPreAlertOffset as BigDecimal
             boolean indoorNear = indoorTemp <= (heatSP + offset)
             boolean breached = indoorTemp < heatSP
-            boolean urgentClose = breached && outdoorTemp < indoorTemp
+            boolean outdoorBelowSetpoint = outdoorTemp < heatSP
+            boolean urgentClose = breached && outdoorBelowSetpoint && outdoorTemp < indoorTemp
             if (closeAllowed && urgentClose) {
                 String actionText = trend == "cooling down" ? "It's getting colder outside" : "It's colder outside"
                 options << [severity: 2, family: "windowCloseCold",
@@ -636,9 +646,10 @@ private Map evaluateWindowAction(Map zone, BigDecimal indoorTemp, BigDecimal out
             }
 
             boolean comfortableOutside = coolSP == null || outdoorTemp < coolSP
+            boolean warmingUseful = outdoorTemp > warmestIndoor
             boolean anticipateOpen = trend == "heating up" && indoorNear &&
-                    outdoorTemp >= (heatSP - offset) && outdoorTemp > indoorTemp && comfortableOutside
-            boolean urgentOpen = breached && outdoorTemp > indoorTemp && comfortableOutside
+                    outdoorTemp >= (heatSP - offset) && warmingUseful && comfortableOutside
+            boolean urgentOpen = breached && warmingUseful && comfortableOutside
             if ((mode in ["heat", "auto", "emergency heat"]) && openAllowed && openingSafe && (anticipateOpen || urgentOpen)) {
                 String actionText = trend == "heating up" ? "It's getting warmer outside" : "It's warmer outside"
                 options << [severity: 2, family: "windowOpenWarm",
@@ -933,18 +944,20 @@ private String severityText(int severity) {
     return "clear"
 }
 
-private BigDecimal averageTemps(List devices) {
-    if (!devices) { return null }
-    List<BigDecimal> vals = []
-    devices.each { d ->
+private List<BigDecimal> currentTemperatures(List devices) {
+    List<BigDecimal> values = []
+    (devices ?: []).each { d ->
         try {
             def raw = d.currentValue("temperature")
-            if (raw != null) { vals << (raw as BigDecimal) }
-        } catch (Exception e) { log.warn "averageTemps error: ${e.message}" }
+            if (raw != null) { values << (raw as BigDecimal) }
+        } catch (Exception e) { log.warn "currentTemperatures error: ${e.message}" }
     }
-    if (!vals) { return null }
-    BigDecimal sum = vals.inject(0.0G) { acc, v -> acc + v }
-    return (sum / vals.size()).setScale(1, BigDecimal.ROUND_HALF_UP)
+    return values
+}
+
+private BigDecimal averageTemperatureValues(List<BigDecimal> values) {
+    BigDecimal sum = values.inject(0.0G) { acc, value -> acc + value }
+    return (sum / values.size()).setScale(1, BigDecimal.ROUND_HALF_UP)
 }
 
 private BigDecimal safeCurrentTemp(device) {

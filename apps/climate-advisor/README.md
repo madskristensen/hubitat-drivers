@@ -12,16 +12,16 @@ Climate Advisor monitors indoor and outdoor temperatures, outdoor trend (heating
 
 | Alert family | Severity | Trigger |
 |---|---|---|
-| Close for warming weather | WARNING (2) | Windows open, outdoor heating up, and indoor/outdoor have reached the cooling anticipation thresholds |
-| Close for cooling weather | WARNING (2) | Windows open, indoor has fallen below the heating setpoint, and outdoor is colder than indoor |
-| Open for cooling | WARNING (2) | Windows closed, outdoor cooling down within the cooling offset, indoor near the cooling setpoint, outdoor cooler than indoor, and rain/AQI safe |
-| Open for warming | WARNING (2) | Windows closed, outdoor heating up within the heating offset, indoor near the heating setpoint, outdoor warmer than indoor, and rain/AQI safe |
+| Close for warming weather | WARNING (2) | Windows open, indoor is near/above the cooling setpoint, outdoor is above the cooling setpoint and warmer than indoor, and the predictive path requires outdoor heating up |
+| Close for cooling weather | WARNING (2) | Windows open, indoor is below the heating setpoint, and outdoor is below the heating setpoint and colder than indoor |
+| Open for cooling | WARNING (2) | Windows closed, outdoor cooling down within the cooling offset, indoor near the cooling setpoint, outdoor cooler than every selected indoor reading, and rain/AQI safe |
+| Open for warming | WARNING (2) | Windows closed, outdoor heating up within the heating offset, indoor near the heating setpoint, outdoor warmer than every selected indoor reading, and rain/AQI safe |
 | Setpoint breach window action | WARNING (2) | Indoor crosses the setpoint and outdoor air is already beneficial/harmful in the advised direction |
 | AQI moderate | WARNING (2) | House AQI reaches the warning threshold (default 51) |
 | AQI unhealthy | DANGER (3) | House AQI reaches the danger threshold (default 101) |
 | Rain + windows open | DANGER (3) | Weather attribute contains rain keyword AND any contact open |
 
-Only one window action is active per zone, and all temperature-driven window actions remain warning-level even after a setpoint breach. Messages say “getting cooler/warmer” only when the measured trend agrees; breach advice without a matching trend uses neutral “cooler/warmer outside” wording. AQI produces one house-wide advisory rather than duplicate alerts for every zone. Window-action messages are intentionally short and announced once when the action changes.
+Only one window action is active per zone, and all temperature-driven window actions remain warning-level even after a setpoint breach. For zones with multiple indoor sensors, opening advice is conservative: outdoor air must benefit every current reading, not merely the zone average. Messages say “getting cooler/warmer” only when the measured trend agrees; breach advice without a matching trend uses neutral “cooler/warmer outside” wording. AQI produces one house-wide advisory rather than duplicate alerts for every zone. Window-action messages are intentionally short and announced once when the action changes.
 
 A physically open contact suppresses “open the windows” advice immediately. It must remain open for the configured qualification delay (default 60 seconds) before it contributes to close-window advice, rain alerts, or open-contact counts. Closing takes effect immediately.
 

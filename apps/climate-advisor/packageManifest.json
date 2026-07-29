@@ -2,8 +2,8 @@
   "packageName": "Climate Advisor",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
-  "dateReleased": "2026-07-26",
-  "version": "0.4.28",
+  "dateReleased": "2026-07-29",
+  "version": "0.4.30",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/climate-advisor/README.md",
   "apps": [
@@ -16,7 +16,7 @@
       "iconX2Url": "https://github.githubassets.com/favicons/favicon.png",
       "required": true,
       "oauth": false,
-      "version": "0.4.28"
+      "version": "0.4.30"
     }
   ],
   "drivers": [
