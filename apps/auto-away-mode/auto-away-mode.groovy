@@ -2,6 +2,7 @@
  * Auto Away Mode
  *
  * Changelog:
+ *   0.13.0 — 2026-08-06 — Reduce event and scheduler churn, retain only significant decision history, and run lock actions only after actual mode changes.
  *   0.12.0 — 2026-05-22 — Skip full evaluation on activity events that can't change the current mode and only log.info on real mode changes to drastically reduce hub load and log noise.
  *   0.11.0 — 2026-05-20 — Fix asymmetric cooldown: Home transitions now bypass the mode-change cooldown so arriving home is never delayed.
  *   0.10.0 — 2026-05-20 — Add optional Away prerequisite locks: Away is only evaluated when all designated locks are locked; locking them also triggers an immediate re-evaluation.
@@ -19,8 +20,8 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.12.0"
-@Field static final Integer MAX_HISTORY_ITEMS = 12
+@Field static final String VERSION = "0.13.0"
+@Field static final Integer MAX_HISTORY_ITEMS = 5
 @Field static final Integer EVALUATION_DEBOUNCE_SECONDS = 1
 
 definition(
@@ -153,18 +154,19 @@ private void initialize() {
         seedTimestampFromActiveSensor(contactSensors, "contact", "open") ?:
         seedTimestampFromAnyPresenceSensor(presenceSensors)
     state.presenceInactiveSinceTs = presenceSensors?.size() ? now() : null
+    state.decisionHistory = ((state.decisionHistory instanceof List) ? state.decisionHistory : []).take(MAX_HISTORY_ITEMS)
 
     if (presenceSensors) {
         subscribe(presenceSensors, "presence", "presenceHandler")
     }
     if (motionSensors) {
-        subscribe(motionSensors, "motion", "motionHandler")
+        subscribe(motionSensors, "motion.active", "motionHandler")
     }
     if (contactSensors) {
         subscribe(contactSensors, "contact", "contactHandler")
     }
     if (activityLocks) {
-        subscribe(activityLocks, "lock", "lockActivityHandler")
+        subscribe(activityLocks, "lock.unlocked", "lockActivityHandler")
     }
     if (awayPrerequisiteLocks) {
         subscribe(awayPrerequisiteLocks, "lock", "awayPrerequisiteLockHandler")
@@ -238,8 +240,16 @@ private boolean canSkipReinforcement() {
 }
 
 private void rescheduleAwayCheck() {
-    Integer awayThresholdMinutes = (awayInactiveMinutes as Integer) ?: 20
-    scheduleNextEvaluation(now(), awayThresholdMinutes, null)
+    if (isPausedByCurrentMode()) {
+        return
+    }
+
+    Long nowTs = now()
+    Long scheduledForTs = state.nextEvaluationTs as Long
+    if (!scheduledForTs || scheduledForTs <= nowTs) {
+        Integer awayThresholdMinutes = (awayInactiveMinutes as Integer) ?: 20
+        scheduleNextEvaluation(nowTs, awayThresholdMinutes, null)
+    }
 }
 
 def awayPrerequisiteLockHandler(evt) {
@@ -250,6 +260,7 @@ def awayPrerequisiteLockHandler(evt) {
 }
 
 def evaluateOccupancy(Boolean manualTrigger = false) {
+    state.nextEvaluationTs = null
     if (!hasAnyConfiguredSensor()) {
         return
     }
@@ -360,8 +371,6 @@ def evaluateOccupancy(Boolean manualTrigger = false) {
             holdReasons << "mode change cooldown active"
             decision = "hold"
         }
-    } else if (decision == "away" || decision == "home") {
-        runModeActions(decision)
     }
 
     String summary = "Decision: ${decision.toUpperCase()} | " +
@@ -376,8 +385,8 @@ def evaluateOccupancy(Boolean manualTrigger = false) {
 
 private void recordSummary(String summary, Boolean manualTrigger = false, Boolean importantEvent = false) {
     state.lastEvaluationSummary = summary
-    appendHistory(summary)
     if (manualTrigger || importantEvent) {
+        appendHistory(summary)
         log.info "Auto Away Mode: ${summary}"
     } else if (logEnable) {
         log.debug "Auto Away Mode: ${summary}"
@@ -454,8 +463,9 @@ private String currentSummary() {
 }
 
 private void queueEvaluation(Integer delaySeconds = EVALUATION_DEBOUNCE_SECONDS) {
-    unschedule("evaluateOccupancy")
-    runIn(Math.max(1, delaySeconds ?: EVALUATION_DEBOUNCE_SECONDS), "evaluateOccupancy")
+    Integer actualDelaySeconds = Math.max(1, delaySeconds ?: EVALUATION_DEBOUNCE_SECONDS)
+    state.nextEvaluationTs = now() + (actualDelaySeconds * 1000L)
+    runIn(actualDelaySeconds, "evaluateOccupancy", [overwrite: true])
 }
 
 private void runModeActions(String decision) {
