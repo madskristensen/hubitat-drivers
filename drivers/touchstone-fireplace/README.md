@@ -4,9 +4,9 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: v0.2.1 — beta.
+> **Status: v0.2.2 — beta.
 >
-> **Killer feature:** Works out-of-the-box for Touchstone Sideline Elite; adapts to other Touchstone models (Steel, Forte, Onyx, etc.) and generic Tuya WiFi fireplaces via configurable Device Profiles and in-driver discovery. The local key is fetched and refreshed automatically from the Tuya Cloud — no Python, no manual key extraction.
+> **Killer feature:** Works out-of-the-box for Touchstone Sideline Elite; adapts to other Touchstone models
 
 ## Supported Devices
 
@@ -486,7 +486,8 @@ Some remote buttons (log brightness, flame tempo, remote timer) don't map to Tuy
 
 ## Changelog
 
-- **v0.2.1 (2026-06-11):** Hardened the Tuya Cloud integration. All cloud calls are now **non-blocking** (async), so they never stall command or socket handling on the single driver thread. Added access-token caching, automatic **clock-skew compensation** (a common cause of `sign invalid` errors), clearer error messages mapped from Tuya API codes, and a new **`testCloudConnection()`** command to verify credentials on demand. A stale `localKeyStatus` failure message now clears automatically once local control recovers.
+- **v0.2.2 (2026-08-06):** Reduced idle hub load by fast-pathing heartbeat acknowledgements, coalescing periodic refreshes while one is queued or in flight, avoiding duplicate reconnect refreshes, throttling liveness persistence and `lastActivity`, and suppressing unchanged socket/DP attributes. Heartbeat timing remains unchanged.
+- **v0.2.1 (2026-06-11):** Hardened the Tuya Cloud integration. All cloud calls are now **non-blocking** (async), so they never stall command or socket handling on the single driver thread.
 - **v0.2.0 (2026-06-11):** Added **Tuya Cloud local-key management**, so the local key never has to be extracted by hand. New `refreshLocalKey()` command plus automatic key fetch — on startup when the **Local key** field is blank, and again whenever the device becomes unreachable after exhausting retries (handles the key rotating after a WiFi re-pair). With cloud credentials set you only need the Device ID (the "Virtual ID" from the Tuya/Smart Life app). The **Local key** preference is now optional. Auto-recovery turns on simply by entering the Access ID + Access Secret (with data center); no separate enable/auto-refresh toggles. Adds the `localKeyStatus` attribute. The secret is stored as a password preference and only sent to Tuya's signed OpenAPI endpoints.
 - **v0.1.17 (2026-05-17):** Renamed `setLogColor` → `setCharcoalColor`, `logColor` → `charcoalColor`, `defaultLogColor` → `defaultCharcoalColor` to match the Tuya app's "Charcoal" terminology. Converted from NUMBER input (v0.1.14) to named ENUM dropdown with 12 verified labels from the Tuya app palette picker: Orange / Red / Blue / Yellow / Green / Purple / Cyan / Magenta / White / Pink / Rainbow / Spotlight (DP 104 values 1–12 in app order). ⚠️ **Breaking**: `setLogColor(N)` automations must migrate to `setCharcoalColor("LabelName")` — no backward-compat alias. "Spotlight" (DP 12) is a best-guess label pending confirmation. Diagnostic `debugLog` in `setCharcoalColor` and `applyDps` DP 104 is gated behind `logEnable` (flame-color precedent).
 - **v0.1.15 (2026-05-17):** Restored named ENUM for `setFlameColor` with authoritative labels from the Tuya mobile app (Orange/Blue/White/Orange+Blue/Orange+White/Blue+White). DP 101 value `"1"` = Orange (the app's default). v0.1.13's invented labels (Red/Orange/…) were wrong — picking "Orange" sent DP=2 which is actually Blue, explaining the "doesn't do anything" report. Added unconditional `log.info` diagnostic lines in both `setFlameColor` (write path) and `applyDps` DP 101 (echo path) so you can verify wire values and device echo in Hubitat logs.

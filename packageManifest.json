@@ -2,8 +2,8 @@
   "packageName": "Mads Kristensen — Hubitat Drivers",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
-  "dateReleased": "2026-07-29",
-  "version": "1.8.5",
+  "dateReleased": "2026-08-06",
+  "version": "1.8.6",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/README.md",
   "drivers": [
@@ -12,14 +12,16 @@
       "name": "Touchstone / Tuya Fireplace",
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/touchstone-fireplace/touchstone-fireplace.groovy",
-      "required": false
+      "required": false,
+      "version": "0.2.2"
     },
     {
       "id": "257ada29-4d65-4f90-9183-da6cc75ef908",
       "name": "Gemstone Lights",
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/gemstone-lights/gemstone-lights.groovy",
-      "required": false
+      "required": false,
+      "version": "0.4.22"
     },
     {
       "id": "fe4da0f7-5c8f-429c-8a5d-8d5797667e1f",
@@ -97,7 +99,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/calendar-todo/calendar-todo.groovy",
       "required": false,
-      "version": "0.7.1"
+      "version": "0.7.2"
     },
     {
       "id": "c713e3fc-71cd-4560-918f-fd07eba2eb68",

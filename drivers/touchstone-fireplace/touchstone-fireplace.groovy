@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.2.1
+ * Version: 0.2.2
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,8 +17,9 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.2.2 — 2026-08-06 — fast-path heartbeat-only frames; coalesce periodic refreshes so offline polls cannot grow the request queue; avoid reconnect refresh duplication; throttle liveness state writes and lastActivity events; dedupe online, switch, temperature-unit, raw-DP, and child-lock telemetry
  *   0.2.1 — 2026-06-11 — make all Tuya Cloud calls non-blocking (asynchttpGet) so the single driver thread is never stalled on the network; add access-token caching, automatic server clock-skew compensation, a testCloudConnection command, friendlier cloud error messages, and auto-clearing of stale localKeyStatus once local control recovers
- *   0.2.0 — 2026-06-11 — add optional Tuya Cloud local-key auto-recovery: refreshLocalKey command + automatic key fetch (on startup when the local key is blank, and on the device becoming unreachable after exhausting retries) so the local key rotating after a WiFi re-pair self-heals automatically. Local key preference is now optional; auto-recovery enables simply by entering the Tuya Cloud Access ID and Access Secret — no separate toggles.
+ *   0.2.0 — 2026-06-11 — add optional Tuya Cloud local-key auto-recovery:
  *   0.1.34 — 2026-06-08 — move power control to DP-confirmed state transitions (no optimistic switch on/off), add commandStatus/lastCommandError attributes, and retry power commands when status responses show state mismatch
  *   0.1.33 — 2026-06-01 — stop heartbeat ACKs from clearing the in-flight command and cancelling its response timeout; a command (e.g. off) that was sent but never reached the device now keeps its retry/timeout safety net instead of being silently dropped
  *   0.1.32 — 2026-05-19 — recycle the TCP socket on each command timeout so retries reopen a fresh connection instead of reusing a stale one
@@ -101,8 +102,8 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import java.security.MessageDigest
 
-@Field static final String DRIVER_VERSION = "0.2.1"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.2.1"
+@Field static final String DRIVER_VERSION = "0.2.2"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.2.2"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -922,20 +923,34 @@ def parse(String message) {
         return
     }
 
-    state.lastSocketEventTs = now()
+    Long receivedAt = now()
+    Long lastSocketEvent = safeLong(state.lastSocketEventTs, 0L)
+    if (state.pingPending == true || (receivedAt - lastSocketEvent) >= 300000L) {
+        state.lastSocketEventTs = receivedAt
+    }
 
     try {
         String buffer = safeStr(state.rxBuffer) ?: ""
         buffer += chunk
-        state.frameHadDpData = false
-        state.frameWasResponse = false
         if (buffer.size() > 32768) {
             int keepFrom = Math.max(buffer.lastIndexOf("000055AA"), buffer.size() - 8192)
             buffer = keepFrom > 0 ? buffer.substring(keepFrom) : buffer
         }
 
-        Integer processed = consumeReceiveBuffer(buffer)
-        if ((processed ?: 0) > 0) {
+        Map consumed = consumeReceiveBuffer(buffer)
+        Integer processed = safeInt(consumed.processed, 0)
+        if (processed > 0) {
+            Boolean wasOffline = safeStr(device.currentValue("online")) != "online"
+            updateOnlineStatus("online", "Device responded")
+            if (wasOffline) {
+                clearStaleLocalKeyStatus()
+            }
+
+            if (consumed.heartbeatOnly == true) {
+                touchSocketActivity(receivedAt)
+                completePendingPing()
+                return
+            }
             if (state.discoveryMode == true) {
                 // discoveryHandleResponse() has already handled routing; skip normal post-processing.
                 state.remove("frameHadDpData")
@@ -943,11 +958,7 @@ def parse(String message) {
                 return
             }
             // Only a genuine command/status response should fulfil the in-flight request and
-            // cancel its timeout. Heartbeat ACKs arrive every ~20s independently of command
-            // flow; letting one clear awaitingResponse/inFlight (and unschedule responseTimeout)
-            // destroys the retry safety net for a command — e.g. off() — that was sent but never
-            // reached the device, leaving the fireplace on with no retry. (Intermittent: only when
-            // a heartbeat ACK lands in the window between sending a command and its real ACK.)
+            // cancel its timeout. Heartbeat ACKs never enter this generic response path.
             if (state.frameWasResponse == true && state.awaitingResponse == true) {
                 unschedule("responseTimeout")
                 state.awaitingResponse = false
@@ -958,34 +969,34 @@ def parse(String message) {
             }
             state.remove("frameHadDpData")
             state.remove("frameWasResponse")
-            Boolean wasOffline = safeStr(device.currentValue("online")) != "online"
-            updateOnlineStatus("online", "Device responded")
-            if (wasOffline) {
-                clearStaleLocalKeyStatus()
-            }
             pumpQueue()
-            // Persistent socket: do NOT close after response — stay open for push frames.
-            // Throttle lastActivity emit to ≥60s: every inbound frame (heartbeat ACK, push,
-            // command response) used to emit, producing ~4300 events/day at the 20s heartbeat
-            // interval. 60s preserves at-a-glance freshness without filling event-history DB.
-            Long lastEmittedAt = (state.lastActivityEmittedAt ?: 0L) as Long
-            if ((now() - lastEmittedAt) >= 60000L) {
-                state.lastActivityEmittedAt = now()
-                String tsActivity = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
-                sendEvent(name: "lastActivity", value: tsActivity,
-                          descriptionText: "${device.displayName} last activity")
-            }
-            if (state.pingPending == true) {
-                state.pingPending = false
-                sendEvent(name: "healthStatus", value: "online",
-                          descriptionText: "${device.displayName} responded to ping")
-            } else if (safeStr(device.currentValue("healthStatus")) != "online") {
-                sendEvent(name: "healthStatus", value: "online",
-                          descriptionText: "${device.displayName} health status is online")
-            }
+            touchSocketActivity(receivedAt)
+            completePendingPing()
         }
     } catch (Exception e) {
         log.warn "[Touchstone] parse() failed — ${e.message}"
+    }
+}
+
+private void touchSocketActivity(Long receivedAt) {
+    // lastActivity is coarse device telemetry, not a record of every heartbeat or poll.
+    Long lastEmittedAt = (state.lastActivityEmittedAt ?: 0L) as Long
+    if ((receivedAt - lastEmittedAt) >= 1800000L) {
+        state.lastActivityEmittedAt = receivedAt
+        String tsActivity = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
+        sendEvent(name: "lastActivity", value: tsActivity,
+                  descriptionText: "${device.displayName} last activity")
+    }
+}
+
+private void completePendingPing() {
+    if (state.pingPending == true) {
+        state.pingPending = false
+        sendEvent(name: "healthStatus", value: "online",
+                  descriptionText: "${device.displayName} responded to ping")
+    } else if (safeStr(device.currentValue("healthStatus")) != "online") {
+        sendEvent(name: "healthStatus", value: "online",
+                  descriptionText: "${device.displayName} health status is online")
     }
 }
 
@@ -1001,6 +1012,11 @@ private void requestStatus(String reason, String captureMode = null, List<String
 }
 
 private void enqueueRequest(Integer cmd, String payloadJson, String reason, String captureMode = null, List<String> requestedDps = null) {
+    if (reason == "refresh" && hasQueuedOrInFlightRefresh()) {
+        traceLog "Refresh already queued or in flight; coalescing duplicate request"
+        return
+    }
+
     List<Map> queue = pendingRequestQueue()
     Map request = [cmd: cmd, payloadJson: payloadJson, reason: reason]
     if (captureMode) {
@@ -1017,6 +1033,18 @@ private void enqueueRequest(Integer cmd, String payloadJson, String reason, Stri
         debugLog "Queued Tuya cmd ${cmd} for ${reason}; pending=${queue.size()}"
     }
     pumpQueue()
+}
+
+private Boolean hasQueuedOrInFlightRefresh() {
+    if (state.inFlight instanceof Map && safeStr((state.inFlight as Map).reason) == "refresh") {
+        return true
+    }
+    if (!(state.pendingRequests instanceof List)) {
+        return false
+    }
+    return (state.pendingRequests as List).any { entry ->
+        entry instanceof Map && safeStr((entry as Map).reason) == "refresh"
+    }
 }
 
 private void sendDpWrite(String dpId, Object value, String reason, Integer refreshDelaySeconds) {
@@ -1216,7 +1244,14 @@ def openSocket() {
         log.info "[Touchstone] Socket opened to ${deviceIpValue()}:${TUYA_PORT}"
         unschedule("sendHeartbeat")
         runIn(HEARTBEAT_INTERVAL_SECONDS, "sendHeartbeat")
-        runIn(2, "refresh")
+        if (hasPendingWork()) {
+            // A scheduled reconnect is not inside pumpQueue(); explicitly resume any
+            // request requeued by socketStatus. If pumpQueue opened this socket, the
+            // delayed handler harmlessly observes awaitingResponse and returns.
+            runIn(1, "resumePendingWork", [overwrite: true])
+        } else {
+            runIn(2, "refresh")
+        }
     } catch (Exception e) {
         state.socketOpen = false
         updateSocketState("error")
@@ -1339,7 +1374,13 @@ private void queueDelayedRefresh(Integer delaySeconds) {
 }
 
 def delayedRefresh() {
-    refresh()
+    // This reconciliation must remain ordered after a write; an older periodic
+    // refresh already in flight must not coalesce it away.
+    requestStatus("post-write refresh")
+}
+
+def resumePendingWork() {
+    pumpQueue()
 }
 
 def applyOnPowerOnDefaults() {
@@ -1720,9 +1761,10 @@ private String buildStatusPayloadJson(List<String> requestedDps = null) {
 // Tuya frame parsing
 // ---------------------------------------------------------------------------
 
-private Integer consumeReceiveBuffer(String buffer) {
+private Map consumeReceiveBuffer(String buffer) {
     buffer = safeStr(buffer) ?: ""
     Integer processed = 0
+    Boolean heartbeatOnly = true
 
     while (buffer.size() >= 32) {
         Integer prefixIndex = buffer.indexOf("000055AA")
@@ -1745,37 +1787,40 @@ private Integer consumeReceiveBuffer(String buffer) {
 
         String frameHex = buffer.substring(0, frameHexLength)
         buffer = buffer.substring(frameHexLength)
-        if (processFrame(frameHex)) {
+        Integer frameType = processFrame(frameHex)
+        if (frameType > 0) {
             processed++
+            if (frameType != 1) heartbeatOnly = false
         }
     }
 
     if (buffer) {
         state.rxBuffer = buffer
-    } else {
+    } else if (state.rxBuffer != null) {
         state.remove("rxBuffer")
     }
-    return processed
+    return [processed: processed, heartbeatOnly: processed > 0 && heartbeatOnly]
 }
 
-private Boolean processFrame(String frameHex) {
+// 0 = invalid, 1 = heartbeat ACK, 2 = command/status response.
+private Integer processFrame(String frameHex) {
     byte[] frame = hubitat.helper.HexUtils.hexStringToByteArray(frameHex)
     if (frame.length < 28) {
         log.warn "[Touchstone] Ignoring short Tuya frame (${frame.length} bytes)"
-        return false
+        return 0
     }
 
     Long suffix = readUInt32(frame, frame.length - 4)
     if (suffix != TUYA_SUFFIX) {
         log.warn "[Touchstone] Ignoring Tuya frame with bad suffix"
-        return false
+        return 0
     }
 
     Long expectedCrc = readUInt32(frame, frame.length - 8)
     Long actualCrc = crc32(sliceBytes(frame, 0, frame.length - 8))
     if (expectedCrc != actualCrc) {
         log.warn "[Touchstone] Ignoring Tuya frame with CRC mismatch"
-        return false
+        return 0
     }
 
     Integer cmd = (readUInt32(frame, 8) as Integer)
@@ -1785,7 +1830,7 @@ private Boolean processFrame(String frameHex) {
 
     if (cmd == TUYA_CMD_HEARTBEAT) {
         traceLog "Received Tuya cmd ${cmd} retcode=${retcode} payloadLen=${payload.length}"
-        return true
+        return 1
     }
     // Any non-heartbeat frame is a real device response (control ACK, status push, etc.) and is
     // allowed to fulfil the in-flight request; heartbeat ACKs above intentionally do not.
@@ -1795,7 +1840,7 @@ private Boolean processFrame(String frameHex) {
     Map inFlightRequest = state.inFlight instanceof Map ? (Map) state.inFlight : [:]
     String decoded = decryptTuyaPayload(payload)?.trim()
     if (!decoded) {
-        return true
+        return 2
     }
 
     traceLog "Decoded Tuya payload: ${decoded}"
@@ -1807,18 +1852,18 @@ private Boolean processFrame(String frameHex) {
             List<String> requestedDps = inFlightRequest.requestedDps instanceof List ? (List<String>) inFlightRequest.requestedDps : statusDpIds()
             enqueueRequest(TUYA_CMD_CONTROL_NEW, buildStatusPayloadJson(requestedDps), "device22 retry", safeStr(inFlightRequest.captureMode), requestedDps)
         }
-        return true
+        return 2
     }
 
     if (!decoded.startsWith("{")) {
-        return true
+        return 2
     }
 
     Map response = new JsonSlurper().parseText(decoded) as Map
     // Discovery mode: intercept before normal DP processing; check devId match.
     if (state.discoveryMode == true) {
         discoveryHandleResponse(response)
-        return true
+        return 2
     }
     if (response?.dps instanceof Map) {
         Map<String, Object> dps = normaliseDps(response.dps as Map)
@@ -1827,7 +1872,7 @@ private Boolean processFrame(String frameHex) {
         handleStatusCapture(safeStr(inFlightRequest.captureMode), dps)
     }
 
-    return true
+    return 2
 }
 
 private Map<String, Object> normaliseDps(Map dps) {
@@ -1842,7 +1887,7 @@ private void applyDps(Map<String, Object> dps) {
     if (dps.containsKey("13")) {
         String deviceUnit = normaliseTempUnit(dps["13"])
         if (deviceUnit) {
-            emitAttribute("tempUnit", deviceUnit, "${device.displayName} temperature unit is ${deviceUnit}")
+            emitParsedAttributeIfChanged("tempUnit", deviceUnit, "${device.displayName} temperature unit is ${deviceUnit}")
         }
     }
 
@@ -1904,7 +1949,7 @@ private void applyDps(Map<String, Object> dps) {
     if (activeDeviceProfile() == PROFILE_SIDELINE) {
         if (dps.containsKey("103")) {
             String rawSpeed = safeStr(dps["103"])
-            emitAttribute("dp103", rawSpeed, "${device.displayName} DP 103 is ${rawSpeed}")
+            emitParsedAttributeIfChanged("dp103", rawSpeed, "${device.displayName} DP 103 is ${rawSpeed}")
             String speedLabel = DP_TO_FLAME_SPEED[rawSpeed]
             if (speedLabel) {
                 emitParsedAttributeIfChanged("flameSpeed", speedLabel, "${device.displayName} flame speed is ${speedLabel}")
@@ -1918,13 +1963,13 @@ private void applyDps(Map<String, Object> dps) {
             traceLog "applyDps: received DP 105 = ${safeStr(dps["105"])} (read-only on this firmware; ignored)"
         }
         if (dps.containsKey("107")) {
-            emitAttribute("dp107", safeStr(dps["107"]), "${device.displayName} DP 107 is ${dps["107"]}")
+            emitParsedAttributeIfChanged("dp107", safeStr(dps["107"]), "${device.displayName} DP 107 is ${dps["107"]}")
         }
         if (dps.containsKey("108")) {
             Boolean lockBool = asBoolean(dps["108"])
             String lockValue = lockBool != null ? (lockBool ? "on" : "off") : safeStr(dps["108"])
-            emitAttribute("dp108", safeStr(dps["108"]), "${device.displayName} DP 108 is ${dps["108"]}")
-            emitAttribute("childLock", lockValue, "${device.displayName} child lock is ${lockValue}")
+            emitParsedAttributeIfChanged("dp108", safeStr(dps["108"]), "${device.displayName} DP 108 is ${dps["108"]}")
+            emitParsedAttributeIfChanged("childLock", lockValue, "${device.displayName} child lock is ${lockValue}")
         }
     }
 
@@ -2114,7 +2159,9 @@ private void ensureDefaultAttributes() {
 
 private void applySwitchState(Boolean isOn, String eventType) {
     String switchValue = isOn ? "on" : "off"
-    emitAttribute("switch", switchValue, "${device.displayName} was turned ${switchValue}", eventType)
+    if (attributeValueChanged("switch", switchValue)) {
+        emitAttribute("switch", switchValue, "${device.displayName} was turned ${switchValue}", eventType)
+    }
 }
 
 private void beginPowerCommand(Boolean requestedOn) {
@@ -2222,7 +2269,7 @@ private void emitCommandStatus(String status, String detail = null) {
 
 private void updateOnlineStatus(String value, String detail = null) {
     String description = detail ? "${device.displayName} is ${value} (${detail})" : "${device.displayName} is ${value}"
-    emitAttribute("online", value, description)
+    emitParsedAttributeIfChanged("online", value, description)
 }
 
 private void emitAttribute(String name, Object value, String descriptionText, String type = null, String unit = null) {

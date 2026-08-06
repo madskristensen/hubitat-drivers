@@ -1,7 +1,7 @@
 /**
  *  Calendar Todo Switch
  *  Author:  Mads Kristensen
- *  Version: 0.7.1 — 2026-05-26 — Scrub auth tokens (Google `/private-<hex>/` segments and any query string) from URLs before debug-logging the fetch. WKST=MO assumption now documented inline.
+ *  Version: 0.7.2 — 2026-08-06 — Reduce idle polling work by filtering before recurrence expansion, fast-forwarding unbounded daily/weekly recurrences, and suppressing redundant events, schedules, and state writes.
  *  License: MIT
  *
  *  Subscribes to a webcal/iCal feed (https://...) and exposes a Switch that
@@ -19,7 +19,8 @@
  *  weekly chore fires fresh every week.
  *
  *  Changelog:
- *    0.7.1 — 2026-05-26 — Scrub auth tokens (Google `/private-<hex>/` segments and any query string) from URLs before debug-logging the fetch. WKST=MO assumption now documented inline on expandOccurrences.
+ *    0.7.2 — 2026-08-06 — Reduce idle polling work: filter non-todo events before recurrence expansion; fast-forward old unbounded daily/weekly rules near the active window; use sets for EXDATE/trigger lookups; and skip unchanged preview/count events, triggered-state writes, and exact-trigger rescheduling.
+ *    0.7.1
  *    0.7.0 — 2026-05-26 — Quality pass.Perf: parse emoji rules once per poll (was per matching event), single-pass iCal line unfolder (was 2x list allocation), cheap base64 sentinel check (was anchored regex over the entire 1+ MB body). Correctness: queued/older matching occurrences are now all marked triggered (previously only the most-recent fired and older ones could keep being "missed"); exact-trigger runIn now overwrites (was stacking on every poll); synthetic UIDs no longer depend on parse-order index; iCal unescape order fixed with sentinel; URL scheme guard rejects non-http(s); response.getStatus() wrapped in try/catch. Quality: unified ISO timestamps to hub zone; added logd helper; removed dead parseIcsDateTime; fixed (state?:[]) cast precedence; documented WKST limitation.
  *    0.6.1 — 2026-05-26 — Idle icon/text now refresh whenever preferences are saved (was only seeded on first install / when null). Default idle text changed to "Clear".
  *    0.6.0 — 2026-05-26 — New `idleEmoji` and `idleText` preferences. `todo` / `nextTodo` now publish the idle text (default "Clear") when there is no active or upcoming chore. `todoIcon` idle defaults to ✔️ but can be changed.
@@ -47,7 +48,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
-@Field static final String DRIVER_VERSION = "0.7.1"
+@Field static final String DRIVER_VERSION = "0.7.2"
 @Field static final String DEFAULT_PREFIX = "\u2705" // ✅
 @Field static final String DEFAULT_FALLBACK_EMOJI = "\uD83D\uDD14" // 🔔
 @Field static final String DEFAULT_IDLE_ICON = "\u2714\uFE0F" // ✔️ (shown when no active todo)
@@ -131,12 +132,14 @@ def installed() {
 def updated() {
 	log.info "Calendar Todo: preferences updated"
 	unschedule()
+	state.remove("exactTriggerAt")
 	if (logEnable) runIn(1800, "logsOff")
 	initialize()
 }
 
 def initialize() {
 	if (state.triggeredUIDs == null) state.triggeredUIDs = []
+	state.remove("exactTriggerAt")
 	if (device.currentValue("switch") == null) {
 		sendEvent(name: "switch", value: "off")
 	}
@@ -347,28 +350,27 @@ void processEvents(List<Map> events) {
 	String prefixStr = (prefix ?: DEFAULT_PREFIX)
 	String mode = matchMode ?: "prefix"
 
+	// Filter before recurrence expansion. Large feeds often contain many unrelated
+	// recurring events, and expanding those on every poll is pure overhead.
+	List<Map> candidates = events.findAll { Map ev -> eventMatches(ev, prefixStr, mode) }
+
 	// Parse emoji rules ONCE per poll instead of per matching event
 	List<List> rules = parseEmojiMap(emojiMap as String)
 	String fallback = resolveFallbackEmoji()
 
-	List<Map> expanded = expandOccurrences(events, windowStart, windowEnd)
-	logd "${expanded.size()} occurrence(s) after RRULE expansion"
-
-	List<Map> matching = expanded.findAll { Map ev ->
-		if (ev.startMs == null) return false
-		if (ev.startMs < windowStart || ev.startMs > windowEnd) return false
-		String summary = (ev.summary ?: "").trim()
-		if (!summary) return false
-		return (mode == "contains") ? summary.contains(prefixStr) : summary.startsWith(prefixStr)
+	List<Map> matching = expandOccurrences(candidates, windowStart, windowEnd).findAll { Map ev ->
+		ev.startMs != null && ev.startMs >= windowStart && ev.startMs <= windowEnd
 	}.sort { a, b -> (a.startMs <=> b.startMs) }
+	logd "${matching.size()} matching occurrence(s) after RRULE expansion"
 
-	sendEvent(name: "matchingEvents", value: matching.size())
+	emitAttributeIfChanged("matchingEvents", matching.size())
 
 	List<String> triggered = ((state.triggeredUIDs ?: []) as List<String>)
 
 	// Drop UIDs for events no longer in the lookback window (cleanup)
 	Set<String> currentUids = matching.collect { it.uid }.findAll { it } as Set<String>
 	triggered = triggered.findAll { currentUids.contains(it) }
+	Set<String> triggeredSet = triggered as Set<String>
 
 	// Single linear split: everything <= now is "due", everything > now is upcoming.
 	int splitIdx = matching.size()
@@ -381,7 +383,7 @@ void processEvents(List<Map> events) {
 
 	// Trigger logic: any matching due event that hasn't been triggered yet → fire the latest such
 	// event AND mark all older missed ones triggered so they don't get stuck in the untriggered set.
-	List<Map> untriggeredList = due.findAll { !triggered.contains(it.uid) }
+	List<Map> untriggeredList = due.findAll { !triggeredSet.contains(it.uid) }
 	Map untriggered = untriggeredList ? untriggeredList.last() : null
 	if (untriggered) {
 		String cleanTitle = cleanSummary(untriggered.summary as String, prefixStr, mode)
@@ -412,31 +414,56 @@ void processEvents(List<Map> events) {
 		}
 	}
 
-	state.triggeredUIDs = triggered
+	if (((state.triggeredUIDs ?: []) as List<String>) != triggered) {
+		state.triggeredUIDs = triggered
+	}
 
 	// Publish next-upcoming preview
 	if (nextEvent) {
 		String nextClean = cleanSummary(nextEvent.summary as String, prefixStr, mode)
-		sendEvent(name: "nextTodo", value: nextClean)
-		sendEvent(name: "nextTodoIcon", value: pickEmojiFromRules(nextClean, rules, fallback))
-		sendEvent(name: "nextTodoStart", value: isoFromMs(nextEvent.startMs as long))
-		// Schedule an exact trigger at the next event's start time, so the switch turns on promptly
-		// even between polls. Use overwrite:true via a named handler so repeated polls don't stack.
-		long delay = ((nextEvent.startMs as long) - now) / 1000L
-		if (delay > 0 && delay < 24L * 3600L) {
-			runIn((delay as Integer) + 1, "exactTrigger", [overwrite: true])
-			logd "scheduled exact trigger in ${delay}s for '${nextEvent.summary}'"
-		}
+		emitAttributeIfChanged("nextTodo", nextClean)
+		emitAttributeIfChanged("nextTodoIcon", pickEmojiFromRules(nextClean, rules, fallback))
+		emitAttributeIfChanged("nextTodoStart", isoFromMs(nextEvent.startMs as long))
 	} else {
-		sendEvent(name: "nextTodo", value: idleTextValue())
-		sendEvent(name: "nextTodoIcon", value: idleIconValue())
-		sendEvent(name: "nextTodoStart", value: idleTextValue())
+		emitAttributeIfChanged("nextTodo", idleTextValue())
+		emitAttributeIfChanged("nextTodoIcon", idleIconValue())
+		emitAttributeIfChanged("nextTodoStart", idleTextValue())
+	}
+	updateExactTrigger(nextEvent, now)
+}
+
+private boolean eventMatches(Map event, String prefixStr, String mode) {
+	String summary = (event?.summary ?: "").trim()
+	if (!summary) return false
+	return (mode == "contains") ? summary.contains(prefixStr) : summary.startsWith(prefixStr)
+}
+
+private void emitAttributeIfChanged(String name, Object value) {
+	if (device.currentValue(name)?.toString() != value?.toString()) {
+		sendEvent(name: name, value: value)
+	}
+}
+
+private void updateExactTrigger(Map nextEvent, long currentTime) {
+	Long target = nextEvent?.startMs != null ? (nextEvent.startMs as Long) : null
+	long delay = target != null ? (target - currentTime) / 1000L : 0L
+	boolean schedulable = delay > 0 && delay < 24L * 3600L
+	Long scheduledTarget = state.exactTriggerAt != null ? (state.exactTriggerAt as Long) : null
+
+	if (schedulable && scheduledTarget != target) {
+		runIn((delay as Integer) + 1, "exactTrigger", [overwrite: true])
+		state.exactTriggerAt = target
+		logd "scheduled exact trigger in ${delay}s for '${nextEvent.summary}'"
+	} else if (!schedulable && scheduledTarget != null) {
+		unschedule("exactTrigger")
+		state.remove("exactTriggerAt")
 	}
 }
 
 // Named handler for the exact-time trigger so it has its own runIn slot
 // (overwrite:true prevents stacking when multiple polls schedule it).
 void exactTrigger() {
+	state.remove("exactTriggerAt")
 	pollFeed()
 }
 
@@ -690,7 +717,7 @@ List<Map> expandOccurrences(List<Map> events, long windowStart, long windowEnd) 
 			Map untilParsed = parseIcsDateTimeFull(rule.UNTIL as String, [:])
 			if (untilParsed != null) untilMs = untilParsed.ms
 		}
-		List<Long> exdates = (ev.exdates ?: []) as List<Long>
+		Set<Long> exdates = ((ev.exdates ?: []) as List<Long>) as Set<Long>
 		Set<DayOfWeek> byDays = parseByDay((rule.BYDAY ?: "") as String)
 
 		ZonedDateTime start = ev.startZdt as ZonedDateTime
@@ -700,7 +727,9 @@ List<Map> expandOccurrences(List<Map> events, long windowStart, long windowEnd) 
 
 		int emitted = 0
 		int safety = 0
-		ZonedDateTime cursor = start
+		// COUNT requires accounting for every prior occurrence. Unbounded rules can
+		// safely jump close to the active window instead of iterating from an old DTSTART.
+		ZonedDateTime cursor = countLimit == null ? fastForwardRecurrenceCursor(start, freq, interval, windowStart) : start
 		while (safety++ < MAX_RRULE_INSTANCES) {
 			if (cursor.toInstant().toEpochMilli() > endLimit) break
 			if (countLimit != null && emitted >= countLimit) break
@@ -755,6 +784,28 @@ List<Map> expandOccurrences(List<Map> events, long windowStart, long windowEnd) 
 		}
 	}
 	return out
+}
+
+private ZonedDateTime fastForwardRecurrenceCursor(ZonedDateTime start, String freq, int interval, long windowStart) {
+	ZonedDateTime window = Instant.ofEpochMilli(windowStart).atZone(start.zone)
+	long units = 0L
+	switch (freq) {
+		case "DAILY":
+			units = window.toLocalDate().toEpochDay() - start.toLocalDate().toEpochDay()
+			break
+		case "WEEKLY":
+			units = (window.toLocalDate().toEpochDay() - start.toLocalDate().toEpochDay()) / 7L
+			break
+		default:
+			// Repeated plusMonths/plusYears can clamp month-end and leap-day dates;
+			// aggregating those increments would change recurrence semantics.
+			return start
+	}
+
+	long cycles = units > 0 ? ((units / interval) as long) - 1L : 0L
+	if (cycles <= 0L) return start
+	long amount = cycles * interval
+	return freq == "DAILY" ? start.plusDays(amount) : start.plusWeeks(amount)
 }
 
 Set<DayOfWeek> parseByDay(String byDay) {

@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.21
+ * Version: 0.4.22
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,8 +9,9 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.22 — 2026-08-06 — Skip pattern cloning, inference, and persistent state rewrites when refresh telemetry is unchanged; invalidate the refresh signature on local pattern changes; reduce lastActivity event churn to one update per 30 minutes.
  *   0.4.21 — 2026-05-23 — Apply the v0.4.20 "don't skip while switch is off" fix to setLevel, setColor, and setColorTemperature. All three now capture the prior switch state, only short-circuit the pattern PUT when the cached value matches AND the switch was already on, and defer state.lastOnState mutation until after the request is built so the buildXRequest helpers can correctly wrap an off→on transition with /onState true. Fixes the same WebCoRE dusk turn-on no-op for level/color/CT commands.
- *   0.4.20 — 2026-05-23 — playEffectByName / setEffect now turns the lights on when the switch is off, even if the named effect was already the active pattern. Previously the v0.4.12 "effect already active — skip PUT" optimization no-opted in this case, leaving lights dark (Mads-reported: WebCoRE dusk turn-on calling playEffectByName left lights off).
+ *   0.4.20 — 2026-05-23 — playEffectByName / setEffect now turns the lights on when the switch is off, even if the named effect was already the active pattern.
  *   0.4.19 — 2026-05-19 — remove on/off dedup guard so switch commands always send /onState (fixes stale Hubitat state causing first press to no-op)
  *   0.4.18 — 2026-05-19 — mark switch state as uncertain when /onState writes fail and bypass on/off dedup until a confirmed success/refresh (fixes stale optimistic 'on' state blocking retries)
  *   0.4.17 — 2026-05-18 — ensureSession() check before command dedup guards so an expired Cognito token always triggers re-auth instead of silent no-op (Mads-reported: control lost after inactivity until refresh)
@@ -58,7 +59,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.21"
+@Field static final String DRIVER_VERSION = "0.4.22"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -78,7 +79,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.21"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.22"
 
 metadata {
     definition(
@@ -210,6 +211,7 @@ def logsOff() {
 def on() {
     ensureSession()
     infoLog "${device.displayName} switch → on"
+    state.remove("lastRefreshSignature")
     sendEvent(name: "switch", value: "on", descriptionText: "${device.displayName} was turned on", type: "digital")
     state.lastOnState = true
     sendCommand(action: "on")
@@ -218,6 +220,7 @@ def on() {
 def off() {
     ensureSession()
     infoLog "${device.displayName} switch → off"
+    state.remove("lastRefreshSignature")
     sendEvent(name: "switch", value: "off", descriptionText: "${device.displayName} was turned off", type: "digital")
     state.lastOnState = false
     sendCommand(action: "off")
@@ -239,6 +242,7 @@ def setLevel(level, duration = 0) {
     sendEvent(name: "switch", value: clamped > 0 ? "on" : "off", descriptionText: "${device.displayName} turned ${clamped > 0 ? 'on' : 'off'}", type: "digital")
 
     if (clamped == 0) {
+        state.remove("lastRefreshSignature")
         sendCommand(action: "off")
         state.lastOnState = false
         return
@@ -281,6 +285,7 @@ def setColor(colorMap) {
     updateColorMode(COLOR_MODE_RGB)
 
     if (level == 0) {
+        state.remove("lastRefreshSignature")
         sendCommand(action: "off")
         state.lastOnState = false
         return
@@ -347,6 +352,7 @@ def setColorTemperature(colorTemperature, level = null, transitionTime = null) {
     updateColorMode(COLOR_MODE_CT)
 
     if (targetLevel == 0) {
+        state.remove("lastRefreshSignature")
         sendCommand(action: "off")
         state.lastOnState = false
         return
@@ -1260,6 +1266,7 @@ private void clearDiscoveryState() {
     state.remove("deviceId")
     state.remove("deviceName")
     state.remove("lastPattern")
+    state.remove("lastRefreshSignature")
     state.remove("discoveryHomegroups")
 }
 
@@ -1419,12 +1426,10 @@ private void handleAuthFailure(String logMessage, String statusValue) {
 }
 
 private void touchActivity() {
-    // Throttle to ≥60s between emissions: lastActivity is a coarse "last successful
-    // API call" timestamp; emitting on every async callback produces hundreds of
-    // events/day with no information gain. 60s preserves at-a-glance freshness
-    // without filling Hubitat's event-history DB.
+    // This is coarse connection telemetry, not per-request history. A 30-minute
+    // cadence keeps it useful while avoiding an event and state write on every poll.
     Long lastEmittedAt = (state.lastActivityEmittedAt ?: 0L) as Long
-    if ((now() - lastEmittedAt) < 60000L) {
+    if ((now() - lastEmittedAt) < 1800000L) {
         return
     }
     state.lastActivityEmittedAt = now()
@@ -1449,13 +1454,19 @@ private void handleRefreshResponse(Map payload) {
         return
     }
 
+    String refreshSignature = buildRefreshSignature(data)
+    if (safeString(state.lastRefreshSignature) == refreshSignature) {
+        debugLog "Refresh telemetry unchanged; skipping pattern processing"
+        return
+    }
+
     Boolean onState = data.onState == true
     state.lastOnState = onState
     sendRefreshTelemetryEventIfChanged("switch", onState ? "on" : "off", "${device.displayName} turned ${onState ? 'on' : 'off'}")
 
     Map pattern = data.pattern instanceof Map ? data.pattern as Map : null
     if (pattern) {
-        Map previousPattern = state.lastPattern instanceof Map ? cloneMap(state.lastPattern as Map) : [:]
+        Map previousPattern = state.lastPattern instanceof Map ? state.lastPattern as Map : [:]
         pattern.name = currentEffectName(pattern)
         String inferredColorMode = inferColorMode(pattern, previousPattern)
         Integer inferredColorTemperature = inferredColorMode == COLOR_MODE_CT ? resolvePatternColorTemperature(pattern) : null
@@ -1492,6 +1503,12 @@ private void handleRefreshResponse(Map payload) {
         updateEffectName("")
         clearCurrentEffectIndex()
     }
+    state.lastRefreshSignature = refreshSignature
+}
+
+private String buildRefreshSignature(Map data) {
+    String json = JsonOutput.toJson(data)
+    return "${json.hashCode()}:${json.length()}:${safeLong(state.effectCatalogFetchedAt, 0L)}"
 }
 
 private Boolean sendRefreshTelemetryEventIfChanged(String name, Object value, String descriptionText, String unit = null) {
@@ -1870,6 +1887,9 @@ private String generatePatternId() {
 
 private void rememberPattern(Map pattern) {
     state.lastPattern = cloneMap(pattern)
+    // Commands update this cache optimistically; force the next cloud refresh to
+    // reconcile instead of treating its payload as already processed.
+    state.remove("lastRefreshSignature")
     if (pattern?.name) {
         updateEffectName(safeString(pattern.name))
     }
