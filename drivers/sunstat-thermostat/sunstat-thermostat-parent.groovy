@@ -1,7 +1,7 @@
 /**
  * SunStat Connect Plus — Parent Driver
  * Author:  Mads Kristensen
- * Version: 0.1.11
+ * Version: 0.1.12
  * License: MIT
  *
  * Token-based device discovery, polling, and command routing for the
@@ -13,6 +13,7 @@
  * command on the parent device. The driver rotates the token automatically after that.
  *
  * Changelog:
+ *   0.1.12 — 2026-09-04 — fix setHome() permanently disabled after first setAway(): PATCH /Location/{id}/State returns a partial body without supportsAway, and routing it through parseLocationState() misread the missing field as "away unsupported", latching locationSupportsAway=false and silently ignoring all subsequent setHome()/setAway() calls
  *   0.1.11 — 2026-05-18 — add Polling + Actuator capability markers for parent discovery and command contract
  *   0.1.10 — 2026-05-18 — version synced to child (v0.1.10); no parent behavior change
  *   0.1.9 — 2026-05-18 — throttle lastActivity emit + child fan-out to ≥60s; cuts unchanged-event DB churn on polls (perf audit fix #1)
@@ -35,8 +36,8 @@ import groovy.json.JsonSlurper
 // Constants — all literals; NO cross-@Field references (Hubitat sandbox rule)
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION               = "0.1.11"
-@Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.11"
+@Field static final String DRIVER_VERSION               = "0.1.12"
+@Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.12"
 @Field static final String WATTS_API_BASE               = "https://home.watts.com/api"
 @Field static final String WATTS_TOKEN_URL              = "https://login.watts.io/tfp/wattsb2cap02.onmicrosoft.com/B2C_1A_Residential_UnifiedSignUpOrSignIn/oauth2/v2.0/token"
 @Field static final String WATTS_CLIENT_ID              = "c832c38c-ce70-4ebc-83b6-b4548083ac90"
@@ -253,10 +254,12 @@ private void setAwayModeInternal(String mode, boolean retry401) {
                     setAwayModeInternal(mode, false)
                 }
             } else if (status >= 200 && status < 300) {
+                // PATCH /Location/{id}/State returns a partial body (no
+                // supportsAway/locationId) — apply just the awayState, do
+                // NOT route through parseLocationState() (see applyAwayState doc).
                 Map respBody = parseResponseBody(resp)
-                if (respBody) {
-                    parseLocationState(respBody)
-                }
+                Integer respAwayState = respBody?.containsKey("awayState") ? safeInt(respBody.awayState, awayState) : awayState
+                applyAwayState(respAwayState)
                 infoLog "${device.displayName} away mode set to '${mode}'"
             } else if (status >= 400) {
                 log.error "[SunStat] PATCH /Location/${encodedLocId}/State failed: HTTP ${status} — optimistic state may be stale"
@@ -419,7 +422,7 @@ private void fetchAndParseLocationState(String locId) {
 
 /**
  * Reads awayState, supportsAway, locationId, and name from a location map
- * (one entry from GET /api/Location or the body of PATCH /Location/{id}/State).
+ * (one entry from GET /api/Location, which returns the full location record).
  * Updates state.* and emits corresponding attribute events.
  */
 private void parseLocationState(Map loc) {
@@ -450,9 +453,21 @@ private void parseLocationState(Map loc) {
         return
     }
 
-    Integer awayStateVal = safeInt(loc?.awayState, 0)
-    state.awayState = awayStateVal
-    String modeStr = awayStateVal == 1 ? "away" : "home"
+    applyAwayState(safeInt(loc?.awayState, 0))
+}
+
+/**
+ * Applies an awayState value (0/1) to state + the awayMode attribute.
+ * Used both by parseLocationState() (full GET /Location records) and by the
+ * PATCH /Location/{id}/State success handler, whose response body is a
+ * partial object that does NOT include supportsAway/locationId — reusing
+ * parseLocationState() there would misread the missing supportsAway as
+ * "false" and wrongly mark the location as away-unsupported forever.
+ */
+private void applyAwayState(Integer awayStateVal) {
+    Integer val = awayStateVal ?: 0
+    state.awayState = val
+    String modeStr = val == 1 ? "away" : "home"
     String currentMode = safeStr(device.currentValue("awayMode"))
     if (currentMode != modeStr) {
         sendEvent(name: "awayMode", value: modeStr,
