@@ -29,6 +29,8 @@ A physically open contact suppresses “open the windows” advice immediately. 
 
 When no advisories are active, `latestMessage` shows a contextual one-line forecast summary. It can include today's high and rain chance, a materially different feels-like temperature, tomorrow's range and conditions, high UV, and AQI. Missing data is omitted; if nothing notable is available, it shows `No notable weather`.
 
+Forecast, rain-probability, wind, humidity, and UV changes refresh this summary even when the weather condition text and outdoor temperature stay unchanged. Only attributes supported by the selected devices are subscribed.
+
 ## Architecture
 
 One parent app + one optional child device (house-wide aggregate):

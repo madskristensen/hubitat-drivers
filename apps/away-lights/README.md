@@ -2,7 +2,7 @@
 
 Away Lights is a Hubitat app that simulates occupancy by automatically turning a set of lights on and off during a configurable time window whenever the hub is in Away mode. When you leave home, it waits a short debounce period before checking the clock — if the time is within your window it switches the lights on and can send a push notification. At the end of the window (or when you return home with the option enabled) the lights go back off.
 
-**Version 0.4.0+ adds multi-scene rotation:** Instead of simple on/off toggling, you can now cycle through preset Hubitat scenes for more realistic occupancy simulation. Each scene holds for a randomized duration before rotating to the next.
+The app turns the selected lights on together, optionally after a random delay. It does not rotate scenes or randomly toggle individual lights during the window. Always-on lights bypass the start delay.
 
 ## Installation
 
@@ -23,8 +23,7 @@ Away Lights is a Hubitat app that simulates occupancy by automatically turning a
 | Setting | Description | Default |
 |---|---|---|
 | **Lights to control** | All switch devices that will be managed for occupancy simulation. These lights will be turned on/off according to the schedule. | *(required)* |
-| **Always-On Lights** | Optional subset of lights to keep on continuously (or at all times within the active window). These lights are separate from the random rotation and always turn on when Away mode is entered. Use this for believable occupancy—having a light permanently on (e.g., a hallway) makes the absence less obvious. | *(optional)* |
-| **Scenes to rotate through** | **(v0.4.0+)** Optional list of Hubitat scenes to cycle through instead of simple light on/off. Each scene activates in order with a randomized hold time (5–20 minutes by default) before advancing to the next. Provides more realistic occupancy simulation. **Scenes** are preset light configurations you create in Hubitat—go to **Devices → Rooms & Scenes → Scene Settings** to create them. If empty, falls back to standard light toggling. | *(optional)* |
+| **Always-On Lights** | Optional lights that turn on immediately when simulation starts, without the random start delay. They need not also be selected in the main list; shutdown includes both lists. | *(optional)* |
 | **Turn on at** | Fixed time of day when lights should turn on (used when "Use sunset" is disabled). Good starting point: one hour before sunset, or when family typically arrives home. | 4:00 PM |
 | **Use sunset instead of fixed on-time** | When enabled, lights turn on relative to sunset, which changes daily with the season. Useful in climates with significant seasonal daylight shifts—the schedule automatically stays realistic year-round without manual updates. | false |
 | **Sunset offset (minutes)** | Fine-tune the sunset trigger. Negative values = before sunset (e.g., −30 to light up as dusk approaches), positive = after sunset (e.g., +15 to simulate arriving after dark). Leave at 0 for natural dusk lighting. | 0 |
@@ -39,28 +38,12 @@ Away Lights is a Hubitat app that simulates occupancy by automatically turning a
 
 ## How it works
 
-- **Mode → Away:** starts a debounce timer (`awayDebounceMinutes`). When it fires, checks that the mode is still Away and the current time falls inside the `[onTime, offTime)` window (or `[sunset±offset, offTime)` when sunset mode is active). If so, turns **always-on lights immediately on**, starts the random lights (or scene rotation if configured) with jitter, and sends a notification.
-- **Always-on lights vs. random lights:** Always-on lights (if configured) turn on immediately when Away mode is entered and stay on for the entire window, creating constant ambient light for believable occupancy. Random lights are the remaining switches, which turn on/off with random delays to simulate variable activity. This two-tier approach lets you maintain a baseline (e.g., hallway on constantly) while still varying other lights to avoid predictability.
-- **Scene Rotation (v0.4.0+):** When scenes are configured, the app activates them in order instead of simple light toggling. Each scene holds for a randomized duration (5–20 minutes by default, logged for debugging). When the next rotation time arrives, the app advances to the next scene. At the end of the day's window, all lights turn off. Scene rotation provides more sophisticated occupancy simulation—e.g., a "Movie Night" scene, then "Kitchen Cooking" scene, creating realistic activity patterns.
-- **Daily at `onTime` (or sunset±offset):** if the hub is currently in Away mode, ensures always-on lights are on and starts scene rotation or randomizes any pending random-light triggers. When **Use sunset** is enabled, the on-time is recalculated every day at noon so the trigger automatically drifts with the season.
-- **Daily at `offTime`:** if the hub is currently in Away mode, turns all lights off (and cancels any pending scene rotations).
-- **Random jitter:** when `randomizeMinutes > 0`, each light on/off trigger (or scene rotation start) is delayed by a random 0–N minute offset, so the schedule never looks exactly the same to an observer. Always-on lights are not affected by jitter—they stay on for the full window.
-- **Mode leaves Away** *(optional)*: cancels any pending debounce and turns all lights off immediately if `turnOffOnHome` is enabled.
+- **Mode to Away:** starts the configured debounce timer, then checks the time window and optional maximum start time. Always-on lights turn on immediately; the remaining lights turn on together after a random delay. A notification is sent when the main lights turn on.
+- **Daily start:** uses the same window and maximum-start checks. Sunset scheduling is recalculated each day at noon.
+- **Daily end:** cancels pending starts and turns off both light lists, optionally after the random shutdown delay. This schedule survives Home/Away transitions. A delayed start cannot relight the lights after the window ends.
+- **Mode leaves Away:** cancels pending starts. With turn-off-on-home enabled, both lists turn off immediately; otherwise lights already started by the app remain on until the scheduled shutdown.
+- **Overnight windows:** windows such as 23:00-06:00 are supported. A maximum start of 01:00 belongs to the following morning for that window.
 
-## Scene Setup Guide
+## Changelog
 
-Hubitat **Scenes** are preset configurations that let you control multiple lights together. Away Lights can cycle through scenes for more realistic occupancy simulation.
-
-**How to create a scene:**
-1. Go to **Devices → Rooms & Scenes → Scene Settings**
-2. Click **Create Scene**
-3. Give it a name (e.g., "Movie Time", "Reading", "Night Mode")
-4. Add lights and set their desired states (brightness, color, etc.)
-5. Save the scene
-6. Return to Away Lights preferences and select your scenes under **Scenes to rotate through**
-
-**How scene rotation works:**
-- Scenes cycle in the order you selected them
-- Each scene holds for a random 5–20 minute duration
-- When the timer expires, the next scene activates
-- This creates a realistic "activity pattern" while you're away
+- **0.8.2 (2026-10-25):** preserve daily shutdown across mode changes, clean up always-on-only selections, prevent stale delayed starts, honor maximum start time on every start path, and correct obsolete scene-rotation documentation.

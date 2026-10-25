@@ -1,7 +1,7 @@
 /**
  * SunStat Connect Plus — Child Driver (Thermostat)
  * Author:  Mads Kristensen
- * Version: 0.1.11
+ * Version: 0.1.12
  * License: MIT
  *
  * Hubitat capability surface for the Watts® Home SunStat Connect Plus
@@ -9,6 +9,7 @@
  * driver (SunStat Connect Plus) via parent.sendDevicePatch(...).
  *
  * Changelog:
+ *   0.1.12 — 2026-10-25 — convert outgoing temperatures in API units; restore boost setpoint/schedule durably with acknowledged PATCH retries.
  *   0.1.11 — 2026-05-18 — version synced to parent metadata capability release; no child behavior change
  *   0.1.10 — 2026-05-18 — cache Schedule.Floor.W and skip redundant setFloorMinTemp PATCH (audit SC-4)
  *   0.1.9 — 2026-05-18 — funnel poll telemetry through emitIfChanged (temperature/setpoints/energy/floor); dedupes event history on unchanged polls (perf audit fix #5)
@@ -29,7 +30,7 @@ import groovy.json.JsonSlurper
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION                    = "0.1.11"
+@Field static final String DRIVER_VERSION                    = "0.1.12"
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_F        = 110L
 @Field static final Long   FLOOR_PROBE_DISCONNECTED_C        = 43L
 
@@ -132,9 +133,14 @@ def updated() {
 def initialize() {
     // Child has no independent schedule; parent owns polling
     debugLog "initialize() — child has no independent schedule"
+    state.remove("boostStartOperationId")
+    unschedule("boostActivationTimeout")
 
     // Hub-restart boost recovery: re-arm or auto-cancel the expiry timer
-    if (state.boostActive == true && state.boostUntil != null) {
+    if (state.boostActive == true && state.boostRestoring == true) {
+        state.remove("boostRestoreOperationId")
+        runIn(2, "retryBoostRestore")
+    } else if (state.boostActive == true && state.boostUntil != null) {
         long remaining = (state.boostUntil as Long) - now()
         if (remaining <= 0) {
             log.info "[SunStat] ${device.displayName}: boost detected as overrun after reboot — auto-cancelling"
@@ -214,9 +220,9 @@ def emergencyHeat() { log.warn "[SunStat] ${device.displayName}: emergencyHeat()
 // ---------------------------------------------------------------------------
 
 def setHeatingSetpoint(temp) {
-    BigDecimal step    = validStep(state.setpointStep)
-    BigDecimal rounded = (Math.round((temp as BigDecimal) / step) * step).setScale(2, BigDecimal.ROUND_HALF_UP)
-    BigDecimal clamped = clampSetpoint(rounded)
+    if (!temperatureConfigurationReady()) { return }
+    BigDecimal apiTarget = normalizeApiSetpoint(hubToApiTemperature(temp as BigDecimal))
+    BigDecimal clamped = convertTemp(apiTarget, apiTemperatureUnit(), location.temperatureScale ?: "F")
     def raw = device.currentValue("heatingSetpoint")
     Number current = (raw != null) ? (raw as BigDecimal) : null
     if (current != null && current == (clamped as BigDecimal)) {
@@ -228,7 +234,7 @@ def setHeatingSetpoint(temp) {
     sendEvent(name: "thermostatSetpoint", value: clamped, unit: location.temperatureScale,
               descriptionText: "${device.displayName} thermostatSetpoint set to ${clamped}", type: "digital")
     if (settings.txtEnable) { log.info descTxt }
-    sendDevicePatch([Heat: clamped])
+    sendDevicePatch([Heat: apiTarget])
 }
 
 def setCoolingSetpoint(temp) {
@@ -255,11 +261,12 @@ def setThermostatFanMode(mode) {
  * This is a driver-managed pseudo-boost — the Watts Home API has no native boost endpoint.
  * TODO: Monitor Target.Hold in future firmware updates; it may eventually surface as a writable hold-timer field.
  */
-def setBoost(minutes) {
+def setBoost(minutes = null) {
     if (state.boostActive == true) {
         log.warn "[SunStat] ${device.displayName}: boost already active; call cancelBoost() first or wait for expiry"
         return
     }
+    if (!temperatureConfigurationReady()) { return }
 
     String hubScale = location.temperatureScale ?: "F"
     BigDecimal defaultDelta = (hubScale == "C") ? 3.0 : 5.0
@@ -271,27 +278,29 @@ def setBoost(minutes) {
         if (mins <= 0) { mins = 30.0 }
     }
 
-    BigDecimal currentSetpoint = safeBigDecimal(device.currentValue("heatingSetpoint"), 68.0)
+    BigDecimal currentSetpoint = safeBigDecimal(device.currentValue("heatingSetpoint"), hubScale == "C" ? 20.0 : 68.0)
     state.preBoostSetpoint = currentSetpoint
+    state.preBoostTemperatureUnit = hubScale
+    state.preBoostApiSetpoint = normalizeApiSetpoint(hubToApiTemperature(currentSetpoint))
+    state.preBoostApiUnit = apiTemperatureUnit()
 
-    BigDecimal boostTarget = currentSetpoint + delta
-    BigDecimal maxSp = safeBigDecimal(state.setpointMax, hubScale == "C" ? 35.0 : 95.0)
-    if (boostTarget > maxSp) {
-        boostTarget = maxSp
-        log.warn "[SunStat] ${device.displayName}: boost target clamped to max setpoint (${maxSp} °${hubScale})"
-    }
-    boostTarget = boostTarget.setScale(1, BigDecimal.ROUND_HALF_UP)
-
-    sendDevicePatch([Heat: boostTarget])
-
-    boolean suppressSched = settings.boostSuppressSchedule != false
-    if (suppressSched) {
-        sendDevicePatch([SchedEnable: "Off"])
-    }
+    BigDecimal apiBoostTarget = normalizeApiSetpoint(hubToApiTemperature(currentSetpoint + delta))
+    BigDecimal boostTarget = convertTemp(apiBoostTarget, apiTemperatureUnit(), hubScale)
+    String priorSchedule = safeStr(state.confirmedScheduleEnabled)
+    boolean suppressSched = settings.boostSuppressSchedule != false && priorSchedule == "on"
+    state.preBoostScheduleEnabled = priorSchedule
+    Map boostSettings = [Heat: apiBoostTarget]
+    if (suppressSched) { boostSettings.SchedEnable = "Off" }
 
     state.boostActive           = true
-    state.boostUntil            = now() + (mins.toLong() * 60L * 1000L)
+    state.boostRestoring        = false
+    state.boostUntil            = now() + (mins * 60000L).toLong()
     state.boostScheduleSuppressed = suppressSched
+    int sequence = safeInt(state.boostRestoreSequence, 0) + 1
+    state.boostRestoreSequence = sequence
+    String operationId = "boost-start-${sequence}"
+    state.boostStartOperationId = operationId
+    runIn(240, "boostActivationTimeout")
 
     String untilStr = new Date(state.boostUntil as Long).format("yyyy-MM-dd'T'HH:mm:ssZ")
     sendEvent(name: "boostActive", value: "on",     descriptionText: "${device.displayName} boostActive is on")
@@ -299,6 +308,14 @@ def setBoost(minutes) {
 
     unschedule("boostExpired")
     runIn((int)(mins * 60), "boostExpired")
+
+    try {
+        parent.sendDevicePatch(device.getDataValue("wattsDeviceId"), boostSettings,
+            [childDni: device.deviceNetworkId, operationId: operationId])
+    } catch (Exception e) {
+        log.warn "[SunStat] Boost activation dispatch failed: ${e.message}"
+        devicePatchCompleted(operationId, false)
+    }
 
     log.info "[SunStat] ${device.displayName}: boost active — setpoint raised from ${currentSetpoint} to ${boostTarget} °${hubScale} for ${mins} min (until ${untilStr})"
 }
@@ -312,28 +329,81 @@ def cancelBoost() {
         return
     }
 
-    BigDecimal restoreSetpoint = safeBigDecimal(state.preBoostSetpoint, 68.0)
-    sendDevicePatch([Heat: restoreSetpoint])
-
-    if (state.boostScheduleSuppressed == true) {
-        sendDevicePatch([SchedEnable: "On"])
-    }
-
-    state.boostActive           = false
-    state.boostUntil            = null
-    state.preBoostSetpoint      = null
-    state.boostScheduleSuppressed = false
-
-    sendEvent(name: "boostActive", value: "off", descriptionText: "${device.displayName} boostActive is off")
-    sendEvent(name: "boostUntil",  value: "",    descriptionText: "${device.displayName} boostUntil cleared")
+    state.boostRestoring = true
     unschedule("boostExpired")
+    if (!state.boostRestoreOperationId && !state.boostStartOperationId) {
+        retryBoostRestore()
+    }
+}
 
-    log.info "[SunStat] ${device.displayName}: boost cancelled — setpoint restored to ${restoreSetpoint}"
+def retryBoostRestore() {
+    if (state.boostActive != true || state.boostRestoring != true) { return }
+    if (state.boostStartOperationId) { return }
+    if (!temperatureConfigurationReady()) {
+        runIn(60, "retryBoostRestore")
+        return
+    }
+    BigDecimal restore = state.preBoostApiSetpoint != null
+        ? convertTemperatureValue(safeBigDecimal(state.preBoostApiSetpoint), safeStr(state.preBoostApiUnit, apiTemperatureUnit()), apiTemperatureUnit())
+        : convertTemperatureValue(safeBigDecimal(state.preBoostSetpoint, 68.0), safeStr(state.preBoostTemperatureUnit, location.temperatureScale ?: "F"), apiTemperatureUnit())
+    Map restoreSettings = [Heat: normalizeApiSetpoint(restore)]
+    if (state.boostScheduleSuppressed == true && state.preBoostScheduleEnabled in ["on", "off"]) {
+        restoreSettings.SchedEnable = state.preBoostScheduleEnabled == "on" ? "On" : "Off"
+    }
+    int attempt = safeInt(state.boostRestoreSequence, 0) + 1
+    state.boostRestoreSequence = attempt
+    String operationId = "boost-restore-${attempt}"
+    state.boostRestoreOperationId = operationId
+    // A watchdog survives a missing async callback; normal failures retry after one minute.
+    runIn(240, "retryBoostRestore")
+    String deviceId = device.getDataValue("wattsDeviceId")
+    if (!deviceId) {
+        devicePatchCompleted(operationId, false)
+        return
+    }
+    try {
+        parent.sendDevicePatch(deviceId, restoreSettings, [childDni: device.deviceNetworkId, operationId: operationId])
+    } catch (Exception e) {
+        log.warn "[SunStat] Boost restore dispatch failed: ${e.message}"
+        devicePatchCompleted(operationId, false)
+    }
+}
+
+void devicePatchCompleted(String operationId, boolean success) {
+    if (operationId == safeStr(state.boostStartOperationId)) {
+        state.remove("boostStartOperationId")
+        unschedule("boostActivationTimeout")
+        if (!success || state.boostRestoring == true) { cancelBoost() }
+        return
+    }
+    if (state.boostRestoring != true || operationId != safeStr(state.boostRestoreOperationId)) { return }
+    state.remove("boostRestoreOperationId")
+    if (!success) {
+        log.warn "[SunStat] ${device.displayName}: boost restoration pending — retrying in 60 seconds"
+        runIn(60, "retryBoostRestore")
+        return
+    }
+    unschedule("retryBoostRestore")
+    state.boostActive = false
+    state.boostRestoring = false
+    state.boostUntil = null
+    state.preBoostSetpoint = null
+    state.preBoostApiSetpoint = null
+    state.preBoostScheduleEnabled = null
+    state.boostScheduleSuppressed = false
+    sendEvent(name: "boostActive", value: "off", descriptionText: "${device.displayName} boost restoration confirmed")
+    sendEvent(name: "boostUntil", value: "", descriptionText: "${device.displayName} boostUntil cleared")
 }
 
 /**
  * boostExpired(): Scheduled callback — auto-cancel after the boost window elapses.
  */
+def boostActivationTimeout() {
+    if (!state.boostStartOperationId) { return }
+    state.remove("boostStartOperationId")
+    cancelBoost()
+}
+
 def boostExpired() {
     log.info "[SunStat] ${device.displayName}: boost expired automatically — restoring previous setpoint"
     cancelBoost()
@@ -372,11 +442,12 @@ def setScheduleEnabled(String enabled) {
  * Read-modify-write: must supply both W (warmth) and A (away) together.
  */
 def setFloorMinTemp(temp) {
+    if (!temperatureConfigurationReady()) { return }
     BigDecimal step     = validStep(state.setpointStep)
-    BigDecimal input    = safeBigDecimal(temp, 40.0)
+    BigDecimal input    = hubToApiTemperature(safeBigDecimal(temp, location.temperatureScale == "C" ? 4.4 : 40.0))
     BigDecimal rounded  = (Math.round(input / step) * step).setScale(2, BigDecimal.ROUND_HALF_UP)
-    BigDecimal floorMin = safeBigDecimal(state.floorMin, 40.0)
-    BigDecimal floorMax = safeBigDecimal(state.floorMax, 85.0)
+    BigDecimal floorMin = safeBigDecimal(state.floorMin, apiTemperatureUnit() == "C" ? 4.4 : 40.0)
+    BigDecimal floorMax = safeBigDecimal(state.floorMax, apiTemperatureUnit() == "C" ? 29.4 : 85.0)
     BigDecimal clamped  = rounded.max(floorMin).min(floorMax)
     if (clamped != rounded) {
         log.warn "[SunStat] setFloorMinTemp(${input}) clamped to ${clamped} (range ${floorMin}..${floorMax})"
@@ -428,12 +499,13 @@ private void parseDeviceStateInternal(Map body) {
     }
 
     // Temperature units: API returns "F" or "C"; hub uses location.temperatureScale
-    String apiUnit = safeStr(data?.TempUnits?.Val, "F")
+    String apiUnit = safeStr(data?.TempUnits?.Val, safeStr(state.apiTemperatureUnit))
+    state.apiTemperatureUnit = apiUnit
     String hubScale = location.temperatureScale ?: "F"
 
     // Min/max setpoint bounds — cache for clamping
-    BigDecimal targetMin = safeBigDecimal(data?.Target?.Min, 40.0)
-    BigDecimal targetMax = safeBigDecimal(data?.Target?.Max, 100.0)
+    BigDecimal targetMin = safeBigDecimal(data?.Target?.Min, apiUnit == "C" ? 4.4 : 40.0)
+    BigDecimal targetMax = safeBigDecimal(data?.Target?.Max, apiUnit == "C" ? 37.8 : 100.0)
     state.setpointMin = targetMin
     state.setpointMax = targetMax
 
@@ -444,7 +516,8 @@ private void parseDeviceStateInternal(Map body) {
         if (step > 0) {
             state.setpointStep = step
             String descTxtStep = "${device.displayName} setpointStep is ${step}"
-            sendEvent(name: "setpointStep", value: step, descriptionText: descTxtStep, type: "digital")
+            BigDecimal hubStep = apiUnit == hubScale ? step : (apiUnit == "C" ? step * 9.0 / 5.0 : step * 5.0 / 9.0)
+            sendEvent(name: "setpointStep", value: hubStep.setScale(4, BigDecimal.ROUND_HALF_UP), descriptionText: descTxtStep, type: "digital")
             if (settings.txtEnable) { log.info descTxtStep }
         }
     }
@@ -576,6 +649,7 @@ private void parseDeviceStateInternal(Map body) {
         }
         emitIfChanged("scheduleEnabled", schedEnabled,
                       "${device.displayName} scheduleEnabled is ${schedEnabled}")
+        state.confirmedScheduleEnabled = schedEnabled
     }
 
     // Energy reporting  (data.Energy.Heat.Daily[] / Monthly[])
@@ -617,7 +691,7 @@ private void parseDeviceStateInternal(Map body) {
                   "${device.displayName} awayMode is ${parentAway}")
 
     // Hub-restart boost recovery: if boost was active and has overrun, cancel now
-    if (state.boostActive == true && state.boostUntil != null && now() > (state.boostUntil as Long)) {
+    if (state.boostActive == true && state.boostRestoring != true && state.boostUntil != null && now() > (state.boostUntil as Long)) {
         log.info "[SunStat] ${device.displayName}: boost detected as expired during poll — restoring"
         boostExpired()
     }
@@ -668,11 +742,31 @@ private BigDecimal fahrenheitToCelsius(BigDecimal f) {
     return ((f - 32.0) * 5.0 / 9.0).setScale(1, BigDecimal.ROUND_HALF_UP)
 }
 
-private BigDecimal clampSetpoint(value) {
-    BigDecimal temp = safeBigDecimal(value, 68.0)
-    BigDecimal minSp = safeBigDecimal(state.setpointMin, 40.0)
-    BigDecimal maxSp = safeBigDecimal(state.setpointMax, 100.0)
-    return temp.max(minSp).min(maxSp).setScale(1, BigDecimal.ROUND_HALF_UP)
+private boolean temperatureConfigurationReady() {
+    if (state.apiTemperatureUnit in ["F", "C"]) { return true }
+    log.warn "[SunStat] ${device.displayName}: temperature units unknown — refresh before sending a temperature command"
+    return false
+}
+
+private String apiTemperatureUnit() {
+    return safeStr(state.apiTemperatureUnit, "F")
+}
+
+private BigDecimal convertTemperatureValue(BigDecimal value, String fromUnit, String toUnit) {
+    if (fromUnit == toUnit) { return value }
+    return fromUnit == "C" ? value * 9.0 / 5.0 + 32.0 : (value - 32.0) * 5.0 / 9.0
+}
+
+private BigDecimal hubToApiTemperature(BigDecimal value) {
+    return convertTemperatureValue(value, location.temperatureScale ?: "F", apiTemperatureUnit())
+}
+
+private BigDecimal normalizeApiSetpoint(BigDecimal value) {
+    BigDecimal step = validStep(state.setpointStep)
+    BigDecimal rounded = Math.round(value / step) * step
+    BigDecimal minSp = safeBigDecimal(state.setpointMin, apiTemperatureUnit() == "C" ? 4.4 : 40.0)
+    BigDecimal maxSp = safeBigDecimal(state.setpointMax, apiTemperatureUnit() == "C" ? 37.8 : 100.0)
+    return rounded.max(minSp).min(maxSp).setScale(2, BigDecimal.ROUND_HALF_UP)
 }
 
 // ---------------------------------------------------------------------------

@@ -210,6 +210,13 @@ Rule Machine and Hubitat rules can use either `setEffect("Pulse")` or `playEffec
 
 ## Testing
 
+### v0.4.23 reliability fixes (2026-10-25)
+
+- Explicit numeric zero saturation produces white; zero `setColor` level turns the lights off.
+- Repeating a Kelvin value with a different brightness still sends the brightness change.
+- A failed catalog lookup only falls back to selections fully available in cache. Uncached selections fail once and require a manual retry, rather than continuously restarting the failed lookup.
+- Offline executable regressions load the actual driver: see `tests\integration-drivers\README.md` at the repository root.
+
 See `TESTING.md` for the manual plan covering:
 - first-time auth setup
 - auth failure visibility

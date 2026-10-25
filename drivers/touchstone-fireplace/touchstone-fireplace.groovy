@@ -1,7 +1,7 @@
 /**
  * Touchstone / Tuya Fireplace
  * Author:  Mads Kristensen
- * Version: 0.2.2
+ * Version: 0.2.3
  * License: MIT
  *
  * Local LAN control for the Touchstone Sideline Elite — and other Tuya WiFi
@@ -17,6 +17,7 @@
  * Optional "Default settings on power-on" preferences are only applied after Hubitat turns the fireplace on; leave any blank to keep the device's remembered setting. Heater state is intentionally excluded for safety.
  *
  * Changelog:
+ *   0.2.3 — 2026-10-25 — supersede pending opposite power commands, correlate replies by sequence/command, and preserve active requests when retry timers fire.
  *   0.2.2 — 2026-08-06 — fast-path heartbeat-only frames; coalesce periodic refreshes so offline polls cannot grow the request queue; avoid reconnect refresh duplication; throttle liveness state writes and lastActivity events; dedupe online, switch, temperature-unit, raw-DP, and child-lock telemetry
  *   0.2.1 — 2026-06-11 — make all Tuya Cloud calls non-blocking (asynchttpGet) so the single driver thread is never stalled on the network; add access-token caching, automatic server clock-skew compensation, a testCloudConnection command, friendlier cloud error messages, and auto-clearing of stale localKeyStatus once local control recovers
  *   0.2.0 — 2026-06-11 — add optional Tuya Cloud local-key auto-recovery:
@@ -102,8 +103,8 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import java.security.MessageDigest
 
-@Field static final String DRIVER_VERSION = "0.2.2"
-@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.2.2"
+@Field static final String DRIVER_VERSION = "0.2.3"
+@Field static final String USER_AGENT = "Hubitat Touchstone-Tuya Fireplace/0.2.3"
 @Field static final long[] CRC32_TABLE = (0..255).collect { int n ->
     long c = n as long
     8.times {
@@ -485,7 +486,7 @@ def on() {
         return
     }
 
-    if (device.currentValue("switch") == "on" && safeStr(state.desiredPower) != "on") {
+    if (device.currentValue("switch") == "on" && !safeStr(state.desiredPower)) {
         debugLog "on(): device already on — skipping DP write"
         emitCommandStatus("success", "Power is already on")
         return
@@ -507,7 +508,7 @@ def off() {
         return
     }
 
-    if (device.currentValue("switch") == "off" && safeStr(state.desiredPower) != "off") {
+    if (device.currentValue("switch") == "off" && !safeStr(state.desiredPower)) {
         debugLog "off(): device already off — skipping DP write"
         emitCommandStatus("success", "Power is already off")
         return
@@ -1019,6 +1020,9 @@ private void enqueueRequest(Integer cmd, String payloadJson, String reason, Stri
 
     List<Map> queue = pendingRequestQueue()
     Map request = [cmd: cmd, payloadJson: payloadJson, reason: reason]
+    if (reason?.startsWith("power ")) {
+        request.powerGeneration = safeLong(state.powerCommandGeneration, 0L)
+    }
     if (captureMode) {
         request.captureMode = captureMode
     }
@@ -1088,9 +1092,14 @@ private void pumpQueue() {
 
     Map request = queue.remove(0)
     state.pendingRequests = queue
+    if (obsoletePowerRequest(request)) {
+        pumpQueue()
+        return
+    }
 
     try {
         byte[] frame = buildTuyaFrame(safeInt(request.cmd, TUYA_CMD_CONTROL), safeStr(request.payloadJson) ?: "{}")
+        request.seq = readUInt32(frame, 4)
         String hex = hubitat.helper.HexUtils.byteArrayToHexString(frame)
         interfaces.rawSocket.sendMessage(hex)
         state.inFlight = request
@@ -1129,8 +1138,6 @@ def responseTimeout() {
 
 def retryPendingRequests() {
     debugLog "retryPendingRequests()"
-    state.awaitingResponse = false
-    state.inFlight = null
     enqueueDeferredRetryRequest()
     pumpQueue()
 }
@@ -1191,7 +1198,7 @@ private void requeueInFlight() {
     state.inFlight = null
     unschedule("responseTimeout")
 
-    if (request) {
+    if (request && !obsoletePowerRequest(request)) {
         List<Map> queue = pendingRequestQueue()
         queue.add(0, request)
         state.pendingRequests = queue
@@ -1211,6 +1218,9 @@ private List<Map> pendingRequestQueue() {
     state.pendingRequests.each { entry ->
         if (entry instanceof Map) {
             Map copy = [cmd: entry.cmd, payloadJson: entry.payloadJson, reason: entry.reason]
+            if (entry.powerGeneration != null) {
+                copy.powerGeneration = entry.powerGeneration
+            }
             if (entry.captureMode) {
                 copy.captureMode = safeStr(entry.captureMode)
             }
@@ -1824,29 +1834,37 @@ private Integer processFrame(String frameHex) {
     }
 
     Integer cmd = (readUInt32(frame, 8) as Integer)
+    Long seq = readUInt32(frame, 4)
     Integer retcode = (readUInt32(frame, 16) as Integer)
     Integer payloadLength = frame.length - 28
     byte[] payload = payloadLength > 0 ? sliceBytes(frame, 20, payloadLength) : new byte[0]
 
+    if (retcode != 0) {
+        log.warn "[Touchstone] Tuya cmd ${cmd} rejected with retcode=${retcode}; leaving request pending"
+        return 0
+    }
     if (cmd == TUYA_CMD_HEARTBEAT) {
         traceLog "Received Tuya cmd ${cmd} retcode=${retcode} payloadLen=${payload.length}"
         return 1
     }
-    // Any non-heartbeat frame is a real device response (control ACK, status push, etc.) and is
-    // allowed to fulfil the in-flight request; heartbeat ACKs above intentionally do not.
-    state.frameWasResponse = true
+    Boolean matched = matchesInFlightResponse(cmd, seq)
     debugLog "Received Tuya cmd ${cmd} retcode=${retcode} payloadLen=${payload.length}"
 
     Map inFlightRequest = state.inFlight instanceof Map ? (Map) state.inFlight : [:]
     String decoded = decryptTuyaPayload(payload)?.trim()
     if (!decoded) {
-        return 2
+        if (payload.length == 0 && matched && safeInt(inFlightRequest.cmd, 0) == TUYA_CMD_CONTROL) {
+            state.frameWasResponse = true
+            return 2
+        }
+        return 0
     }
 
     traceLog "Decoded Tuya payload: ${decoded}"
 
     if (decoded.contains("data unvalid")) {
-        if (getStatusCommand() != TUYA_CMD_CONTROL_NEW) {
+        if (matched && getStatusCommand() != TUYA_CMD_CONTROL_NEW) {
+            state.frameWasResponse = true
             log.warn "[Touchstone] Standard DP_QUERY was rejected; switching to device22 status mode"
             state.statusCommand = TUYA_CMD_CONTROL_NEW
             List<String> requestedDps = inFlightRequest.requestedDps instanceof List ? (List<String>) inFlightRequest.requestedDps : statusDpIds()
@@ -1856,7 +1874,7 @@ private Integer processFrame(String frameHex) {
     }
 
     if (!decoded.startsWith("{")) {
-        return 2
+        return 0
     }
 
     Map response = new JsonSlurper().parseText(decoded) as Map
@@ -1869,10 +1887,23 @@ private Integer processFrame(String frameHex) {
         Map<String, Object> dps = normaliseDps(response.dps as Map)
         state.frameHadDpData = true
         applyDps(dps)
-        handleStatusCapture(safeStr(inFlightRequest.captureMode), dps)
+        if (matched) {
+            state.frameWasResponse = true
+            handleStatusCapture(safeStr(inFlightRequest.captureMode), dps)
+        }
     }
 
     return 2
+}
+
+private Boolean matchesInFlightResponse(Integer cmd, Long seq) {
+    Map request = state.inFlight instanceof Map ? state.inFlight as Map : [:]
+    if (state.awaitingResponse != true || request.seq == null || safeLong(request.seq, -1L) != seq) {
+        return false
+    }
+    Integer sentCommand = safeInt(request.cmd, 0)
+    return cmd == sentCommand ||
+        (cmd == TUYA_CMD_STATUS && sentCommand in [TUYA_CMD_DP_QUERY, TUYA_CMD_CONTROL_NEW, TUYA_CMD_CONTROL])
 }
 
 private Map<String, Object> normaliseDps(Map dps) {
@@ -2166,6 +2197,8 @@ private void applySwitchState(Boolean isOn, String eventType) {
 
 private void beginPowerCommand(Boolean requestedOn) {
     String desired = requestedOn ? "on" : "off"
+    unschedule("retryPendingRequests")
+    state.powerCommandGeneration = safeLong(state.powerCommandGeneration, 0L) + 1L
     resetCommandRetryState()
     state.desiredPower = desired
     state.desiredPowerRequestedAt = now()
@@ -2182,6 +2215,8 @@ private void handlePowerCommandProgress(Boolean isOn) {
 
     String actual = isOn ? "on" : "off"
     if (actual == desired) {
+        unschedule("retryPendingRequests")
+        cancelQueuedPowerCommandWrites()
         state.remove("desiredPower")
         state.remove("desiredPowerRequestedAt")
         state.remove("deferredRetryRequest")
@@ -2232,6 +2267,7 @@ private void queuePowerStateRetry(String actual, String desired) {
     state.deferredRetryRequest = [
         cmd: TUYA_CMD_CONTROL,
         payloadJson: JsonOutput.toJson(payload),
+        powerGeneration: safeLong(state.powerCommandGeneration, 0L),
         reason: "power ${desired} (state-mismatch retry)"
     ]
     emitCommandStatus("pending", "Power command not yet confirmed (${desired}); retrying")
@@ -2240,15 +2276,21 @@ private void queuePowerStateRetry(String actual, String desired) {
 
 private void enqueueDeferredRetryRequest() {
     Map deferred = state.deferredRetryRequest instanceof Map ? (Map) state.deferredRetryRequest : null
-    if (!deferred) {
+    if (!deferred || obsoletePowerRequest(deferred)) {
+        state.remove("deferredRetryRequest")
         return
     }
 
     List<Map> queue = pendingRequestQueue()
-    queue.add(0, [cmd: deferred.cmd, payloadJson: deferred.payloadJson, reason: deferred.reason])
+    queue.add(0, [cmd: deferred.cmd, payloadJson: deferred.payloadJson, reason: deferred.reason, powerGeneration: deferred.powerGeneration])
     state.pendingRequests = queue
     state.remove("deferredRetryRequest")
     queueDelayedRefresh(POWER_REFRESH_DELAY_SECONDS)
+}
+
+private Boolean obsoletePowerRequest(Map request) {
+    return request.powerGeneration != null &&
+        safeLong(request.powerGeneration, -1L) != safeLong(state.powerCommandGeneration, 0L)
 }
 
 private Boolean shouldResetCommandRetryStateAfterDpFrame() {

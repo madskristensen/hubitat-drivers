@@ -2,6 +2,7 @@
  * Away Lights
  *
  * Changelog:
+ *   0.8.2 — 2026-10-25 — Preserve daily shutdown, cancel stale delayed starts, honor maximum start time, and clean up all selected lights.
  *   0.8.1 — 2026-05-20 — Remove turnOffOnHome gate on scheduler cleanup; unschedule offTimeHandler on Away mode exit to eliminate wasteful no-op invocations; reduce CPU/memory overhead.
  *   0.8.0 — 2026-05-20 — Fix critical race condition in light control; fix scheduler memory leak in sunset mode; fix midnight-crossing time windows; improve label clarity; refactor helpers for efficiency.
  *   0.7.0 — 2026-05-20 — UI refinement pass: improve all label descriptions for clarity; add always-on lights feature; add max start time constraint; remove scene selector.
@@ -15,7 +16,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.8.1"
+@Field static final String VERSION = "0.8.2"
 @Field static final Integer SECONDS_PER_MINUTE = 60
 
 definition(
@@ -37,19 +38,19 @@ def mainPage() {
     dynamicPage(name: "mainPage") {
         section("Lights") {
             input "awayLights", "capability.switch",
-                title: "Lights to randomly turn on and off",
-                description: "Select all lights for the away simulation. These will be randomly turned on/off, UNLESS also selected as always-on lights below (which stay on the entire window).",
+                title: "Lights to turn on",
+                description: "These lights turn on together after the optional random delay and stay on until the end of the window.",
                 required: true, multiple: true
             input "alwaysOnLights", "capability.switch",
                 title: "Always-on lights (optional)",
-                description: "Lights that stay ON for the entire window (turn off only at end time). Never included in random rotation. Example: hallway light to prevent complete darkness.",
+                description: "These lights turn on immediately when the simulation starts, without the random delay, and turn off at the end of the window.",
                 required: false, multiple: true
         }
 
 
 
         section("Schedule") {
-            paragraph "⏰ <b>Time Window:</b> Set when your away simulation should run. Lights will be randomly turned on/off within this window to vary patterns and appear more natural."
+            paragraph "⏰ <b>Time Window:</b> Set when your away simulation should run. An optional random delay varies when the lights turn on and off."
             input "onTime", "time",
                 title: "Start time",
                 description: "When to start the away simulation. Ignored if using sunset.",
@@ -73,8 +74,8 @@ def mainPage() {
                 description: "When the hub enters Away mode, wait N minutes before checking if away simulation should start. Prevents false activations during quick mode changes. Set to 0 for immediate response.",
                 required: true, defaultValue: 10, range: "0..60"
             input "randomizeMinutes", "number",
-                title: "Add randomness to start time (±minutes)",
-                description: "Vary the start time of the away simulation by 0 to N minutes for realism. Example: with 15 selected, if start time is 6:00 PM, lights might actually start between 5:45 PM and 6:15 PM. Set to 0 to disable.",
+                title: "Random on/off delay (minutes)",
+                description: "Delay the main lights turning on and the final shutdown by 0 to N minutes. Delayed starts never run beyond the active window. Set to 0 to disable.",
                 required: false, defaultValue: 0, range: "0..60"
             input "maxStartTime", "time",
                 title: "Don't start later than (optional)",
@@ -142,6 +143,12 @@ def initialize() {
         schedule(onTime, "onTimeHandler")
     }
     schedule(offTime, "offTimeHandler")
+    if (state.away_lights_cleanup_pending && !isInWindow(false)) {
+        doLightsOff()
+    }
+    if (location.mode == awayMode) {
+        modeHandler([value: location.mode])
+    }
     log.info "Away Lights v${VERSION} initialized"
 }
 
@@ -151,18 +158,18 @@ def modeHandler(evt) {
     if (evt.value == awayMode) {
         if (logEnable) log.debug "Away Lights: entered Away mode"
         state.away_lights_active = false  // Reset flag when entering Away mode
-        if ((awayDebounceMinutes as Integer) == 0) {
+        Integer debounceMinutes = awayDebounceMinutes == null ? 10 : awayDebounceMinutes as Integer
+        if (debounceMinutes == 0) {
             checkAndTurnOn()
         } else {
-            runIn((awayDebounceMinutes as Integer) * 60, "checkAndTurnOn")
+            runIn(debounceMinutes * 60, "checkAndTurnOn", [overwrite: true])
         }
     } else {
         unschedule("checkAndTurnOn")
         unschedule("doLightsOn")
-        unschedule("offTimeHandler")
         state.away_lights_active = false
         if (turnOffOnHome) {
-            lightsOff()
+            doLightsOff()
             if (logEnable) log.debug "Away Lights: left Away mode — lights turned off"
         } else {
             if (logEnable) log.debug "Away Lights: left Away mode"
@@ -171,23 +178,11 @@ def modeHandler(evt) {
 }
 
 def onTimeHandler() {
-    // Race condition prevention: if already active from mode change, skip
-    if (state.away_lights_active) {
-        if (logEnable) log.debug "Away Lights: onTimeHandler — already active from mode change, skipping"
-        return
-    }
-    if (location.mode != awayMode) {
-        if (logEnable) log.debug "Away Lights: onTime reached but not in Away mode — skipping"
-        return
-    }
-    
-    state.away_lights_active = true
-    turnOnAlwaysOnLights()
-    scheduleRandomLightToggle()
+    checkAndTurnOn()
 }
 
 def doLightsOn() {
-    if (location.mode != awayMode) return
+    if (!state.away_lights_active || location.mode != awayMode || !isInWindow(false)) return
     
     if (awayLights) {
         Set alwaysOnIds = getAlwaysOnLightIds()
@@ -204,10 +199,10 @@ def doLightsOn() {
 }
 
 def offTimeHandler() {
-    if (location.mode != awayMode) {
-        if (logEnable) log.debug "Away Lights: offTime reached but not in Away mode — skipping"
-        return
-    }
+    if (!state.away_lights_cleanup_pending) return
+    state.away_lights_active = false
+    unschedule("checkAndTurnOn")
+    unschedule("doLightsOn")
     Integer jitter = getRandomJitterSeconds()
     if (jitter > 0) {
         if (logEnable) log.debug "Away Lights: offTime — delaying ${jitter}s (random jitter)"
@@ -218,8 +213,11 @@ def offTimeHandler() {
 }
 
 def doLightsOff() {
-    if (location.mode != awayMode) return
+    unschedule("checkAndTurnOn")
+    unschedule("doLightsOn")
+    unschedule("doLightsOff")
     state.away_lights_active = false  // Clear active flag when lights turn off
+    state.away_lights_cleanup_pending = false
     lightsOff()
 }
 
@@ -237,7 +235,9 @@ def checkAndTurnOn() {
         return
     }
     
+    unschedule("doLightsOff")
     state.away_lights_active = true
+    state.away_lights_cleanup_pending = true
     turnOnAlwaysOnLights()
     scheduleRandomLightToggle()
 }
@@ -253,8 +253,8 @@ def scheduleSunsetOn() {
     schedule(targetTime, "onTimeHandler")
 }
 
-private boolean isInWindow() {
-    def now = new Date()
+private boolean isInWindow(boolean enforceMaxStart = true) {
+    Date currentTime = new Date(now())
     Date on
     if (useSunset) {
         Integer offsetMinutes = (sunsetOffsetMinutes as Integer) ?: 0
@@ -267,17 +267,27 @@ private boolean isInWindow() {
     // Handle midnight-crossing windows (e.g., 23:00 - 06:00 next day)
     if (on < off) {
         // Normal case: on before off (same day)
-        if (now < on || now >= off) return false
+        if (currentTime < on || currentTime >= off) return false
     } else {
         // Midnight-crossing case: off before on (wraps to next day)
         // Window is active if: now >= on OR now < off
-        if (now < on && now >= off) return false
+        if (currentTime < on && currentTime >= off) return false
     }
     
-    if (maxStartTime) {
+    if (enforceMaxStart && maxStartTime) {
         def maxStart = timeToday(maxStartTime, location.timeZone)
-        if (now > maxStart) {
-            if (logEnable) log.debug "Away Lights: current time ${now} is after max start time ${maxStart}"
+        if (on >= off) {
+            Calendar calendar = Calendar.getInstance(location.timeZone)
+            calendar.time = maxStart
+            if (currentTime >= on && maxStart < on) {
+                calendar.add(Calendar.DATE, 1)
+            } else if (currentTime < off && maxStart >= on) {
+                calendar.add(Calendar.DATE, -1)
+            }
+            maxStart = calendar.time
+        }
+        if (currentTime > maxStart) {
+            if (logEnable) log.debug "Away Lights: current time ${currentTime} is after max start time ${maxStart}"
             return false
         }
     }
@@ -315,8 +325,7 @@ private Set getAlwaysOnLightIds() {
 }
 
 private void lightsOff() {
-    if (awayLights) {
-        for (def light in awayLights) { light.off() }
-    }
+    List lights = ((awayLights ?: []) + (alwaysOnLights ?: [])).unique { it.id }
+    for (def light in lights) { light.off() }
     if (logEnable) log.debug "Away Lights: lights off"
 }

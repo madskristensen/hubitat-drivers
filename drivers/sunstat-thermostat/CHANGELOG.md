@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Parent 0.1.13 / Child 0.1.12 — 2026-10-25
+- Convert setpoint, floor, boost, and restoration temperatures into API units before applying API bounds and steps.
+- Preserve saved boost state until the parent acknowledges successful restoration; retry failures and recover missing callbacks/reboots.
+- Serialize immediate cancellation behind boost activation and restore only the known prior schedule state.
+- Deduplicate home/away against confirmed state, allowing failed commands and authentication retries to proceed.
+- Update the component manifest and add executable offline regression coverage loading actual production drivers.
+
 ## 0.1.6 — 2026-05-17 — pseudo-boost implementation
 - Implemented `setBoost(minutes)` and `cancelBoost()` as driver-managed temporary setpoint overrides — the Watts Home API does not expose a native boost endpoint, so boost is achieved by raising the heat setpoint by a configurable delta and auto-cancelling via `runIn`
 - Added `boostActive` and `boostUntil` attributes for dashboard visibility

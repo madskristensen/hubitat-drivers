@@ -1,7 +1,7 @@
 /**
  *  Minoston Smart Plug 2-Channel (MP24Z) — Hubitat Fork
  *  Author:  Mads Kristensen
- *  Version: 1.0.7 — 2026-05-23
+ *  Version: 1.0.8 — 2026-10-25
  *  License: Apache-2.0
  *
  *  Fork of sky-nie/hubitat "Smart Plug 2-Channel" driver.
@@ -9,6 +9,7 @@
  *  Forked because upstream does not accept PRs; this version applies reliability and Hubitat-quality hardening.
  *
  *  Changelog:
+ *    1.0.8 — 2026-10-25 — Resolve legacy endpoint children for reports and aggregation; reconcile association changes immediately and after discovery.
  *    1.0.7 — 2026-05-23 — Fix BasicReport interpretation: per Z-Wave spec, value 0x01-0x63 means 'on at that level' (not off). Treat any non-zero BasicReport/SwitchBinaryReport value as on. Previously the device's unsolicited BasicReport(value:99) was flipping state to off ~5s after on().
  *    1.0.6 — 2026-05-23 — Fix state-drift on slow Z-Wave nodes: emit optimistic switch events on on/off/childOn/childOff, use child.parse for component state, drop in-driver verify/retry loop (duplicated Hubitat's platform command-retry and raced stale Get reports against optimistic state).
  *    1.0.5 — 2026-05-19 — Reduce hub/radio load with light-first child command path, duplicate child command suppression, throttled lastActivity writes, and stale verify cancellation.
@@ -96,7 +97,7 @@ def recordLastActivity(Boolean force = false) {
 }
 
 def endpointIsOn(int ep) {
-    def childDevice = getChildDevice("${device.deviceNetworkId}-ep${ep}")
+    def childDevice = getTargetDeviceByEndPoint(ep)
     return childDevice?.currentValue("switch") == "on"
 }
 
@@ -118,7 +119,11 @@ def updateAggregateSwitch(Integer changedEp = null, String changedValue = null) 
 }
 
 def getTargetDeviceByEndPoint(Integer ep = null) {
-    ep ? getChildDevice("${device.deviceNetworkId}-ep${ep}") : device
+    if (ep == null || ep == 0) return device
+    String parentDni = device.deviceNetworkId
+    return getChildDevice("${parentDni}-ep${ep}") ?:
+        getChildDevice("${parentDni}-${ep}") ?:
+        getChildDevice("${parentDni}-${ep.toString().padLeft(2, '0')}")
 }
 
 def secure(hubitat.zwave.Command cmd, Integer ep = null) {
@@ -260,9 +265,23 @@ void zwaveEvent(hubitat.zwave.commands.associationv2.AssociationReport cmd) {
             nodeIds << Integer.toHexString(nodeId as Integer).padLeft(2, "0").toUpperCase()
         }
     }
-    state."actualAssociation${cmd.groupingIdentifier}" = nodeIds
-    debugLog "Associations for Group ${cmd.groupingIdentifier}: ${nodeIds}"
-    updateDataValue("associationGroup${cmd.groupingIdentifier}", "${nodeIds}")
+    Integer group = cmd.groupingIdentifier as Integer
+    nodeIds = ((state."partialAssociation${group}" ?: []) + nodeIds).unique()
+    if (cmd.reportsToFollow > 0) {
+        state."partialAssociation${group}" = nodeIds
+        return
+    }
+    state.remove("partialAssociation${group}".toString())
+    state."actualAssociation${group}" = nodeIds
+    debugLog "Associations for Group ${group}: ${nodeIds}"
+    updateDataValue("associationGroup${group}", "${nodeIds}")
+    List pending = state."pendingAssociation${group}" ?: []
+    pending.each { change -> applyAssociationChange(group, change.nodes, change.action) }
+    state.remove("pendingAssociation${group}".toString())
+    if (state."associationSync${group}" || pending) {
+        state."associationSync${group}" = false
+        reconcileAssociations(group)
+    }
 }
 
 def zwaveEvent(hubitat.zwave.commands.associationv2.AssociationGroupingsReport cmd) {
@@ -370,7 +389,7 @@ def createChildDevices() {
     state.oldLabel = device.label
     (1..2).each { Integer i ->
         String childDni = "${device.deviceNetworkId}-ep${i}"
-        if (!getChildDevice(childDni)) {
+        if (!getTargetDeviceByEndPoint(i)) {
             addChildDevice("hubitat", "Generic Component Switch", childDni, [
                 completedSetup: true,
                 label: "${device.displayName} (CH${i})",
@@ -437,11 +456,8 @@ def configure() {
 
 def initialize() {
     debugLog "initialize()"
-    if (!childDevices) {
-        createChildDevices()
-    } else {
-        syncChildLabels()
-    }
+    syncChildLabels()
+    createChildDevices()
 
     sendEvent(name: "checkInterval", value: 3 * 60 * 60 + 2 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"])
     recordLastActivity(true)
@@ -468,7 +484,7 @@ def setDefaultAssociations() {
 }
 
 def setAssociationGroup(group, nodes, action, endpoint = null) {
-    action = "${action}" == "1" ? "Add" : "${action}" == "0" ? "Remove" : "${action}"
+    action = "${action}" == "1" ? "Add" : "${action}" == "0" ? "Remove" : action.toString()
     group = "${group}" =~ /\d+/ ? (group as Integer) : group
     List<String> requestedNodes = (nodes instanceof Collection ? nodes : [nodes]).collect { "${it}".trim().toUpperCase() }
 
@@ -483,7 +499,24 @@ def setAssociationGroup(group, nodes, action, endpoint = null) {
         return
     }
 
-    List<String> associations = state."desiredAssociation${group}" ?: []
+    if (!(action in ["Add", "Remove"])) {
+        log.error "Association action must be Add or Remove"
+        return
+    }
+    requestedNodes = requestedNodes.collect { it.padLeft(2, "0") }
+    if (state."actualAssociation${group}" == null && state."desiredAssociation${group}" == null) {
+        List pending = state."pendingAssociation${group}" ?: []
+        pending << [nodes: requestedNodes, action: action]
+        state."pendingAssociation${group}" = pending
+    } else {
+        applyAssociationChange(group as Integer, requestedNodes, action)
+    }
+    reconcileAssociations(group as Integer)
+}
+
+def applyAssociationChange(Integer group, List<String> requestedNodes, String action) {
+    List<String> associations = state."desiredAssociation${group}" != null ?
+        new ArrayList(state."desiredAssociation${group}") : new ArrayList(state."actualAssociation${group}" ?: [])
     requestedNodes.each { String node ->
         if (action == "Remove") {
             debugLog "Removing node ${node} from association group ${group}"
@@ -500,21 +533,27 @@ def maxAssociationGroup() {
     (state.associationGroups ?: 5) as Integer
 }
 
-def processAssociations() {
+def reconcileAssociations(Integer group) {
+    List<hubitat.zwave.Command> cmds = processAssociations(group)
+    if (cmds) sendCommands(cmds)
+}
+
+def processAssociations(Integer onlyGroup = null) {
     List<hubitat.zwave.Command> cmds = []
     setDefaultAssociations()
     Integer associationGroups = maxAssociationGroup()
 
-    for (Integer i = 1; i <= associationGroups; i++) {
+    for (Integer i : (onlyGroup != null ? [onlyGroup] : (1..associationGroups))) {
         if (state."actualAssociation${i}" != null) {
             if (state."desiredAssociation${i}" != null || state."defaultG${i}") {
                 boolean refreshGroup = false
-                ((state."desiredAssociation${i}" ? state."desiredAssociation${i}" : [] + state."defaultG${i}") - state."actualAssociation${i}").each { String nodeHex ->
+                List<String> target = ((state."desiredAssociation${i}" ?: []) + (state."defaultG${i}" ?: [])).unique()
+                (target - state."actualAssociation${i}").each { String nodeHex ->
                     debugLog "Adding node ${nodeHex} to group ${i}"
                     cmds << zwave.associationV2.associationSet(groupingIdentifier: i, nodeId: hubitat.helper.HexUtils.hexStringToInt(nodeHex))
                     refreshGroup = true
                 }
-                ((state."actualAssociation${i}" - state."defaultG${i}") - state."desiredAssociation${i}").each { String nodeHex ->
+                (state."actualAssociation${i}" - target).each { String nodeHex ->
                     debugLog "Removing node ${nodeHex} from group ${i}"
                     cmds << zwave.associationV2.associationRemove(groupingIdentifier: i, nodeId: hubitat.helper.HexUtils.hexStringToInt(nodeHex))
                     refreshGroup = true
@@ -526,6 +565,7 @@ def processAssociations() {
                 }
             }
         } else {
+            state."associationSync${i}" = true
             debugLog "Association info unknown for group ${i}; requesting from device."
             cmds << zwave.associationV2.associationGet(groupingIdentifier: i)
         }

@@ -2,9 +2,10 @@
  * Climate Advisor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.4.30
+ * Version:   0.4.31
  *
  * Changelog:
+ *   0.4.31 — 2026-10-25 — Refresh advice and dashboard summaries when forecast, humidity, wind, or UV attributes change.
  *   0.4.30 — 2026-07-29 — Require outdoor temperature to be above the cooling setpoint for warm-weather close advice and below the heating setpoint for cold-weather close advice.
  *   0.4.29 — 2026-07-27 — Make open-window advice conservative across multiple indoor sensors: cooling requires outdoor air cooler than every zone reading, and warming requires it warmer than every zone reading.
  *   0.4.28 — 2026-07-26 — Require indoor temperature to fall below the heating setpoint before advising that windows be closed for cold outdoor air; outdoor temperature/trend alone no longer triggers the warning.
@@ -50,7 +51,7 @@
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION        = "0.4.30"
+@Field static final String  APP_VERSION        = "0.4.31"
 @Field static final String  CHILD_DRIVER       = "Climate Advisor Device"
 @Field static final String  CHILD_NS           = "mads"
 @Field static final Integer MAX_AGG_MSG        = 20
@@ -276,11 +277,22 @@ private void reconcileChildren() {
 private void subscribeAll(List zones) {
     if (settings.outdoorTempDevice) {
         subscribe(settings.outdoorTempDevice, "temperature", outdoorTempHandler)
+        if (settings.outdoorTempDevice.hasAttribute("humidity")) {
+            subscribe(settings.outdoorTempDevice, "humidity", debounceHandler)
+        }
     }
 
     String wAttr = settings.weatherAttribute as String ?: "weather"
     if (settings.weatherDevice) {
-        subscribe(settings.weatherDevice, wAttr, debounceHandler)
+        List<String> attributes = [wAttr, "temperature", "apparentTemperature", "humidity", "windSpeed",
+                "temperatureMax", "temperatureMaxTomorrow", "temperatureMinTomorrow", "weatherTomorrow",
+                "precipitationProbabilityTomorrow", "precipitationProbabilityNextHour",
+                "precipitationProbabilityNext6h", "ultravioletIndex"]
+        attributes.unique().each { String attribute ->
+            if (attribute == wAttr || settings.weatherDevice.hasAttribute(attribute)) {
+                subscribe(settings.weatherDevice, attribute, debounceHandler)
+            }
+        }
     }
 
     if (settings.aqiDevice) {

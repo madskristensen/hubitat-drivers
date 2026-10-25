@@ -1,7 +1,7 @@
 ﻿/**
  * Daikin WiFi Thermostat
  * Author:  Mads Kristensen
- * Version: 0.1.9
+ * Version: 0.1.10
  * License: MIT
  *
  * Local LAN control for Daikin WiFi adapters (BRP069B series, BRP15B61, and similar
@@ -14,6 +14,7 @@
  *   original. Credit and thanks to @eriktack for the foundational research.
  *
  * Changelog:
+ *   0.1.10 — 2026-10-25 — Preserve confirmed adapter controls across power changes; serialize writes and reconcile failures; correct auto operating-state fallback and logging timeouts.
  *   0.1.9 — 2026-05-21 — fix: auto setpoint persistence by applying auto target via stemp only in auto mode and queuing requested auto target until next auto-mode activation
  *   0.1.8 — 2026-05-21 — feat: per-mode setpoints via Daikin dt* fields (auto/cool/heat); feat: fanCirculate now uses Daikin fan-only circulation mode; feat: add explicit dehumidify() + autoSetpoint attribute/command
  *   0.1.7 — 2026-05-18 — feat: tempUp/tempDown ±0.5° commands, energyYesterday + energyThisYear/LastYear attrs; fix: graceful 404 on get_special_mode (some BRP069B firmware doesn't support it), drying→fan only operatingState spec compliance; cleanup: remove dead state.pingRequestedAt write
@@ -35,7 +36,7 @@ import groovy.json.JsonOutput
 // Constants
 // ---------------------------------------------------------------------------
 
-@Field static final String  DRIVER_VERSION            = "0.1.9"
+@Field static final String  DRIVER_VERSION            = "0.1.10"
 @Field static final Integer DAIKIN_PORT               = 80
 @Field static final Integer LAST_ACTIVITY_THROTTLE_MS = 60000
 @Field static final Integer ENERGY_POLL_MINUTES       = 30
@@ -199,12 +200,6 @@ def installed() {
 
 def updated() {
     log.info "Daikin WiFi Thermostat v${DRIVER_VERSION} preferences updated: ${device.displayName}"
-    if (settings.logEnable) {
-        runIn(1800, "logsOff")
-        debugLog "Debug logging enabled; auto-disable in 30 minutes"
-    }
-    if (settings.traceEnable) { runIn(1800, "traceOff") }
-
     // Re-emit supported lists so any new mode selections in dashboards are current.
     sendEvent(name: "supportedThermostatModes",
               value: JsonOutput.toJson(SUPPORTED_MODES),
@@ -219,6 +214,11 @@ def updated() {
 def initialize() {
     debugLog "initialize()"
     unschedule()
+    if (settings.logEnable) { runIn(1800, "logsOff") }
+    if (settings.traceEnable) { runIn(1800, "traceOff") }
+    state.controlWriteInFlight = false
+    state.pendingControlWrites = [:]
+    state.controlInfo = null
     state.pingPending            = false
     state.specialModeUnsupported = false
     state.lastActivityEmittedAt  = 0L
@@ -261,21 +261,15 @@ private void traceLog(String msg) { if (settings.traceEnable) { log.trace "[Daik
 // ---------------------------------------------------------------------------
 
 def on() {
-    if (device.currentValue("switch") == "on") { debugLog "on(): already on — skipping"; return }
     log.info "[Daikin] ${device.displayName} turned on"
-    emitIfChanged("switch", "on", null, "${device.displayName} turned on")
     sendControlWrite([pow: "1"])
     runIn(2, "applyPowerOnDefaults")
 }
 
 def off() {
-    if (device.currentValue("switch") == "off") { debugLog "off(): already off — skipping"; return }
     log.info "[Daikin] ${device.displayName} turned off"
-    emitIfChanged("switch",                   "off",  null, "${device.displayName} turned off")
-    emitIfChanged("thermostatMode",           "off",  null, "${device.displayName} thermostat mode → off")
-    emitIfChanged("thermostatOperatingState", "idle", null, "${device.displayName} operating state → idle")
+    unschedule("applyPowerOnDefaults")
     sendControlWrite([pow: "0"])
-    emitIfChanged("setpointDisplay", composeSetpointDisplay(), null, "${device.displayName} setpoint display updated")
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +299,6 @@ def setThermostatMode(String mode) {
     Map writes = [pow: "1", mode: daikinCode]
     if (lmode == "auto" && state.pendingAutoSetpointC != null) {
         writes.stemp = state.pendingAutoSetpointC.toString()
-        state.pendingAutoSetpointC = null
         debugLog "Applying queued auto setpoint during mode change to auto"
     }
     log.info "[Daikin] ${device.displayName} thermostat mode → ${lmode}"
@@ -615,19 +608,21 @@ private void ensureDNI() {
     }
 }
 
-private void sendGet(String path, String callbackMethod) {
-    if (!settings.ip) { log.warn "[Daikin] IP not configured — skipping: ${path}"; return }
+private boolean sendGet(String path, String callbackMethod, Map context = [:]) {
+    if (!settings.ip) { log.warn "[Daikin] IP not configured — skipping: ${path}"; return false }
     traceLog "GET ${path} → ${callbackMethod}"
     Map params = [
         uri         : "http://${settings.ip}${path}",
         timeout     : 10,
         contentType : "text/plain"
     ]
-    Map data = [path: path]
+    Map data = [path: path] + context
     try {
         asynchttpGet(callbackMethod, params, data)
+        return true
     } catch (Exception e) {
         log.warn "[Daikin] sendGet failed (${path}): ${e.message}"
+        return false
     }
 }
 
@@ -675,26 +670,33 @@ def parseModelInfo(hubitat.scheduling.AsyncResponse response, Map data) {
 }
 
 private void sendControlWrite(Map overrides) {
-    // All 6 parameters are required by the adapter on every set_control_info call.
-    // Read current device state for any required parameter the caller did not override.
-    String currentMode = device.currentValue("thermostatMode") ?: "cool"
-    boolean isPowered  = (device.currentValue("switch") == "on")
+    state.pendingControlWrites = (state.pendingControlWrites ?: [:]) + overrides
+    flushControlWrites()
+}
 
-    String pow   = overrides.containsKey("pow")    ? overrides.pow    : (isPowered ? "1" : "0")
-    String mCode = overrides.containsKey("mode")   ? overrides.mode   : (HUBITAT_MODE_TO_DAIKIN[currentMode] ?: "1")
-    String stemp = overrides.containsKey("stemp")  ? overrides.stemp  : "${currentSetpointC()}"
-    String fRate = overrides.containsKey("f_rate") ? overrides.f_rate : (device.currentValue("fanRate") ?: "A")
-    String fDir  = overrides.containsKey("f_dir")  ? overrides.f_dir  : (SWING_TO_DAIKIN_F_DIR[device.currentValue("swingMode")] ?: "0")
-    String shum  = overrides.containsKey("shum")   ? overrides.shum   : "0"
+private void flushControlWrites() {
+    if (state.controlWriteInFlight || !state.pendingControlWrites) { return }
+    Map cached = state.controlInfo ?: [:]
+    if (!cached.mode || !cached.pow) {
+        sendGet("/aircon/get_control_info", "handleControlInfo")
+        return
+    }
 
-    List<String> query = [
-        "pow=${pow}",
-        "mode=${mCode}",
-        "stemp=${stemp}",
-        "f_rate=${fRate}",
-        "f_dir=${fDir}",
-        "shum=${shum}"
+    Map overrides = new LinkedHashMap(state.pendingControlWrites)
+    Map control = [
+        pow: cached.pow, mode: cached.mode, stemp: cached.stemp ?: "${currentSetpointC()}",
+        f_rate: cached.f_rate ?: "A", f_dir: cached.f_dir ?: "0", shum: cached.shum ?: "0"
     ]
+    if (overrides.mode && !overrides.containsKey("stemp")) {
+        String remembered = cached["dt${overrides.mode}"]
+        if (remembered?.isNumber()) { control.stemp = remembered }
+    }
+    control.putAll(overrides)
+    if (control.mode in ["0", "1", "7"] && state.pendingAutoSetpointC != null && !overrides.containsKey("stemp")) {
+        control.stemp = state.pendingAutoSetpointC.toString()
+    }
+
+    List<String> query = ["pow", "mode", "stemp", "f_rate", "f_dir", "shum"].collect { key -> "${key}=${control[key]}" }
     ["dt1", "dt3", "dt4", "dt7"].each { String key ->
         if (overrides.containsKey(key) && overrides[key] != null) {
             query << "${key}=${overrides[key]}"
@@ -703,7 +705,12 @@ private void sendControlWrite(Map overrides) {
 
     String path = "/aircon/set_control_info?${query.join('&')}"
     debugLog "sendControlWrite: ${path}"
-    sendGet(path, "handleSetControlInfo")
+    state.pendingControlWrites = [:]
+    state.controlWriteInFlight = true
+    if (!sendGet(path, "handleSetControlInfo", [control: control])) {
+        state.controlWriteInFlight = false
+        state.pendingControlWrites = overrides + (state.pendingControlWrites ?: [:])
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -718,6 +725,12 @@ def handleControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
 
     Map kv = parseKV(body)
     if (kv.ret != "OK") { log.warn "[Daikin] get_control_info: ret=${kv.ret}"; return }
+    if (!(kv.pow in ["0", "1"]) || !DAIKIN_MODE_TO_HUBITAT.containsKey(kv.mode)) {
+        log.warn "[Daikin] Incomplete control-info response — ignoring"
+        return
+    }
+    if (state.controlWriteInFlight) { return }
+    state.controlInfo = new LinkedHashMap(kv)
 
     String pow   = kv.pow
     String mode  = kv.mode
@@ -779,6 +792,7 @@ def handleControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
 
     emitIfChanged("setpointDisplay", composeSetpointDisplayForMode(tMode, heatSp, coolSp, autoSp), null, "${device.displayName} setpoint display updated")
     emitLastActivity()
+    flushControlWrites()
 }
 
 def handleSensorInfo(hubitat.scheduling.AsyncResponse response, Map data) {
@@ -882,10 +896,19 @@ def handleYearPower(hubitat.scheduling.AsyncResponse response, Map data) {
 }
 
 def handleSetControlInfo(hubitat.scheduling.AsyncResponse response, Map data) {
-    if (!checkHttpOk(response, "set_control_info")) { return }
+    state.controlWriteInFlight = false
+    if (!checkHttpOk(response, "set_control_info")) {
+        runIn(2, "getControlInfo")
+        return
+    }
     Map kv = parseKV(response.getData() ?: "")
     if (kv.ret == "OK") {
         debugLog "set_control_info accepted"
+        state.controlInfo = (state.controlInfo ?: [:]) + (data?.control ?: [:])
+        Map accepted = data?.control ?: [:]
+        if (accepted.mode in ["0", "1", "7"] && accepted.stemp == state.pendingAutoSetpointC) {
+            state.pendingAutoSetpointC = null
+        }
     } else {
         log.warn "[Daikin] set_control_info: ret=${kv.ret}"
     }
@@ -1115,7 +1138,7 @@ private String operatingStateForMode(String mode) {
         case "fan":  return "fan only"
         case "dry":  return "fan only"
         case "off":  return "idle"
-        default:      return "auto"   // "auto" mode — device decides heating/cooling demand
+        default:      return "idle"   // The API exposes selected mode, not actual auto-mode demand.
     }
 }
 

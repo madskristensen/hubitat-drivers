@@ -1,7 +1,7 @@
 /**
  * SunStat Connect Plus — Parent Driver
  * Author:  Mads Kristensen
- * Version: 0.1.12
+ * Version: 0.1.13
  * License: MIT
  *
  * Token-based device discovery, polling, and command routing for the
@@ -13,6 +13,7 @@
  * command on the parent device. The driver rotates the token automatically after that.
  *
  * Changelog:
+ *   0.1.13 — 2026-10-25 — acknowledge child PATCH completion for durable boost restoration; use confirmed away state and bypass deduplication on authentication retry.
  *   0.1.12 — 2026-09-04 — fix setHome() permanently disabled after first setAway(): PATCH /Location/{id}/State returns a partial body without supportsAway, and routing it through parseLocationState() misread the missing field as "away unsupported", latching locationSupportsAway=false and silently ignoring all subsequent setHome()/setAway() calls
  *   0.1.11 — 2026-05-18 — add Polling + Actuator capability markers for parent discovery and command contract
  *   0.1.10 — 2026-05-18 — version synced to child (v0.1.10); no parent behavior change
@@ -36,8 +37,8 @@ import groovy.json.JsonSlurper
 // Constants — all literals; NO cross-@Field references (Hubitat sandbox rule)
 // ---------------------------------------------------------------------------
 
-@Field static final String DRIVER_VERSION               = "0.1.12"
-@Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.12"
+@Field static final String DRIVER_VERSION               = "0.1.13"
+@Field static final String USER_AGENT                   = "Hubitat SunStat Connect Plus/0.1.13"
 @Field static final String WATTS_API_BASE               = "https://home.watts.com/api"
 @Field static final String WATTS_TOKEN_URL              = "https://login.watts.io/tfp/wattsb2cap02.onmicrosoft.com/B2C_1A_Residential_UnifiedSignUpOrSignIn/oauth2/v2.0/token"
 @Field static final String WATTS_CLIENT_ID              = "c832c38c-ce70-4ebc-83b6-b4548083ac90"
@@ -232,14 +233,10 @@ private void setAwayModeInternal(String mode, boolean retry401) {
         log.warn "[SunStat] setAwayMode skipped — token unavailable"
         return
     }
-    String currentAway = safeStr(device.currentValue("awayMode"))
-    if (currentAway != null && currentAway == mode) {
+    if (retry401 && state.confirmedAwayLocationId == locId && state.confirmedAwayMode == mode) {
         debugLog "setAwayModeInternal: already '${mode}' — skipping PATCH"
         return
     }
-    // Optimistic update — Watts app reconciles on next poll if the call fails
-    sendEvent(name: "awayMode", value: mode,
-              descriptionText: "${device.displayName} away mode is ${mode}")
     int awayState = mode == "away" ? 1 : 0
     String body = JsonOutput.toJson([awayState: awayState])
     String encodedLocId = encodePathSegment(locId)
@@ -254,6 +251,10 @@ private void setAwayModeInternal(String mode, boolean retry401) {
                     setAwayModeInternal(mode, false)
                 }
             } else if (status >= 200 && status < 300) {
+                if (!apiPayloadSucceeded(resp.data)) {
+                    state.remove("confirmedAwayMode")
+                    return
+                }
                 // PATCH /Location/{id}/State returns a partial body (no
                 // supportsAway/locationId) — apply just the awayState, do
                 // NOT route through parseLocationState() (see applyAwayState doc).
@@ -261,11 +262,19 @@ private void setAwayModeInternal(String mode, boolean retry401) {
                 Integer respAwayState = respBody?.containsKey("awayState") ? safeInt(respBody.awayState, awayState) : awayState
                 applyAwayState(respAwayState)
                 infoLog "${device.displayName} away mode set to '${mode}'"
-            } else if (status >= 400) {
-                log.error "[SunStat] PATCH /Location/${encodedLocId}/State failed: HTTP ${status} — optimistic state may be stale"
+            } else {
+                state.remove("confirmedAwayMode")
+                log.error "[SunStat] PATCH /Location/${encodedLocId}/State failed: HTTP ${status}"
             }
         }
     } catch (Exception e) {
+        state.remove("confirmedAwayMode")
+        Integer exceptionStatus = 0
+        try { exceptionStatus = safeStatus(e.response) } catch (ignored) { }
+        if (retry401 && exceptionStatus == 401 && refreshTokensSync()) {
+            setAwayModeInternal(mode, false)
+            return
+        }
         log.error "[SunStat] setAwayMode exception: ${e.message}"
     }
 }
@@ -279,14 +288,16 @@ private void setAwayModeInternal(String mode, boolean retry401) {
  * Sends PATCH /api/Device/{deviceId} with {"Settings": settingsMap}.
  * Retries once on 401.
  */
-def sendDevicePatch(String deviceId, Map settingsMap) {
+def sendDevicePatch(String deviceId, Map settingsMap, Map completion = null) {
+    Map data = [deviceId: deviceId, settingsMap: settingsMap, retry401: true, completion: completion]
     if (!ensureValidToken()) {
         log.warn "[SunStat] sendDevicePatch() skipped — token unavailable"
+        notifyDevicePatchResult(data, false)
         return
     }
     String body = JsonOutput.toJson([Settings: settingsMap])
     Map params = buildApiParams("PATCH", "/Device/${deviceId}", body)
-    asynchttpPatch("sendDevicePatchCallback", params, [deviceId: deviceId, settingsMap: settingsMap, retry401: true])
+    dispatchDevicePatch(params, data)
 }
 
 // ---------------------------------------------------------------------------
@@ -468,6 +479,8 @@ private void applyAwayState(Integer awayStateVal) {
     Integer val = awayStateVal ?: 0
     state.awayState = val
     String modeStr = val == 1 ? "away" : "home"
+    state.confirmedAwayMode = modeStr
+    state.confirmedAwayLocationId = state.locationId
     String currentMode = safeStr(device.currentValue("awayMode"))
     if (currentMode != modeStr) {
         sendEvent(name: "awayMode", value: modeStr,
@@ -569,14 +582,11 @@ void sendDevicePatchCallback(response, Map data) {
     String deviceId = safeStr(data?.deviceId)
     boolean retry401 = data?.retry401 != false
 
-    if (response.hasError()) {
-        log.error "[SunStat] PATCH /Device/${deviceId} error: ${response.errorMessage}"
-        return
-    }
     Integer status = safeStatus(response)
     debugLog "PATCH /Device/${deviceId} → HTTP ${status}"
     if (status == 429) {
         rateLimit429Warn("PATCH /Device/${deviceId}")
+        notifyDevicePatchResult(data, false)
         return
     }
     if (status == 401 && retry401) {
@@ -585,12 +595,50 @@ void sendDevicePatchCallback(response, Map data) {
             Map sm = data?.settingsMap as Map ?: [:]
             String retryBody = JsonOutput.toJson([Settings: sm])
             Map retryParams = buildApiParams("PATCH", "/Device/${deviceId}", retryBody)
-            asynchttpPatch("sendDevicePatchCallback", retryParams, [deviceId: deviceId, settingsMap: sm, retry401: false])
+            Map retryData = data + [retry401: false]
+            dispatchDevicePatch(retryParams, retryData)
+        } else {
+            notifyDevicePatchResult(data, false)
         }
         return
     }
-    if (status >= 400) {
+    boolean success = status != null && status >= 200 && status < 300 && !response.hasError()
+    if (success) {
+        success = apiPayloadSucceeded(response.data)
+    }
+    if (!success) {
         log.error "[SunStat] PATCH /Device/${deviceId} failed: HTTP ${status}"
+    }
+    notifyDevicePatchResult(data, success)
+}
+
+private void dispatchDevicePatch(Map params, Map data) {
+    try {
+        asynchttpPatch("sendDevicePatchCallback", params, data)
+    } catch (Exception e) {
+        log.error "[SunStat] PATCH dispatch failed: ${e.message}"
+        notifyDevicePatchResult(data, false)
+    }
+}
+
+private void notifyDevicePatchResult(Map data, boolean success) {
+    Map completion = data?.completion instanceof Map ? data.completion as Map : [:]
+    if (completion.childDni && completion.operationId) {
+        getChildDevice(safeStr(completion.childDni))?.devicePatchCompleted(safeStr(completion.operationId), success)
+    }
+}
+
+private boolean apiPayloadSucceeded(raw) {
+    try {
+        def payload = raw instanceof String && raw ? new JsonSlurper().parseText(raw) : raw
+        if (payload instanceof Map && payload.errorNumber != null && safeInt(payload.errorNumber, -1) != 0) {
+            log.warn "[SunStat] API error ${payload.errorNumber}: ${payload.errorMessage}"
+            return false
+        }
+        return true
+    } catch (Exception e) {
+        log.warn "[SunStat] Invalid PATCH response: ${e.message}"
+        return false
     }
 }
 

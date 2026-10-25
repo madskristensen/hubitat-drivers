@@ -118,6 +118,8 @@ For advanced users or offline installations:
 
 **Version bump reminder:** When updating a driver, also bump the root `packageManifest.json` version so HPM bundle users get notified.
 
+**Regression checks:** Run `.\tests\Run-Tests.ps1` before submitting changes. See [test setup and limitations](tests/README.md). The suites exercise production Groovy with Hubitat mocks and validate complete bundle coverage and synchronized manifest versions; device testing is still required.
+
 ## Support & Community
 
 - **Questions?** Visit the [Hubitat Community Forums](https://community.hubitat.com/)

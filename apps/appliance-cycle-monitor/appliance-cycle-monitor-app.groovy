@@ -2,7 +2,7 @@
  * Appliance Cycle Monitor
  * Namespace: mads
  * Author:    Mads Kristensen
- * Version:   0.1.0
+ * Version:   0.1.1
  *
  * Turns "dumb" appliances such as washers, dryers, and dishwashers into
  * status-reporting devices. Each appliance gets a child "Appliance Cycle Monitor
@@ -24,12 +24,13 @@
  * it"); a quick peek that re-closes the door does not reset it.
  *
  * Changelog:
+ *   0.1.1 — 2026-10-25 — Restore pending timers after preference changes and honor zero-minute finish delays.
  *   0.1.0 — 2026-05-29 — Initial release: parent app + child driver, power (with hysteresis) / acceleration run detection, door-closed start gate, sustained-vibration delay, finish debounce, 15s door-hold-open reset, manual status override API.
  */
 
 import groovy.transform.Field
 
-@Field static final String  APP_VERSION       = "0.1.0"
+@Field static final String  APP_VERSION       = "0.1.1"
 @Field static final String  CHILD_DRIVER      = "Generic Appliance Device"
 @Field static final String  CHILD_NS          = "mads"
 @Field static final Integer MAX_APPLIANCES    = 10
@@ -235,7 +236,7 @@ private String runSignal(int i) {
         def dev = settings["powerDevice_${i}"]
         if (!dev) { return "hold" }
         BigDecimal watts  = (dev.currentValue("power") ?: 0) as BigDecimal
-        BigDecimal runThr = (settings["powerThreshold_${i}"] ?: DEFAULT_POWER_THRESHOLD) as BigDecimal
+        BigDecimal runThr = (settings["powerThreshold_${i}"] == null ? DEFAULT_POWER_THRESHOLD : settings["powerThreshold_${i}"]) as BigDecimal
         BigDecimal finThr = (settings["powerFinishedThreshold_${i}"] != null
                                 ? settings["powerFinishedThreshold_${i}"]
                                 : DEFAULT_POWER_FINISHED_THRESHOLD) as BigDecimal
@@ -302,7 +303,7 @@ private void evaluateRun(int i) {
             // Start the finish countdown once per quiet period — don't reschedule
             // on every sub-threshold report.
             if (st.pendingFinishAt == null) {
-                int delayMin = (settings["finishDelayMin_${i}"] ?: DEFAULT_FINISH_DELAY_MIN) as int
+                int delayMin = (settings["finishDelayMin_${i}"] == null ? DEFAULT_FINISH_DELAY_MIN : settings["finishDelayMin_${i}"]) as int
                 st.pendingFinishAt = now() + (delayMin * 60_000L)
                 scheduleNearestTimer()
                 logDebug "${settings["applianceName_${i}"]}: quiet — Finished in ${delayMin} min unless it resumes"
@@ -375,7 +376,7 @@ def checkTimers() {
 
         // Pending Ready: the door has been held open long enough after a cycle.
         if (st.pendingReadyAt != null && nowMs >= (st.pendingReadyAt as long)) {
-            if (st.status == "Finished") {
+            if (st.status == "Finished" && i && currentContact(i) == "open") {
                 st.status = "Ready"
                 st.runningSince = null
                 st.pendingFinishAt = null
@@ -489,6 +490,7 @@ def seedAll() {
         evaluateRun(i)
         pushState(i)
     }
+    scheduleNearestTimer()
 }
 
 def refresh() {

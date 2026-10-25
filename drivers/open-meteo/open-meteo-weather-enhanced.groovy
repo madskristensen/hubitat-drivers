@@ -1,7 +1,7 @@
 /**
  *  Open-Meteo Weather Enhanced
  *  Author:  Mads Kristensen
- *  Version: 0.1.5 — 2026-05-25 — Add tomorrow's forecast attributes (high/low/condition/rain probability)
+ *  Version: 0.1.6 — 2026-10-25 — Weight precipitation by actual next-hour overlap, cover all next-six-hour probability buckets, and reject incomplete forecasts without updating freshness.
  *  License: MIT
  *
  *  Free weather driver backed by https://open-meteo.com — no API key required.
@@ -14,6 +14,7 @@
  *  Source: https://github.com/madskristensen/hubitat-drivers
  *
  *  Changelog:
+ *    0.1.6 — 2026-10-25 — Weight precipitation by actual next-hour overlap, cover all next-six-hour probability buckets, and reject incomplete forecasts without updating freshness.
  *    0.1.5 — 2026-05-25 — Add tomorrow's forecast attributes: temperatureMaxTomorrow, temperatureMinTomorrow, weatherTomorrow, precipitationProbabilityTomorrow.
  *    0.1.4 — 2026-05-25 — Fix: precipitationNextHour / precipitationProbabilityNextHour now cover the next 60 minutes
  *                         (previously only sampled the current hour bucket).
@@ -29,8 +30,10 @@
 
 import groovy.transform.Field
 import groovy.json.JsonOutput
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 
-@Field static final String DRIVER_VERSION = "0.1.5"
+@Field static final String DRIVER_VERSION = "0.1.6"
 @Field static final String FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
 // WMO weather interpretation codes — standard Open-Meteo descriptions
@@ -243,6 +246,12 @@ void httpResponse(hubitat.scheduling.AsyncResponse response, Map data = null) {
 		return
 	}
 
+	String invalid = validateForecast(json)
+	if (invalid != null) {
+		setStatus("error: incomplete forecast (${invalid})")
+		return
+	}
+
 	Map u = resolvedUnits()
 	String tUnit = u.temperature_unit == "fahrenheit" ? "°F" : "°C"
 	String wUnit = u.wind_speed_unit == "mph" ? "mph" : "km/h"
@@ -258,6 +267,45 @@ void httpResponse(hubitat.scheduling.AsyncResponse response, Map data = null) {
 }
 
 // ── Parsers ──────────────────────────────────────────────────────────────────
+
+private String validateForecast(Map json) {
+	if (!(json.current instanceof Map) || !(json.hourly instanceof Map) || !(json.daily instanceof Map)) return "missing current/hourly/daily"
+	List currentFields = ["temperature_2m", "relative_humidity_2m", "apparent_temperature", "is_day", "precipitation", "weather_code", "cloud_cover", "pressure_msl", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m"]
+	if (currentFields.any { roundN(json.current[it], 3) == null }) return "current values"
+	List times = json.hourly.time instanceof List ? json.hourly.time : []
+	if (!times) return "hourly times"
+	List hourlyFields = ["temperature_2m", "relative_humidity_2m", "precipitation_probability", "precipitation", "weather_code", "wind_speed_10m", "uv_index"]
+	if (hourlyFields.any { !(json.hourly[it] instanceof List) || json.hourly[it].size() != times.size() || json.hourly[it].any { v -> roundN(v, 3) == null } }) return "hourly values"
+	List dailyFields = ["temperature_2m_max", "temperature_2m_min", "weather_code", "precipitation_probability_max", "uv_index_max"]
+	if (dailyFields.any { !(json.daily[it] instanceof List) || json.daily[it].size() < 2 || json.daily[it].take(2).any { v -> roundN(v, 3) == null } }) return "daily values"
+	try {
+		for (String field : ["sunrise", "sunset"]) {
+			if (!(json.daily[field] instanceof List) || json.daily[field].size() < 2) return "daily ${field}"
+			json.daily[field].take(2).each { LocalDateTime.parse(it as String) }
+		}
+		LocalDateTime current = LocalDateTime.parse(json.current.time as String)
+		LocalDateTime end = current.plusHours(6)
+		long coverage = 0L
+		LocalDateTime previous = null
+		for (def time : times) {
+			LocalDateTime bucketEnd = LocalDateTime.parse(time as String)
+			if (previous != null && (bucketEnd.toEpochSecond(ZoneOffset.UTC) - previous.toEpochSecond(ZoneOffset.UTC)) != 3600L) return "non-hourly times"
+			previous = bucketEnd
+			coverage += overlapSeconds(current, end, bucketEnd)
+		}
+		if (coverage != 6L * 3600L) return "hourly window coverage"
+	} catch (Exception ignored) {
+		return "invalid forecast times"
+	}
+	return null
+}
+
+private long overlapSeconds(LocalDateTime start, LocalDateTime end, LocalDateTime bucketEnd) {
+	LocalDateTime bucketStart = bucketEnd.minusHours(1)
+	LocalDateTime from = start.isAfter(bucketStart) ? start : bucketStart
+	LocalDateTime to = end.isBefore(bucketEnd) ? end : bucketEnd
+	return to.isAfter(from) ? (to.toEpochSecond(ZoneOffset.UTC) - from.toEpochSecond(ZoneOffset.UTC)) : 0L
+}
 
 private void parseCurrent(Map json, String tUnit, String wUnit, String pUnit) {
 	Map cur = (json.current instanceof Map) ? (Map) json.current : null
@@ -311,6 +359,9 @@ private void parseHourly(Map json, String tUnit, String pUnit) {
 		if (startIdx < 0) startIdx = 0
 	}
 
+	LocalDateTime windowStart = LocalDateTime.parse(curTime)
+	LocalDateTime hourEnd = windowStart.plusHours(1)
+	LocalDateTime sixHourEnd = windowStart.plusHours(6)
 	int endIdx = Math.min(times.size(), startIdx + 24)
 	List<Map> blob = []
 	BigDecimal precipNext1h     = 0g
@@ -319,7 +370,6 @@ private void parseHourly(Map json, String tUnit, String pUnit) {
 	BigDecimal currentHourUv    = null
 
 	for (int i = startIdx; i < endIdx; i++) {
-		int rel = i - startIdx
 		Integer hcode = toInt(codes.size() > i ? codes[i] : null)
 		Map entry = [
 			time      : times[i],
@@ -333,13 +383,15 @@ private void parseHourly(Map json, String tUnit, String pUnit) {
 		]
 		blob << entry
 
-		if (rel == 0) currentHourUv = entry.uv as BigDecimal
-		// "Next hour" = remainder of current hour bucket + next hour bucket, so we cover a full 60 min window from now.
-		if (rel < 2) {
-			if (entry.precip != null) precipNext1h += (entry.precip as BigDecimal)
+		if (i == startIdx) currentHourUv = entry.uv as BigDecimal
+		// Open-Meteo labels precipitation and probability by the END of the preceding hour.
+		LocalDateTime bucketEnd = LocalDateTime.parse(times[i])
+		long overlap = overlapSeconds(windowStart, hourEnd, bucketEnd)
+		if (overlap > 0L) {
+			if (entry.precip != null) precipNext1h += (precips[i] as BigDecimal) * overlap / 3600g
 			if (entry.precipProb != null) probNext1hMax = Math.max(probNext1hMax != null ? probNext1hMax : 0, entry.precipProb as Integer)
 		}
-		if (rel < 6) {
+		if (overlapSeconds(windowStart, sixHourEnd, bucketEnd) > 0L) {
 			if (entry.precipProb != null) probNext6hMax = Math.max(probNext6hMax != null ? probNext6hMax : 0, entry.precipProb as Integer)
 		}
 	}

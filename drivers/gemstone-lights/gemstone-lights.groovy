@@ -1,7 +1,7 @@
 /**
  * Gemstone Lights
  * Author:  Mads Kristensen
- * Version: 0.4.22
+ * Version: 0.4.23
  * License: MIT
  *
  * Controls a Gemstone permanent outdoor LED string via the Gemstone cloud REST API.
@@ -9,6 +9,7 @@
  * as encrypted preferences and the driver caches Cognito tokens in state.
  *
  * Changelog:
+ *   0.4.23 — 2026-10-25 — preserve zero color inputs, include brightness in CT deduplication, and bound failed catalog fallback to cached selections.
  *   0.4.22 — 2026-08-06 — Skip pattern cloning, inference, and persistent state rewrites when refresh telemetry is unchanged; invalidate the refresh signature on local pattern changes; reduce lastActivity event churn to one update per 30 minutes.
  *   0.4.21 — 2026-05-23 — Apply the v0.4.20 "don't skip while switch is off" fix to setLevel, setColor, and setColorTemperature. All three now capture the prior switch state, only short-circuit the pattern PUT when the cached value matches AND the switch was already on, and defer state.lastOnState mutation until after the request is built so the buildXRequest helpers can correctly wrap an off→on transition with /onState true. Fixes the same WebCoRE dusk turn-on no-op for level/color/CT commands.
  *   0.4.20 — 2026-05-23 — playEffectByName / setEffect now turns the lights on when the switch is off, even if the named effect was already the active pattern.
@@ -59,7 +60,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.URLEncoder
 
-@Field static final String DRIVER_VERSION = "0.4.22"
+@Field static final String DRIVER_VERSION = "0.4.23"
 @Field static final String COGNITO_URL = "https://cognito-idp.us-west-2.amazonaws.com/"
 @Field static final String JSON_CONTENT_TYPE = "application/json"
 @Field static final String COGNITO_CONTENT_TYPE = "application/x-amz-json-1.1"
@@ -79,7 +80,7 @@ import java.net.URLEncoder
 @Field static final String COLOR_MODE_EFFECTS = "EFFECTS"
 @Field static final String CT_PATTERN_NAME_PREFIX = "Hubitat White Temperature"
 // keep in sync with DRIVER_VERSION
-@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.22"
+@Field static final String USER_AGENT = "Hubitat Gemstone Lights/0.4.23"
 
 metadata {
     definition(
@@ -266,8 +267,8 @@ def setLevel(level, duration = 0) {
 
 def setColor(colorMap) {
     Integer hue = clampPercent(colorMap?.hue ?: 0)
-    Integer saturation = clampPercent(colorMap?.saturation ?: 100)
-    Integer level = clampPercent(colorMap?.level ?: safeInt(device.currentValue("level"), 100))
+    Integer saturation = clampPercent(colorMap?.saturation != null ? colorMap.saturation : 100)
+    Integer level = clampPercent(colorMap?.level != null ? colorMap.level : safeInt(device.currentValue("level"), 100))
 
     def curHue = device.currentValue("hue")
     def curSat = device.currentValue("saturation")
@@ -337,6 +338,7 @@ def setColorTemperature(colorTemperature, level = null, transitionTime = null) {
     def curMode = device.currentValue("colorMode")
     def rawTemp = device.currentValue("colorTemperature")
     Integer currentTemp = (rawTemp != null) ? (rawTemp as Integer) : null
+    Integer currentLevel = safeInt(device.currentValue("level"), -1)
     boolean sessionReady = ensureSession()
     boolean wasOn = isSwitchCurrentlyOn()
 
@@ -359,7 +361,7 @@ def setColorTemperature(colorTemperature, level = null, transitionTime = null) {
     }
 
     // G-6: only skip if switch already on, already in CT mode, and temperature matches
-    if (sessionReady && wasOn && curMode == "CT" && currentTemp != null && currentTemp == kelvin) {
+    if (sessionReady && wasOn && curMode == "CT" && currentTemp != null && currentTemp == kelvin && currentLevel == targetLevel) {
         state.lastOnState = true
         debugLog "setColorTemperature: already ${kelvin}K in CT mode and switch on — skipping pattern PUT"
         return
@@ -761,8 +763,8 @@ private Map buildLevelRequest(Integer level) {
 
 private Map buildColorRequest(Map color) {
     Integer hue = clampPercent(color?.hue ?: 0)
-    Integer saturation = clampPercent(color?.saturation ?: 100)
-    Integer level = clampPercent(color?.level ?: safeInt(device.currentValue("level"), 100))
+    Integer saturation = clampPercent(color?.saturation != null ? color.saturation : 100)
+    Integer level = clampPercent(color?.level != null ? color.level : safeInt(device.currentValue("level"), 100))
 
     Map pattern = currentOrDefaultPattern()
     pattern.name = "Hubitat Solid Color"
@@ -1699,7 +1701,11 @@ private void handleEffectCatalogRefreshFailure() {
             logAvailableEffectNames()
         }
         pending.each { request ->
-            processPendingEffectRequest(request as Map)
+            if (cachedEffectRequestResolvable(request as Map)) {
+                processPendingEffectRequest(request as Map)
+            } else {
+                log.error "[Gemstone] Effect selection is unavailable in cache after catalog failure; retry manually when connectivity returns."
+            }
         }
         return
     }
@@ -1707,6 +1713,24 @@ private void handleEffectCatalogRefreshFailure() {
     if (pending) {
         log.error "[Gemstone] Effect catalog refresh failed before pending effect requests could be resolved."
     }
+}
+
+private boolean cachedEffectRequestResolvable(Map request) {
+    String type = safeString(request?.type)
+    String patternId
+    if (type == "name") {
+        String name = resolveEffectCatalogName(safeString(request.value))
+        patternId = name ? safeString((state.effectCatalog as Map)[name]) : ""
+    } else if (type == "index") {
+        patternId = state.effectIndex instanceof Map ? safeString(state.effectIndex[safeInt(request.value, -1).toString()]) : ""
+    } else if (type in ["next", "previous"]) {
+        List indexes = availableEffectIndexes()
+        return indexes && indexes.every { index ->
+            String id = safeString(state.effectIndex[index.toString()])
+            effectNameForPatternId(id) && effectPatternForId(id)
+        }
+    }
+    return patternId && effectNameForPatternId(patternId) && effectPatternForId(patternId)
 }
 
 private void logEffectCatalogCollision(Map entry) {

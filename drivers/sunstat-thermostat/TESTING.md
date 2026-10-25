@@ -11,6 +11,12 @@
 
 ## Prerequisites
 
+### Offline reliability regressions (parent 0.1.13 / child 0.1.12, 2026-10-25)
+
+See `tests\integration-drivers\README.md` at the repository root. The executable suite compiles both actual drivers and verifies C/F writes in both directions, API step/bounds handling, raw floor-away preservation, boost activation/cancellation ordering, prior schedule preservation, failed/missing restoration callbacks, restart recovery, stale callback rejection, authentication/rate-limit/API errors, and confirmed home/away retry/deduplication.
+
+Later hardware checks: test opposite hub/API temperature units and inspect the applied setpoint. Test boost with schedule initially enabled and disabled. During a controlled connectivity outage at expiry, confirm saved restoration state persists and is applied after connectivity returns; do not leave a heating boost unattended. Home/away must only change after a successful PATCH or poll. These device/cloud checks were not executed for this release. Older manual scenarios below are not evidence of passing tests.
+
 Before running any test:
 
 - **Hubitat hub** has internet connectivity (cloud driver requires outbound HTTPS)
@@ -484,7 +490,7 @@ Before running any test:
 
 **Expected:**
 
-- Immediately after `setAway()`: parent emits an event `awayMode = "away"` (optimistic update)
+- After a successful `setAway()` PATCH: parent emits `awayMode = "away"`; failures leave the prior confirmed value unchanged and may be retried
 - Logs show a successful HTTP `PATCH` call or equivalent success message
 - Watts app reflects the away state within 5–10 seconds
 - All child devices show `awayMode = "away"` on the next poll cycle
@@ -512,7 +518,7 @@ Before running any test:
 
 **Expected:**
 
-- Immediately after `setHome()`: parent emits an event `awayMode = "home"` (optimistic update)
+- After a successful `setHome()` PATCH: parent emits `awayMode = "home"`; failures leave the prior confirmed value unchanged and may be retried
 - Logs show successful HTTP call
 - Watts app reflects home state within 5–10 seconds
 - All child devices show `awayMode = "home"` on next poll
@@ -542,7 +548,7 @@ Before running any test:
 
 - Both calls produce the same API behavior as `setAway()` and `setHome()`
 - Logs show successful HTTP `PATCH` calls
-- Attribute updates optimistically and reconciles after poll
+- Attribute updates after a successful PATCH and reconciles after poll; failed commands remain retryable
 - No errors or stack traces
 
 **Actual:**

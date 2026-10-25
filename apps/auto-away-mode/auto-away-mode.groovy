@@ -2,6 +2,7 @@
  * Auto Away Mode
  *
  * Changelog:
+ *   0.13.1 — 2026-10-25 — Resume evaluation on location mode changes and honor a zero-minute cooldown.
  *   0.13.0 — 2026-08-06 — Reduce event and scheduler churn, retain only significant decision history, and run lock actions only after actual mode changes.
  *   0.12.0 — 2026-05-22 — Skip full evaluation on activity events that can't change the current mode and only log.info on real mode changes to drastically reduce hub load and log noise.
  *   0.11.0 — 2026-05-20 — Fix asymmetric cooldown: Home transitions now bypass the mode-change cooldown so arriving home is never delayed.
@@ -20,7 +21,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.13.0"
+@Field static final String VERSION = "0.13.1"
 @Field static final Integer MAX_HISTORY_ITEMS = 5
 @Field static final Integer EVALUATION_DEBOUNCE_SECONDS = 1
 
@@ -156,6 +157,7 @@ private void initialize() {
     state.presenceInactiveSinceTs = presenceSensors?.size() ? now() : null
     state.decisionHistory = ((state.decisionHistory instanceof List) ? state.decisionHistory : []).take(MAX_HISTORY_ITEMS)
 
+    subscribe(location, "mode", "locationModeHandler")
     if (presenceSensors) {
         subscribe(presenceSensors, "presence", "presenceHandler")
     }
@@ -172,6 +174,15 @@ private void initialize() {
         subscribe(awayPrerequisiteLocks, "lock", "awayPrerequisiteLockHandler")
     }
     queueEvaluation(EVALUATION_DEBOUNCE_SECONDS)
+}
+
+def locationModeHandler(evt) {
+    if (isPausedByCurrentMode()) {
+        unschedule("evaluateOccupancy")
+        state.nextEvaluationTs = null
+    } else {
+        queueEvaluation(EVALUATION_DEBOUNCE_SECONDS)
+    }
 }
 
 def presenceHandler(evt) {
@@ -446,7 +457,7 @@ private Integer minutesSince(Long lastTs, Long nowTs) {
 }
 
 private boolean cooldownElapsed(Long nowTs) {
-    Integer cooldownMinutes = (modeChangeCooldownMinutes as Integer) ?: 20
+    Integer cooldownMinutes = modeChangeCooldownMinutes == null ? 20 : modeChangeCooldownMinutes as Integer
     Long lastModeChangeTs = state.lastModeChangeTs as Long
     if (!lastModeChangeTs || cooldownMinutes <= 0) {
         return true
@@ -514,7 +525,7 @@ private void scheduleNextEvaluation(Long nowTs, Integer awayThresholdMinutes, St
     }
 
     if (targetMode && location.mode != targetMode) {
-        Integer cooldownMinutes = (modeChangeCooldownMinutes as Integer) ?: 20
+        Integer cooldownMinutes = modeChangeCooldownMinutes == null ? 20 : modeChangeCooldownMinutes as Integer
         Long lastModeChangeTs = state.lastModeChangeTs as Long
         if (lastModeChangeTs && cooldownMinutes > 0) {
             Long cooldownDelayMs = (cooldownMinutes * 60000L) - (nowTs - lastModeChangeTs)

@@ -19,6 +19,14 @@ Controls a Fully Kiosk Browser instance over your local network. The tablet push
 
 Tested on Mads Kristensen's two wall-mounted tablets (Bathroom + Kitchen).
 
+### Reliability changes in v0.6.3
+
+- Mute retains the prior volume until unmute, including a saved volume of zero. `volumeUp()` works from zero; an explicit `setVolume()` exits mute.
+- Brightness inputs are clamped to 0–100 and callback events match the effective transmitted percentage. Levels 1 and 2 now mean percentages (raw brightness 3 and 5), not legacy raw 0–255 exceptions.
+- Debug logging's 30-minute timeout survives initialization after saving preferences.
+
+These changes have executable local Groovy regression coverage using the production source and Hubitat doubles, not new tablet/HTTP integration testing. Test entry point: `tests\device-drivers\local-reliability\ReliabilityTest.groovy` (run from the repository root).
+
 ---
 
 ## Install
@@ -114,6 +122,7 @@ Fork maintained by **Mads Kristensen** — https://github.com/madskristensen
 
 | Version | Date       | Notes |
 |---------|------------|-------|
+| 0.6.3   | 2026-10-25 | Restore saved mute volume (including zero); allow volume-up from zero; normalize brightness commands and callback events to 0–100; preserve debug auto-disable timers. |
 | 0.6.2   | 2026-06-27 | New command: `setStartURL(url)` — sets the Fully Kiosk **start page** (persists via FKB's `startURL` string setting). Complements `loadURL(url)` (loads a URL right now, without changing the start page) and `loadStartURL()` (reloads the configured start page). |
 | 0.6.1   | 2026-05-23 |
 | 0.5.0   | 2026-05-18 |

@@ -2,8 +2,8 @@
   "packageName": "Appliance Cycle Monitor",
   "author": "Mads Kristensen",
   "minimumHEVersion": "2.3.0",
-  "dateReleased": "2026-05-29",
-  "version": "0.1.0",
+  "dateReleased": "2026-10-25",
+  "version": "0.1.1",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/apps/appliance-cycle-monitor/README.md",
   "apps": [
@@ -16,7 +16,7 @@
       "iconX2Url": "https://github.githubassets.com/favicons/favicon.png",
       "required": true,
       "oauth": false,
-      "version": "0.1.0"
+      "version": "0.1.1"
     }
   ],
   "drivers": [

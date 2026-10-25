@@ -1,5 +1,11 @@
 # Calendar Todo Switch
 
+## 0.7.3 — 2026-10-25
+
+Reconcile recurring overrides and cancellations before title filtering; preserve old COUNT rules and skip invalid month-end/leap-day dates.
+
+Single-instance `RECURRENCE-ID` changes are matched by UID and original start time before title filtering. Moved or renamed replacements suppress their originals, and `STATUS:CANCELLED` suppresses an instance or entire series. Month-end and leap-day rules skip invalid dates without consuming COUNT. `RANGE=THISANDFUTURE`, WKST overrides, and exotic RRULE fields remain unsupported. A maximum of 1,000 recurrence periods inside the active window is expanded per series; earlier COUNT history no longer consumes that budget.
+
 Subscribe a Hubitat virtual device to any web calendar (iCal / webcal feed) and turn flagged events into a **switch** that turns on at the event's start time. The event title (minus its prefix) is published as the `todo` attribute, so dashboards like **SharpTools** can render the current chore on a tile and tap to dismiss it.
 
 Use it as a lightweight todo system: drop an event in your calendar prefixed with ✅ (or any keyword you pick), and Hubitat will surface it at the right moment. Recurring events work — each weekly chore fires fresh every week.

@@ -47,6 +47,8 @@ When rules indicate occupancy or vacancy, it sets your hub Location Mode to your
 - Presence not-present time is tracked separately so Away waits for the full window.
 - Lock unlock events (from the "activity locks" picker) count as occupancy activity.
 - Evaluation is event-driven and debounced instead of polling on a fixed timer.
+- Location mode changes trigger evaluation, so leaving a paused mode resumes decisions even when sensors remain quiet.
+- A zero-minute mode-change cooldown disables the cooldown; Home arrivals still bypass any positive cooldown.
 - Activity events that reinforce the current Home mode skip the full evaluation pass and reuse the pending Away check.
 - Routine no-change evaluations are written to `log.debug`; mode changes still emit `log.info`.
 - Decision history retains only manual evaluations and actual mode changes to minimize persisted state.
@@ -57,6 +59,7 @@ When rules indicate occupancy or vacancy, it sets your hub Location Mode to your
 
 | Version | Date       | Notes |
 |---------|------------|-------|
+| 0.13.1  | 2026-10-25 | Resume evaluations when leaving paused modes and honor a zero-minute cooldown. |
 | 0.13.0  | 2026-08-06 | Reduced subscribed events and scheduler churn, limited persisted history, and stopped repeated lock actions when the mode is unchanged. |
 | 0.12.0  | 2026-05-22 | Skip full evaluation on activity events that can't change the current mode and only log.info on real mode changes to drastically reduce hub load and log noise. |
 | 0.10.0  | 2026-05-20 | Added optional Away prerequisite locks — Away is only evaluated when all designated locks are locked; locking them triggers an immediate re-evaluation. |

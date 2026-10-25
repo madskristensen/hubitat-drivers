@@ -2,11 +2,11 @@
   "packageName": "Open-Meteo Weather Enhanced",
   "minimumHEVersion": "2.2.0",
   "author": "Mads Kristensen",
-  "version": "0.1.3",
-  "dateReleased": "2026-05-25",
+  "version": "0.1.6",
+  "dateReleased": "2026-10-25",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/open-meteo/README.md",
-  "releaseNotes": "v0.1.3: Renamed to 'Open-Meteo Weather Enhanced' to avoid name clash with the built-in Hubitat Open-Meteo driver. v0.1.2: Added today's high/low temperature attributes. v0.1.0: Initial release.",
+  "releaseNotes": "v0.1.6: Weight precipitation by actual next-hour overlap, cover all next-six-hour probability buckets, and reject incomplete forecasts without updating freshness.",
   "drivers": [
     {
       "id": "576b2cc8-81a6-4525-a4e3-adc8d075fd82",
@@ -14,7 +14,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/open-meteo/open-meteo-weather-enhanced.groovy",
       "required": true,
-      "version": "0.1.3"
+      "version": "0.1.6"
     }
   ]
 }

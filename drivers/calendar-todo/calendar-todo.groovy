@@ -1,7 +1,7 @@
 /**
  *  Calendar Todo Switch
  *  Author:  Mads Kristensen
- *  Version: 0.7.2 — 2026-08-06 — Reduce idle polling work by filtering before recurrence expansion, fast-forwarding unbounded daily/weekly recurrences, and suppressing redundant events, schedules, and state writes.
+ *  Version: 0.7.3 — 2026-10-25 — Reconcile recurring overrides and cancellations before title filtering; preserve old COUNT rules and skip invalid month-end/leap-day dates.
  *  License: MIT
  *
  *  Subscribes to a webcal/iCal feed (https://...) and exposes a Switch that
@@ -19,6 +19,7 @@
  *  weekly chore fires fresh every week.
  *
  *  Changelog:
+ *    0.7.3 — 2026-10-25 — Reconcile recurring overrides and cancellations before title filtering; preserve old COUNT rules and skip invalid month-end/leap-day dates.
  *    0.7.2 — 2026-08-06 — Reduce idle polling work: filter non-todo events before recurrence expansion; fast-forward old unbounded daily/weekly rules near the active window; use sets for EXDATE/trigger lookups; and skip unchanged preview/count events, triggered-state writes, and exact-trigger rescheduling.
  *    0.7.1
  *    0.7.0 — 2026-05-26 — Quality pass.Perf: parse emoji rules once per poll (was per matching event), single-pass iCal line unfolder (was 2x list allocation), cheap base64 sentinel check (was anchored regex over the entire 1+ MB body). Correctness: queued/older matching occurrences are now all marked triggered (previously only the most-recent fired and older ones could keep being "missed"); exact-trigger runIn now overwrites (was stacking on every poll); synthetic UIDs no longer depend on parse-order index; iCal unescape order fixed with sentinel; URL scheme guard rejects non-http(s); response.getStatus() wrapped in try/catch. Quality: unified ISO timestamps to hub zone; added logd helper; removed dead parseIcsDateTime; fixed (state?:[]) cast precedence; documented WKST limitation.
@@ -48,7 +49,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
-@Field static final String DRIVER_VERSION = "0.7.2"
+@Field static final String DRIVER_VERSION = "0.7.3"
 @Field static final String DEFAULT_PREFIX = "\u2705" // ✅
 @Field static final String DEFAULT_FALLBACK_EMOJI = "\uD83D\uDD14" // 🔔
 @Field static final String DEFAULT_IDLE_ICON = "\u2714\uFE0F" // ✔️ (shown when no active todo)
@@ -352,7 +353,7 @@ void processEvents(List<Map> events) {
 
 	// Filter before recurrence expansion. Large feeds often contain many unrelated
 	// recurring events, and expanding those on every poll is pure overhead.
-	List<Map> candidates = events.findAll { Map ev -> eventMatches(ev, prefixStr, mode) }
+	List<Map> candidates = reconcileOverrides(events).findAll { Map ev -> eventMatches(ev, prefixStr, mode) }
 
 	// Parse emoji rules ONCE per poll instead of per matching event
 	List<List> rules = parseEmojiMap(emojiMap as String)
@@ -430,6 +431,40 @@ void processEvents(List<Map> events) {
 		emitAttributeIfChanged("nextTodoStart", idleTextValue())
 	}
 	updateExactTrigger(nextEvent, now)
+}
+
+List<Map> reconcileOverrides(List<Map> events) {
+	Map masters = [:]
+	Map overrides = [:]
+	for (Map ev : events) {
+		if (ev.recurrenceIdMs != null) {
+			overrides["${ev.uid}::${ev.recurrenceIdMs}".toString()] = ev
+		} else {
+			masters[ev.uid] = ev
+		}
+	}
+	Map overridesByUid = overrides.values().groupBy { it.uid }
+	List<Map> result = []
+	for (Map master : masters.values()) {
+		if (master.status == "CANCELLED") continue
+		Map copy = new LinkedHashMap(master)
+		copy.exdates = new ArrayList((master.exdates ?: []) as List)
+		for (Map override : (overridesByUid[master.uid] ?: [])) {
+			copy.exdates << (override.recurrenceIdMs as Long)
+		}
+		result << copy
+	}
+	for (Map override : overrides.values()) {
+		Map master = masters[override.uid]
+		if (override.status == "CANCELLED" || master?.status == "CANCELLED") continue
+		Map replacement = new LinkedHashMap(override)
+		if (!replacement.containsKey("summary")) replacement.summary = master?.summary
+		if (replacement.startMs == null) replacement.startMs = replacement.recurrenceIdMs
+		replacement.uid = "${override.uid}::${override.recurrenceIdMs}".toString()
+		replacement.remove("rrule")
+		result << replacement
+	}
+	return result
 }
 
 private boolean eventMatches(Map event, String prefixStr, String mode) {
@@ -531,7 +566,7 @@ List<List> parseEmojiMap(String text) {
 
 // Unfolds RFC 5545 line folding (continuation lines start with space or tab)
 // in a single pass and walks VEVENT blocks, pulling DTSTART/DTEND/SUMMARY/UID/
-// RRULE/EXDATE. Ignores VTIMEZONE definitions.
+// RRULE/EXDATE/STATUS/RECURRENCE-ID. Ignores VTIMEZONE definitions.
 //
 // Note on WKST: this parser does not honor RRULE WKST; week boundaries assume
 // Monday (the RFC default). Calendars that explicitly set WKST=SU may compute
@@ -571,6 +606,13 @@ List<Map> parseICal(String body) {
 					break
 				case "UID":
 					current.uid = value
+					break
+				case "STATUS":
+					current.status = value.trim().toUpperCase()
+					break
+				case "RECURRENCE-ID":
+					Map recurrenceId = parseIcsDateTimeFull(value, params)
+					if (recurrenceId != null) current.recurrenceIdMs = recurrenceId.ms
 					break
 				case "DTSTART":
 					Map parsed = parseIcsDateTimeFull(value, params)
@@ -727,11 +769,24 @@ List<Map> expandOccurrences(List<Map> events, long windowStart, long windowEnd) 
 
 		int emitted = 0
 		int safety = 0
-		// COUNT requires accounting for every prior occurrence. Unbounded rules can
-		// safely jump close to the active window instead of iterating from an old DTSTART.
-		ZonedDateTime cursor = countLimit == null ? fastForwardRecurrenceCursor(start, freq, interval, windowStart) : start
-		while (safety++ < MAX_RRULE_INSTANCES) {
-			if (cursor.toInstant().toEpochMilli() > endLimit) break
+		ZonedDateTime cursor = fastForwardRecurrenceCursor(start, freq, interval, windowStart)
+		long cycle = 0L
+		if (freq == "DAILY") {
+			cycle = ((cursor.toLocalDate().toEpochDay() - start.toLocalDate().toEpochDay()) / interval) as long
+			emitted = cycle as int
+		} else if (freq == "WEEKLY") {
+			cycle = ((cursor.toLocalDate().toEpochDay() - start.toLocalDate().toEpochDay()) / (7L * interval)) as long
+			if (cycle > 0 && byDays) {
+				int firstWeekCount = byDays.count { it.value >= start.dayOfWeek.value }
+				emitted = (firstWeekCount + (cycle - 1L) * byDays.size()) as int
+			} else {
+				emitted = cycle as int
+			}
+		}
+		while (safety < MAX_RRULE_INSTANCES) {
+			if (cursor.toInstant().toEpochMilli() >= windowStart) safety++
+			ZonedDateTime periodStart = (freq == "WEEKLY" && byDays) ? cursor.with(DayOfWeek.MONDAY) : cursor
+			if (periodStart.toInstant().toEpochMilli() > endLimit) break
 			if (countLimit != null && emitted >= countLimit) break
 
 			List<ZonedDateTime> occurrences
@@ -747,6 +802,9 @@ List<Map> expandOccurrences(List<Map> events, long windowStart, long windowEnd) 
 						if (!withTime.isBefore(start)) occurrences << withTime
 					}
 				}
+			} else if ((freq == "MONTHLY" || freq == "YEARLY") && cursor.dayOfMonth != start.dayOfMonth) {
+				// RFC 5545 invalid dates are skipped, not clamped or counted.
+				occurrences = []
 			} else {
 				occurrences = [cursor]
 			}
@@ -771,15 +829,16 @@ List<Map> expandOccurrences(List<Map> events, long windowStart, long windowEnd) 
 				emitted++
 			}
 
-			// Advance cursor by INTERVAL of FREQ
+			// Always advance from DTSTART so month-end/leap-day anchors cannot drift.
+			cycle++
 			switch (freq) {
-				case "DAILY":   cursor = cursor.plusDays(interval); break
-				case "WEEKLY":  cursor = cursor.plusWeeks(interval); break
-				case "MONTHLY": cursor = cursor.plusMonths(interval); break
-				case "YEARLY":  cursor = cursor.plusYears(interval); break
+				case "DAILY":   cursor = start.plusDays(cycle * interval); break
+				case "WEEKLY":  cursor = start.plusWeeks(cycle * interval); break
+				case "MONTHLY": cursor = start.plusMonths(cycle * interval); break
+				case "YEARLY":  cursor = start.plusYears(cycle * interval); break
 				default:
 					logd "unsupported FREQ '${freq}' on '${summary}'"
-					cursor = cursor.plusYears(100) // bail
+					safety = MAX_RRULE_INSTANCES
 			}
 		}
 	}
@@ -797,8 +856,8 @@ private ZonedDateTime fastForwardRecurrenceCursor(ZonedDateTime start, String fr
 			units = (window.toLocalDate().toEpochDay() - start.toLocalDate().toEpochDay()) / 7L
 			break
 		default:
-			// Repeated plusMonths/plusYears can clamp month-end and leap-day dates;
-			// aggregating those increments would change recurrence semantics.
+			// Walk anchored monthly/yearly periods so invalid dates can be skipped
+			// without consuming COUNT.
 			return start
 	}
 

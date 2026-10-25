@@ -4,7 +4,7 @@ Local LAN control for the **Touchstone Sideline Elite** electric LED fireplace �
 
 **Compatibility:** Hubitat Elevation C-7, C-8 | Platform 2.3.3.x or later | MIT License
 
-> **Status: v0.2.2 — beta.
+> **Status: v0.2.3 — beta.
 >
 > **Killer feature:** Works out-of-the-box for Touchstone Sideline Elite; adapts to other Touchstone models
 
@@ -391,6 +391,14 @@ Then the default DP assignments already work! Just set **Device Profile** back t
 
 ## Known Quirks & Limitations
 
+### Command ordering and response correlation (v0.2.3)
+
+The latest power command supersedes opposite queued/retry power writes, including an OFF issued before an ON is confirmed. An already transmitted write cannot be recalled; it is followed by the latest requested state. Retry timers never discard another active request.
+
+Only valid replies with the active request's sequence number and a compatible command acknowledge a request. Unsolicited pushes continue updating attributes but cannot satisfy a status query or diagnostic capture. CRC failures, nonzero return codes, and undecodable payloads leave the timeout/retry path armed. This requires firmware that echoes request sequence numbers; hardware verification of that behavior is still required for other Tuya models.
+
+Offline source-loading regression tests are documented in `tests\integration-drivers\README.md` at the repository root.
+
 ### Single TCP Connection
 
 **Tuya WiFi modules allow only one LAN connection at a time.** If the driver can't connect:
@@ -486,6 +494,7 @@ Some remote buttons (log brightness, flame tempo, remote timer) don't map to Tuy
 
 ## Changelog
 
+- **v0.2.3 (2026-10-25):** Fixed immediate opposite power-command supersession, correlated command/status acknowledgements, and retry timers overwriting active requests. Added offline executable regressions.
 - **v0.2.2 (2026-08-06):** Reduced idle hub load by fast-pathing heartbeat acknowledgements, coalescing periodic refreshes while one is queued or in flight, avoiding duplicate reconnect refreshes, throttling liveness persistence and `lastActivity`, and suppressing unchanged socket/DP attributes. Heartbeat timing remains unchanged.
 - **v0.2.1 (2026-06-11):** Hardened the Tuya Cloud integration. All cloud calls are now **non-blocking** (async), so they never stall command or socket handling on the single driver thread.
 - **v0.2.0 (2026-06-11):** Added **Tuya Cloud local-key management**, so the local key never has to be extracted by hand. New `refreshLocalKey()` command plus automatic key fetch — on startup when the **Local key** field is blank, and again whenever the device becomes unreachable after exhausting retries (handles the key rotating after a WiFi re-pair). With cloud credentials set you only need the Device ID (the "Virtual ID" from the Tuya/Smart Life app). The **Local key** preference is now optional. Auto-recovery turns on simply by entering the Access ID + Access Secret (with data center); no separate enable/auto-refresh toggles. Adds the `localKeyStatus` attribute. The secret is stored as a password preference and only sent to Tuya's signed OpenAPI endpoints.

@@ -10,6 +10,7 @@
  *  Goal: keep as in-repo fork — upstream is unlikely to merge after 4.5y silence.
  *
  *  Changelog:
+ *    0.6.3 — 2026-10-25 — Preserve mute restoration volume, accept zero volume, normalize brightness events, and retain logging timeouts.
  *    0.6.2 — 2026-06-27 — Add setStartURL(url) command to set the Fully Kiosk start page (FKB startURL string setting); complements loadURL() (load now) and loadStartURL() (reload start page).
  *    0.6.1
  *    0.6.0 — 2026-05-21 — Perf improvements
@@ -23,7 +24,7 @@
 
 import groovy.transform.Field
 
-@Field static final String VERSION = "0.6.2"
+@Field static final String VERSION = "0.6.3"
 
 metadata {
     definition (name: "Fully Kiosk Browser", namespace: "mads", author: "Mads Kristensen",
@@ -119,14 +120,10 @@ metadata {
 // *** [ Initialization Methods ] *********************************************
 def installed() {
     logger("[installed] ", "trace")
-    // C2: schedule debug-log auto-disable on first install if user has logEnable on
-    if (logEnable) runIn(1800, "logsOff")
     initialize()
 }
 def updated() {
     logger("[updated] ", "trace")
-    // C2: re-arm 30-min auto-disable whenever preferences are saved with logEnable on
-    if (logEnable) runIn(1800, "logsOff")
     initialize()
 }
 def initialize() {
@@ -134,6 +131,7 @@ def initialize() {
     logger(logprefix, "trace")
 
     unschedule()
+    if (logEnable) runIn(1800, "logsOff")
 
     // Fallback to IP address for deviceNetworkId; getMACFromIP is not available in recent Hubitat versions
     if (!settings.serverIP?.trim()) {
@@ -303,7 +301,7 @@ def on() {
 def off() {
     def logprefix = "[off] "
     logger(logprefix + "state.siren:${state.siren}")
-    if (state.siren) {
+    if (state.siren != null) {
         setVolume(state.siren)
     }
     state.remove("siren")
@@ -332,17 +330,9 @@ def setLevel(level) {
         logger(logprefix + "ERROR: level '${level}' is not numeric: ${e.message}", "error")
         return
     }
-    // Special case: levels 1 and 2 pass through as raw FKB values (1/255, 2/255)
-    // so users can reach FKB's true minimum brightness. Without this, 1→3 and 2→5
-    // after rounding, making raw 1 and 2 unreachable via setLevel.
-    int fkbBrightness
-    int levelInt = levelBD.toInteger()
-    if (levelInt == 1 || levelInt == 2) {
-        fkbBrightness = levelInt
-    } else {
-        fkbBrightness = Math.round(levelBD * 2.55).toInteger()
-    }
-    fkbBrightness = Math.min(255, Math.max(0, fkbBrightness))
+    levelBD = Math.min(100G, Math.max(0G, levelBD))
+    int fkbBrightness = Math.round(levelBD * 2.55).toInteger()
+    int effectiveLevel = Math.round(fkbBrightness / 2.55).toInteger()
     def postParams = [
         uri: "http://${serverIP}:${serverPort}/?type=json&password=${serverPassword}&cmd=setStringSetting&key=screenBrightness&value=${fkbBrightness}",
         requestContentType: 'application/json',
@@ -351,7 +341,7 @@ def setLevel(level) {
     Map safeParams = postParams.clone()
     safeParams.uri = safeParams.uri?.replaceAll(/(?i)password=[^&]+/, 'password=***')
     logger(logprefix + safeParams)
-    asynchttpPost("setLevelCallback", postParams, [level: level])
+    asynchttpPost("setLevelCallback", postParams, [level: effectiveLevel])
 }
 def setLevelCallback(response, data) {
     def logprefix = "[setLevelCallback] "
@@ -364,7 +354,7 @@ def setLevelCallback(response, data) {
         // Pick #7: gate checkInterval — value never changes so all subsequent emits are suppressed
         emitIfChanged("checkInterval", 120,
                       "${device.displayName} checkInterval is 120")
-        sendEvent([name:"level", value:data.level,
+        sendEvent([name:"level", value:data.level, unit:"%",
                    descriptionText:"${device.displayName} level is ${data.level}"])
     } else {
         Integer status = response?.status as Integer
@@ -487,6 +477,9 @@ def speak(text, volume = -1, voice = "") {
     }
 }
 def setVolume(volumeLevel) {
+    writeVolume(volumeLevel)
+}
+private void writeVolume(volumeLevel, boolean preserveMute = false) {
     def logprefix = "[setVolume] "
     logger(logprefix + "volumeLevel:${volumeLevel}")
     logger(logprefix + "volumeStream:${volumeStream}")
@@ -518,9 +511,11 @@ def setVolume(volumeLevel) {
         sendCommandPost("cmd=setAudioVolume&level=${vl}&stream=${vs}")
         sendEvent([name:"volume", value:vl,
                    descriptionText:"${device.displayName} volume is ${vl}"])
-        state.remove("mute")
-        sendEvent([name:"mute", value:"unmuted",
-                   descriptionText:"${device.displayName} mute is unmuted"])
+        if (!preserveMute) {
+            state.remove("mute")
+            sendEvent([name:"mute", value:"unmuted",
+                       descriptionText:"${device.displayName} mute is unmuted"])
+        }
     } else {
         logger(logprefix + "volumeLevel or volumeStream out of range.")
     }
@@ -528,8 +523,8 @@ def setVolume(volumeLevel) {
 def volumeUp() {
     def logprefix = "[volumeUp] "
     logger(logprefix + "current volume: ${device.currentValue('volume')}", "debug")
-    def newVolume = state.mute ?: device.currentValue("volume")
-    if (newVolume) {
+    def newVolume = state.mute != null ? state.mute : device.currentValue("volume")
+    if (newVolume != null) {
         newVolume = newVolume.toInteger() + 10
         newVolume = Math.min(newVolume, 100)
         setVolume(newVolume)
@@ -540,8 +535,8 @@ def volumeUp() {
 def volumeDown() {
     def logprefix = "[volumeDown] "
     logger(logprefix + "current volume: ${device.currentValue('volume')}", "debug")
-    def newVolume = state.mute ?: device.currentValue("volume")
-    if (newVolume) {
+    def newVolume = state.mute != null ? state.mute : device.currentValue("volume")
+    if (newVolume != null) {
         newVolume = newVolume.toInteger() - 10
         newVolume = Math.max(newVolume, 0)
         setVolume(newVolume)
@@ -552,12 +547,13 @@ def volumeDown() {
 def mute() {
     def logprefix = "[mute] "
     logger(logprefix, "debug")
-    if (!state.mute) {
+    if (state.mute == null) {
         // Save current volume BEFORE calling async setVolume()
-        def currentVolume = device.currentValue("volume") ?: 100
+        def currentVolume = device.currentValue("volume")
+        if (currentVolume == null) currentVolume = 100
         state.mute = currentVolume
         logger(logprefix + "Previous volume saved to state.mute:${state.mute}", "debug")
-        setVolume(0)
+        writeVolume(0, true)
         sendEvent([name:"mute", value:"muted",
                    descriptionText:"${device.displayName} mute is muted"])
     } else {
@@ -567,7 +563,7 @@ def mute() {
 def unmute() {
     def logprefix = "[unmute] "
     logger(logprefix + state.mute)
-    if (state.mute) {
+    if (state.mute != null) {
         setVolume(state.mute)
     } else {
         logger(logprefix + "Not muted.")
@@ -669,8 +665,9 @@ def sirenStart(eventValue) {
     logger(logprefix + "sirenFile:${sirenFile}")
     logger(logprefix + "sirenVolume:${sirenVolume}")
     logger(logprefix + "eventValue:${eventValue}")
-    if (sirenVolume && sirenFile && eventValue) {
-        state.siren = state.mute ?: (device.currentValue("volume") ?: 100)
+    if (sirenVolume != null && sirenFile && eventValue) {
+        def previousVolume = state.mute != null ? state.mute : device.currentValue("volume")
+        state.siren = previousVolume != null ? previousVolume : 100
         logger(logprefix + "Previous volume saved to state.siren:${state.siren}")
         unmute()
         setVolume(sirenVolume)

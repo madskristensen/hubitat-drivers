@@ -11,6 +11,12 @@
 
 ## Pre-flight Checklist
 
+### Offline reliability regressions (v0.2.3, 2026-10-25)
+
+See `tests\integration-drivers\README.md` at the repository root for the executable production-source suite. Synthetic encrypted Tuya frames exercise immediate ON/OFF supersession in both directions, retry-timer preservation of an active request, fragmented-frame buffering, strict sequence/command matching, unsolicited pushes, invalid plaintext, CRC errors, and nonzero return codes.
+
+Later hardware checks: issue ON then OFF before confirmation (and the reverse); verify the final command wins. Capture a query/reply pair to verify firmware echoes request sequence numbers. Unsolicited pushes must still update attributes without completing another request or populating a diagnostic baseline. These hardware checks were not executed for this release; the older manual scenarios below remain a baseline, not a record of passing results.
+
 Complete every item before running any test. Skipping these is the most common source of false failures.
 
 - [ ] **Smart Life / Tuya app is CLOSED on every phone and tablet on the network.**

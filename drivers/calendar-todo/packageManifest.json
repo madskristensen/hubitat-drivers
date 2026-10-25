@@ -2,11 +2,11 @@
   "packageName": "Calendar Todo Switch",
   "minimumHEVersion": "2.2.0",
   "author": "Mads Kristensen",
-  "version": "0.7.2",
-  "dateReleased": "2026-08-06",
+  "version": "0.7.3",
+  "dateReleased": "2026-10-25",
   "communityLink": "",
   "documentationLink": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/calendar-todo/README.md",
-  "releaseNotes": "v0.7.2: Reduce idle polling work by filtering before recurrence expansion, fast-forwarding old unbounded daily/weekly recurrence rules, and suppressing unchanged events, state writes, and exact-trigger rescheduling.",
+  "releaseNotes": "v0.7.3: Reconcile recurring overrides and cancellations before title filtering; preserve old COUNT rules and skip invalid month-end/leap-day dates.",
   "drivers": [
     {
       "id": "a83e673e-f437-4c04-a51d-0fe8535b9443",
@@ -14,7 +14,7 @@
       "namespace": "mads",
       "location": "https://raw.githubusercontent.com/madskristensen/hubitat-drivers/main/drivers/calendar-todo/calendar-todo.groovy",
       "required": true,
-      "version": "0.7.2"
+      "version": "0.7.3"
     }
   ]
 }

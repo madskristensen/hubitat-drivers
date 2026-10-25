@@ -311,6 +311,20 @@ The SunStat thermostat normally runs on a **programmed daily schedule** (e.g., 6
 
 ## Boost
 
+### Reliability update — parent 0.1.13 / child 0.1.12 (2026-10-25)
+
+Install **both updated drivers**. The parent now reports actual PATCH completion to the child, including HTTP, authentication, transport, and API-envelope failures.
+
+Temperature commands convert hub units to the thermostat's API units before API-step rounding and API-bound clamping. Floor away values remain in their original API units. Commands wait for a successful state poll to establish the API unit; run Refresh if a temperature command reports unknown units.
+
+Boost cancellation/expiry retains its saved setpoint and schedule state until the restoration PATCH succeeds. Failures retry after 60 seconds; missing callbacks have a 240-second watchdog. Pending restoration survives initialization/reboot and blocks a new boost. Immediate cancellation waits for activation completion so a late activation cannot overtake restoration. Keep Hubitat powered and connected: driver-managed boost cannot restore the thermostat while the hub/cloud is unavailable.
+
+Only a schedule confirmed enabled before boost is suppressed, and its prior state is restored. A disabled or unknown schedule is left untouched. Legacy active boosts without a saved schedule state do not guess whether to enable scheduling.
+
+Home/away commands now display confirmed state, not an optimistic success. Failed commands remain retryable, including the one-time authentication retry.
+
+Offline executable regressions load all production sources; see `tests\integration-drivers\README.md` at the repository root.
+
 `setBoost(minutes)` temporarily raises the heating setpoint by a configurable delta and then automatically restores the previous setpoint when the timer expires.
 
 > **Note: This is a driver-managed pseudo-boost.** The Watts Home API does not expose a native boost endpoint (confirmed via full reverse-engineering of the API surface — no `Boost`, `BoostMinutes`, `BoostUntil`, or `BoostExpiration` field exists). Boost is implemented entirely in driver state using Hubitat's `runIn` timer.
@@ -318,15 +332,15 @@ The SunStat thermostat normally runs on a **programmed daily schedule** (e.g., 6
 ### How it works
 
 1. Saves the current `heatingSetpoint` to `state.preBoostSetpoint`
-2. Sends `PATCH /Device/{id}` with `{ Heat: <current + boostDelta> }` (clamped to the device's maximum setpoint)
-3. Optionally sends `PATCH /Device/{id}` with `{ SchedEnable: "Off" }` if **Suppress schedule during boost** is enabled
+2. Converts the boosted target into API units, then rounds and clamps it to the device's step and bounds
+3. Sends one PATCH containing `Heat` and, when suppressing a previously enabled schedule, `SchedEnable: "Off"`
 4. Schedules `boostExpired()` via `runIn(minutes * 60, ...)` to auto-restore
 5. Emits `boostActive = "on"` and `boostUntil = <ISO timestamp>` for dashboards
 
 On expiry (or manual `cancelBoost()`):
 - Restores the saved setpoint
-- Re-enables the schedule if it was suppressed
-- Clears `boostActive` and `boostUntil`
+- Restores the prior schedule if the driver suppressed it
+- Clears `boostActive` and `boostUntil` only after the restoration PATCH is acknowledged; failures remain pending and retry
 
 ### Boost preferences
 
@@ -334,7 +348,7 @@ On expiry (or manual `cancelBoost()`):
 |---|---|---|
 | **Boost delta** | `5` | °F or °C above current setpoint. Set to `3` for metric hubs. |
 | **Default boost duration** | `30 min` | Used when `setBoost()` is called without an argument (e.g., from a dashboard tile or voice command). |
-| **Suppress schedule during boost** | `true` | Recommended — without this, the next scheduled period overrides the boosted setpoint. |
+| **Suppress schedule during boost** | `true` | Suppresses a schedule confirmed enabled before boost, then restores its prior state. Disabled/unknown schedules are untouched. |
 
 ### Hub-restart recovery
 

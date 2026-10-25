@@ -1,7 +1,7 @@
 /**
  *  Philio PST02 Multi-Sensor (PST02-A/B/C) — Hubitat Fork
  *  Author:  Mads Kristensen
- *  Version: 1.4.1 — 2026-05-19
+ *  Version: 1.4.2 — 2026-10-25
  *  License: Apache-2.0
  *
  *  Fork of kunPet/Denny Page "Philio PST02" Hubitat driver.
@@ -11,6 +11,7 @@
  *  Hubitat best-practice hardening.
  *
  *  Changelog:
+ *    1.4.2 — 2026-10-25 — Dispatch scheduled synchronization explicitly; preserve zero-valued settings; handle bundled reports; correct tamper clear enum.
  *    1.4.1 — 2026-05-19 — Fix temperature unit mismatch on some PST02 devices by deriving report unit from SensorMultilevel scale (0=C, 1=F) instead of p5TempScale preference.
  *    1.4.0 — 2026-05-19 — Add missing commandClassVersions map (was null, causing Z-Wave parse without version hints); add P21 prefix to temperatureDifferential label; auto-set pendingResync in updated() so preference changes sync on next wakeup without requiring a manual Configure press.
  *    1.3.0 — 2026-05-19 — Fix temperature bug: P5 bit 3 temperature scale logic was inverted (setBit used "== c" should be "== f"), causing device to run in Fahrenheit mode when Celsius was selected. Fix unit detection in SensorMultilevelReport: PST02 always sends cmd.scale=0 regardless of P5 setting, so unit is now derived from p5TempScale preference instead of cmd.scale.
@@ -231,9 +232,6 @@ def deviceSync()
     boolean resync = state.pendingResync as boolean
     boolean refresh = state.pendingRefresh as boolean
 
-    state.pendingResync = false
-    state.pendingRefresh = false
-
     if (logEnable) log.debug "deviceSync: pendingResync ${resync}, pendingRefresh ${refresh}"
 
     List cmds = []
@@ -266,7 +264,7 @@ def deviceSync()
         cmds.add(zwaveSecureEncap(zwave.configurationV1.configurationGet(parameterNumber: 7)))
     }
 
-    value = pirInterval ? pirInterval.toInteger() : 12	// Para 8
+    value = pirInterval != null ? pirInterval.toInteger() : 12	// Para 8
     if (resync || state.pirInterval != value)
     {
         log.warn "Updating device pirInterval: ${value}"
@@ -274,7 +272,7 @@ def deviceSync()
         cmds.add(zwaveSecureEncap(zwave.configurationV1.configurationGet(parameterNumber: 8)))
     }
 
-    value = batteryInterval ? batteryInterval.toInteger() : 12	//Para 10
+    value = batteryInterval != null ? batteryInterval.toInteger() : 12	//Para 10
     if (resync || state.batteryInterval != value)
     {
         log.warn "Updating device batteryInterval: ${value}"
@@ -282,7 +280,7 @@ def deviceSync()
         cmds.add(zwaveSecureEncap(zwave.configurationV1.configurationGet(parameterNumber: 10)))
     }
 
-    value = doorInterval ? doorInterval.toInteger() : 12	//Para 11
+    value = doorInterval != null ? doorInterval.toInteger() : 12	//Para 11
     if (resync || state.doorInterval != value)
     {
         log.warn "Updating device doorInterval: ${value}"
@@ -290,7 +288,7 @@ def deviceSync()
         cmds.add(zwaveSecureEncap(zwave.configurationV1.configurationGet(parameterNumber: 11)))
     }
     
-    value = luxInterval ? luxInterval.toInteger() : 12	//Para 12
+    value = luxInterval != null ? luxInterval.toInteger() : 12	//Para 12
     if (resync || state.luxInterval != value)
     {
         log.warn "Updating device luxInterval: ${value}"
@@ -298,7 +296,7 @@ def deviceSync()
         cmds.add(zwaveSecureEncap(zwave.configurationV1.configurationGet(parameterNumber: 12)))
     }
 
-    value = temperatureInterval ? temperatureInterval.toInteger() : 2	//Para 13
+    value = temperatureInterval != null ? temperatureInterval.toInteger() : 2	//Para 13
     if (resync || state.temperatureInterval != value)
     {
         log.warn "Updating device temperatureInterval: ${value}"
@@ -322,7 +320,7 @@ def deviceSync()
 //        cmds.add(zwaveSecureEncap(zwave.configurationV1.configurationGet(parameterNumber: 15)))
 //	}
 
-    value = tickInterval ? tickInterval.toInteger() : 30	//Para 20
+    value = tickInterval != null ? tickInterval.toInteger() : 30	//Para 20
     if (resync || state.tickInterval != value)
     {
         log.warn "Updating device tickInterval: ${value}"
@@ -330,7 +328,7 @@ def deviceSync()
         cmds.add(zwaveSecureEncap(zwave.configurationV1.configurationGet(parameterNumber: 20)))
     }
 
-    value = temperatureDifferential ? temperatureDifferential.toInteger() : 3	//Para 21
+    value = temperatureDifferential != null ? temperatureDifferential.toInteger() : 3	//Para 21
     if (resync || state.temperatureDifferential != value)
     {
         log.warn "Updating device temperatureDifferential: ${value}"
@@ -383,7 +381,9 @@ def deviceSync()
     }
 		
     cmds.add(zwaveSecureEncap(zwave.wakeUpV2.wakeUpNoMoreInformation()))
-    delayBetween(cmds, 250)
+    sendHubCommand(new hubitat.device.HubMultiAction(delayBetween(cmds, 250), hubitat.device.Protocol.ZWAVE))
+    state.pendingResync = false
+    state.pendingRefresh = false
 }
 
 void logsOff()
@@ -396,8 +396,8 @@ void installed()
 {
     state.pendingResync = true
     state.pendingRefresh = true
-    runIn(1, deviceSync)
-    runIn(1800, logsOff)
+    runIn(1, "deviceSync")
+    runIn(1800, "logsOff")
 }
 
 void updated()
@@ -737,7 +737,7 @@ def zwaveEvent(hubitat.zwave.commands.sensorbinaryv2.SensorBinaryReport cmd)
             if (cmd.sensorValue.toInteger() > 0 ) {
                 map.value = "detected"
             } else {
-                map.value = "cleared"
+                map.value = "clear"
             }
             map.descriptionText = "tamper value ${map.value}"
             break
@@ -837,7 +837,7 @@ def zwaveEvent(hubitat.zwave.commands.wakeupv2.WakeUpIntervalReport cmd)
 def zwaveEvent(hubitat.zwave.commands.wakeupv2.WakeUpNotification cmd)
 {
     if (logEnable) log.debug "${device.displayName}: Received WakeUpNotification"
-    runInMillis(200, deviceSync)
+    runInMillis(200, "deviceSync")
 }
 
 void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd)
@@ -850,7 +850,7 @@ void zwaveEvent(hubitat.zwave.commands.versionv2.VersionReport cmd)
 
 def zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd)
 {
-    def encapCmd = cmd.encapsulatedCommand()
+    def encapCmd = cmd.encapsulatedCommand(commandClassVersions)
     if (encapCmd)
     {
         return zwaveEvent(encapCmd)
@@ -858,6 +858,13 @@ def zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cm
 
     log.warn "Unable to extract encapsulated cmd: ${cmd.toString()}"
     return null
+}
+
+def zwaveEvent(hubitat.zwave.commands.multicmdv1.MultiCmdEncap cmd)
+{
+    cmd.encapsulatedCommands(commandClassVersions).each { encapsulated ->
+        zwaveEvent(encapsulated)
+    }
 }
 
 def zwaveEvent(hubitat.zwave.Command cmd)

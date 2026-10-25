@@ -48,11 +48,16 @@ Z-Wave thermostat driver for the Honeywell T6 Pro (model TH6320ZW2003). Supports
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 0.5.1 | 2026-10-25 | Convert incoming temperatures and setpoints to the hub's temperature scale; preserve fractional setpoints with one-decimal outgoing precision; synchronize the clock using the hub timezone and standard Z-Wave weekdays (Monday=1, Sunday=7). |
 | 0.5.0 | 2026-05-18 | Replace `runEvery3Hours("syncClock")` with `schedule("0 0 4 * * ?", "syncClock")` in `configure()`, `updated()`, and `initialize()` — 24× fewer Z-Wave frames, DST handled within 24h. Remove `command "syncClock"` declaration (dead UI; auto-sync covers all cases; pressing **Configure** still triggers immediate sync via `runIn(10,"syncClock")`). |
 | 0.4.0 | 2026-05-18 | Add `descriptionText` to `thermostatOperatingState`, `thermostatFanMode`, `thermostatMode` event handlers (Pick #1);change `thermostatFanState` attribute type from `"string"` to `"enum"` with 8 values matching Z-Wave Notification Fan State CC (Pick #2); add Notification type 9 (System) handler stub with `log.warn` for hardware/software fault events (Pick #3). |
 | 0.3.0 | 2026-05-18 | Emit `thermostatFanState` attribute from `ThermostatFanStateReport` (Pick #1); handle battery-low notification events 10/11 with `log.warn` + `sendEvent` for `battery` (Pick #2); fix `CMD_CLASS_VERS` octal bug `043` → `0x43` for Thermostat Setpoint CC (Pick #3). |
 | 0.2.0 | 2026-05-18 | Polish pass (Trinity backlog C1–C5): add `descriptionText` to temperature and humidity events (C1); BigDecimal equality in `eventProcess()` to prevent `68` vs `68.0` false events (C2); remove dead `configurationGet(parameterNumber: 52)` saving 2 Z-Wave frames per fan-state event (C3); add `descriptionText` to `supportedThermostatModes` and `supportedThermostatFanModes` sendEvents (C4); remove redundant `runIn(10,"syncClock")` from `refresh()` (C5). Namespace switched to `mads`. Added `Initialize` capability. |
 | 0.1.0 | 2026-05-18 | Initial fork. Apply Trinity audit fixes: add `txtEnable` preference (BLOCKER), fix `device.currentValue("thermostatOperatingState")` in two locations (MAJOR), add `unschedule("syncClock")` in `configure()` (MAJOR). |
+
+## Reliability validation
+
+Local Groovy regression tests load the production source with Hubitat doubles and cover cross-scale reports, decimal setpoints, and all seven weekday mappings. They do not validate device firmware or Z-Wave serialization. Test entry point: `tests\device-drivers\local-reliability\ReliabilityTest.groovy` (run from the repository root).
 
 ## Attribution
 

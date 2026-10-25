@@ -4,11 +4,17 @@
 **Test Target:** Gemstone cloud REST API  
 **Platform:** Hubitat C-7 / C-8  
 **Created:** 2026-05-16  
-**Last Updated:** 2026-05-16T21:44:01-07:00  
+**Last Updated:** 2026-10-25
 
 ---
 
 ## Prerequisites
+
+### Offline reliability regressions (v0.4.23)
+
+Run `tests\integration-drivers\IntegrationDriversTest.groovy` from the repository root as described in that directory's README. It compiles the actual source and verifies zero saturation/level, CT brightness changes at unchanged Kelvin, successful cached fallback, and bounded failure for uncached effects. No network/device access is used.
+
+For later hardware verification: send `setColor` with numeric saturation `0`, then level `0`; confirm white then off. Change only brightness in two same-Kelvin commands; verify both changes reach the lights. During a catalog outage, request an uncached favorite and confirm it logs failure once without a refetch loop; cached selections should remain usable. These hardware checks were not executed for this release.
 
 Before running any test:
 

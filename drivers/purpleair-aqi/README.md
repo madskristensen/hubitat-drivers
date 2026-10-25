@@ -1,5 +1,11 @@
 # PurpleAir AQI Virtual Sensor
 
+## 0.4.2 — 2026-10-25
+
+Use current EPA PM2.5 AQI breakpoints and extrapolate the hazardous slope above 325.4 ug/m3.
+
+PM2.5 concentration is truncated to one decimal before AQI conversion. The current [official AirNow calculator](https://www.airnow.gov/sites/default/files/custom-js/conc-aqi.js) uses concentration ranges 0–9.0, 9.1–35.4, 35.5–55.4, 55.5–125.4, 125.5–225.4, and 225.5–325.4 µg/m³ for AQI 0–50, 51–100, 101–150, 151–200, 201–300, and 301–500 respectively. Values above 325.4 continue along the hazardous slope (AQI may exceed 500). Sensor correction formulas are unchanged.
+
 Reads AQI data from the [PurpleAir cloud API](https://api.purpleair.com/) using your API key. Supports geolocation-based multi-sensor averaging (uses nearby sensors automatically) or a specific sensor index. Implements US EPA Barkjohn 2021 AQI correction for wildfire smoke accuracy during wildfire season.
 
 ## Capabilities

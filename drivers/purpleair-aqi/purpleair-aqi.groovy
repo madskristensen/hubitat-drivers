@@ -1,7 +1,7 @@
 /**
  *  PurpleAir AQI Virtual Sensor
  *  Author:  Mads Kristensen
- *  Version: 0.4.1 — 2026-05-22 — BUG FIXES: weighted-avg silently dropped sensors with missing position_rating; humidity history bucketed by 12-hour clock (AM/PM collisions); stray double-plus typo in geo-search bbox; one-time HUMIDITY_HISTORY migration to clear stale 12-hour buckets
+ *  Version: 0.4.2 — 2026-10-25 — Use current EPA PM2.5 AQI breakpoints and extrapolate the hazardous slope above 325.4 ug/m3.
  *  License: MIT
  *
  *  Reads AQI data from the PurpleAir cloud API (api.purpleair.com/v1/sensors).
@@ -15,6 +15,7 @@
  *  permanent driver in this repo, not a staging area.
  *
  *  Changelog:
+ *    0.4.2 — 2026-10-25 — Use current EPA PM2.5 AQI breakpoints and extrapolate the hazardous slope above 325.4 ug/m3.
  *    0.4.1 — 2026-05-22 — BUG FIXES: weighted-avg silently dropped sensors with missing position_rating; humidity history bucketed by 12-hour clock (AM/PM collisions); stray double-plus typo in geo-search bbox; one-time HUMIDITY_HISTORY migration to clear stale 12-hour buckets
  *    0.4.0 — 2026-05-18 — BUG FIXES: failCount string-multiplication, disabled-poll retry storm, lat/lng degree math, weighted-avg NaN at distance=0; POLISH: refresh-on-save, canonical async error handling, AirQuality capability, runEvery schedules, hub temp scale, cleaner sites/AQI units
  *    0.3.0 — 2026-05-18 — Added pm2_5, temperature, humidity, and confidence attributes; parseJson guard for blank search_coords + empty API bodies; API key help now points to develop.purpleair.com
@@ -33,7 +34,7 @@
 
 import groovy.transform.Field
 
-@Field static final String DRIVER_VERSION = "0.4.1"
+@Field static final String DRIVER_VERSION = "0.4.2"
 
 metadata {
 	definition (
@@ -553,26 +554,17 @@ Float sensorAverageWeighted(List<Map> sensors, String field, Float[] coords) {
 // getAQI and AQILinear functions from https://www.airnow.gov/aqi/aqi-calculator
 // (https://www.airnow.gov/sites/default/files/custom-js/conc-aqi.js)
 Integer getPart2_5_AQI(Float partCount) {
-	Float c = Math.floor(10*partCount)/10
-	if ( c >= 0 && c < 12.1 ) {
-		return AQILinear(50,0,12,0,c)
-	} else if ( c >= 12.1 && c < 35.5 ) {
-		return AQILinear(100,51,35.4,12.1,c)
-	} else if ( c >= 35.5 && c < 55.5 ) {
-		return AQILinear(150,101,55.4,35.5,c)
-	} else if ( c >= 55.5 && c < 150.5 ) {
-		return AQILinear(200,151,150.4,55.5,c)
-	} else if ( c >= 150.5 && c < 250.5 ) {
-		return AQILinear(300,201,250.4,150.5,c)
-	} else if ( c >= 250.5 && c < 350.5 ) {
-		return AQILinear(400,301,350.4,250.5,c)
-	} else if ( c >= 350.5 && c < 500.5 ) {
-		return AQILinear(500,401,500.4,350.5,c)
-	} else if ( c >= 500.5 ) {
-		return Math.round(c)
-	} else {
-		return -1
-	}
+	if (partCount == null || partCount.isNaN() || partCount.isInfinite()) return -1
+	// Decimal text avoids Float boundary noise before EPA's one-decimal truncation.
+	BigDecimal c = new BigDecimal(partCount.toString()).setScale(1, java.math.RoundingMode.FLOOR)
+	if (c < 0) return -1
+	if (c <= 9.0) return AQILinear(50, 0, 9.0, 0, c)
+	if (c <= 35.4) return AQILinear(100, 51, 35.4, 9.1, c)
+	if (c <= 55.4) return AQILinear(150, 101, 55.4, 35.5, c)
+	if (c <= 125.4) return AQILinear(200, 151, 125.4, 55.5, c)
+	if (c <= 225.4) return AQILinear(300, 201, 225.4, 125.5, c)
+	// AirNow extrapolates the same hazardous slope above 325.4 (AQI 500).
+	return AQILinear(500, 301, 325.4, 225.5, c)
 }
 
 Integer getPart10_AQI(Float partCount) {

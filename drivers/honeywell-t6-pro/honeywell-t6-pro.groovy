@@ -1,7 +1,7 @@
 /**
  *  Honeywell T6 Pro Thermostat (Hubitat) — Fork
  *  Author:  Mads Kristensen
- *  Version: 0.5.0 — 2026-05-18
+ *  Version: 0.5.1 — 2026-10-25
  *  License: MIT
  *
  *  Fork of djdizzyd/hubitat "Advanced Honeywell T6 Pro Thermostat" (Bryan Copeland).
@@ -9,6 +9,7 @@
  *  Forked because: maintainer silent 4+ years; BLOCKER + MAJOR bugs affecting live devices.
  *
  *  Changelog:
+ *    0.5.1 — 2026-10-25 — Normalize incoming temperatures to hub scale, preserve decimal setpoints, and map Java weekdays to Z-Wave Clock encoding.
  *    0.5.0 — 2026-05-18 — syncClock UX: replace every-3-hours auto-schedule with daily 4am cron (24x fewer Z-Wave frames; DST handled within 24h); remove manual syncClock command (dead UI — auto-sync covers all cases; hitting Configure still triggers immediate sync via existing runIn).
  *    0.4.0 — 2026-05-18 — Add descriptionText to thermostatOperatingState, thermostatFanMode, thermostatMode events (Pick #1); change thermostatFanState attribute type from "string" to "enum" with 8 values (Pick #2); add Notification type 9 (System) handler stub with log.warn for hardware/software faults (Pick #3).
  *    0.3.0 — 2026-05-18 — Emit thermostatFanState attribute from ThermostatFanStateReport (Pick #1); handle battery-low notification events 10/11 with log.warn + battery sendEvent (Pick #2); fix CMD_CLASS_VERS octal bug 043 → 0x43 for Thermostat Setpoint CC (Pick #3).
@@ -65,7 +66,7 @@ metadata {
 }
 
 // FIX NIT: VERSION constant for diagnostics / HPM version matching
-@Field static final String VERSION = "0.5.0"
+@Field static final String VERSION = "0.5.1"
 @Field static Map CMD_CLASS_VERS=[0x71:3, 0x7A:2, 0x81:1, 0x73:1, 0x2B:1, 0x2C:1, 0x85:2, 0x72:1, 0x86:2, 0x8F:1, 0x31:5, 0x70:1, 0x80:1, 0x45:1, 0x44:3, 0x43:2, 0x42:1, 0x40:2, 0x5A:1, 0x59:1, 0x5E:2]
 @Field static Map THERMOSTAT_OPERATING_STATE=[0x00:"idle",0x01:"heating",0x02:"cooling",0x03:"fan only",0x04:"pending heat",0x05:"pending cool",0x06:"vent economizer"]
 @Field static Map THERMOSTAT_MODE=[0x00:"off",0x01:"heat",0x02:"cool",0x03:"auto",0x04:"emergency heat"]
@@ -375,8 +376,9 @@ void refresh() {
 }
 
 void syncClock(){
-    Calendar currentDate = Calendar.getInstance()
-    sendToDevice(zwave.clockV1.clockSet(hour: currentDate.get(Calendar.HOUR_OF_DAY), minute: currentDate.get(Calendar.MINUTE), weekday: currentDate.get(Calendar.DAY_OF_WEEK)))
+    Calendar currentDate = Calendar.getInstance(location.timeZone ?: TimeZone.getDefault())
+    int weekday = ((currentDate.get(Calendar.DAY_OF_WEEK) + 5) % 7) + 1
+    sendToDevice(zwave.clockV1.clockSet(hour: currentDate.get(Calendar.HOUR_OF_DAY), minute: currentDate.get(Calendar.MINUTE), weekday: weekday))
 }
 
 void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
@@ -508,10 +510,12 @@ void zwaveEvent(hubitat.zwave.commands.batteryv1.BatteryReport cmd) {
 void zwaveEvent(hubitat.zwave.commands.sensormultilevelv5.SensorMultilevelReport cmd) {
     if (cmd.sensorType.toInteger() == 1) {
         if (logEnable) log.debug "got temp: ${cmd.scaledSensorValue}"
-        String unit = cmd.scale == 1 ? "F" : "C"
-        String descText = "${device.displayName} temperature is ${cmd.scaledSensorValue}°${unit}"
+        String reportUnit = cmd.scale == 1 ? "F" : "C"
+        String unit = getTemperatureScale()
+        def temperature = convertTemperatureIfNeeded(cmd.scaledSensorValue, reportUnit, Math.max(1, cmd.precision as Integer))
+        String descText = "${device.displayName} temperature is ${temperature}°${unit}"
         if (txtEnable) log.info descText
-        eventProcess(name: "temperature", value: cmd.scaledSensorValue, unit: unit, descriptionText: descText)
+        eventProcess(name: "temperature", value: temperature, unit: unit, descriptionText: descText)
     } else if (cmd.sensorType.toInteger() == 5) {
         if (logEnable) log.debug "got humidity: ${cmd.scaledSensorValue}"
         String unit = cmd.scale == 0 ? "%" : "g/m³"
@@ -540,23 +544,23 @@ void setpointCalc(String newmode, String unit, value) {
         mode=state.lastMode
     }
     if (newmode==mode) {
-        eventProcess(name: "thermostatSetpoint", value: Math.round(value), unit: unit, type: state.isDigital?"digital":"physical")
+        eventProcess(name: "thermostatSetpoint", value: value, unit: unit, type: state.isDigital?"digital":"physical")
     }
 }
 
 void zwaveEvent(hubitat.zwave.commands.thermostatsetpointv2.ThermostatSetpointReport cmd) {
     if (logEnable) log.debug "Got thermostat setpoint report: ${cmd}"
-    if (device.currentValue("thermostatMode")=="heat") mode="heat"
-    if (device.currentValue("thermostatMode")=="cool") mode="cool"
-    String unit=cmd.scale == 1 ? "F" : "C"
+    String reportUnit = cmd.scale == 1 ? "F" : "C"
+    String unit = getTemperatureScale()
+    def setpoint = convertTemperatureIfNeeded(cmd.scaledValue, reportUnit, Math.max(1, cmd.precision as Integer))
     switch (cmd.setpointType) {
         case 1:
-            eventProcess(name: "heatingSetpoint", value: Math.round(cmd.scaledValue), unit: unit, type: state.isDigital?"digital":"physical")
-            setpointCalc("heat", unit, cmd.scaledValue)
+            eventProcess(name: "heatingSetpoint", value: setpoint, unit: unit, type: state.isDigital?"digital":"physical")
+            setpointCalc("heat", unit, setpoint)
             break
         case 2:
-            eventProcess(name: "coolingSetpoint", value: Math.round(cmd.scaledValue), unit: unit, type: state.isDigital?"digital":"physical")
-            setpointCalc("cool", unit, cmd.scaledValue)
+            eventProcess(name: "coolingSetpoint", value: setpoint, unit: unit, type: state.isDigital?"digital":"physical")
+            setpointCalc("cool", unit, setpoint)
             break
     }
     state.isDigital=false
@@ -622,7 +626,7 @@ void zwaveEvent(hubitat.zwave.commands.basicv1.BasicSet cmd) {
 
 private void setSetpoint(setPointType, value) {
     List<hubitat.zwave.Command> cmds=[]
-    cmds.add(zwave.thermostatSetpointV2.thermostatSetpointSet(setpointType: setPointType, scale: getTemperatureScale()=="F" ? 1:0 , precision: 0, scaledValue: value))
+    cmds.add(zwave.thermostatSetpointV2.thermostatSetpointSet(setpointType: setPointType, scale: getTemperatureScale()=="F" ? 1:0 , precision: 1, scaledValue: value.toBigDecimal().setScale(1, BigDecimal.ROUND_HALF_UP)))
     cmds.add(zwave.thermostatSetpointV2.thermostatSetpointGet(setpointType: setPointType))
     state.isDigital=true
     sendToDevice(cmds)

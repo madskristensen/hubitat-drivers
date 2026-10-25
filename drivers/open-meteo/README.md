@@ -1,5 +1,11 @@
 # Open-Meteo Weather Enhanced
 
+## 0.1.6 — 2026-10-25
+
+Weight precipitation by actual next-hour overlap, cover all next-six-hour probability buckets, and reject incomplete forecasts without updating freshness.
+
+Open-Meteo labels hourly precipitation totals and probabilities by the **end of the preceding hour**. Next-hour precipitation is an overlap-weighted estimate (uniform precipitation within each hourly bucket), not the sum of two full hours. Probability helpers take the maximum of every bucket overlapping the next 60 minutes or six hours from `current.time`; they are not combined probabilities. Required current values, hourly series/window coverage, and both forecast days must be present before any weather data or `lastUpdated` is published. Incomplete responses set `status` to an error and preserve the last successful readings.
+
 Free Hubitat weather driver backed by [open-meteo.com](https://open-meteo.com) — **no API key required**.
 
 > **Note:** Hubitat ships a built-in "Open-Meteo" driver. This one is named **Open-Meteo Weather Enhanced** to avoid a name clash, and exposes additional attributes (next-hour / next-6h precipitation probability, today's high/low, hourly forecast JSON) that the built-in driver does not provide.

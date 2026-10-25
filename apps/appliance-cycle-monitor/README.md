@@ -32,6 +32,8 @@ Readings **between** the two values hold the current state. This deadband absorb
 
 When the source drops into the "finished" range, the app waits a configurable **debounce** ("quiet minutes") before declaring the cycle `Finished`. This stops a mid-cycle pause (a dishwasher between phases, a washer mid-spin lull) from flipping the status prematurely.
 
+A finish delay of `0` completes on the next scheduler tick (about one second), not the default three-minute delay. Saving preferences preserves and rearms pending finish, sustained-vibration, and door-open deadlines.
+
 ### Sustained vibration (acceleration source)
 
 Vibration sensors can twitch from a door bump or a passing footstep. To avoid false starts, an acceleration-based appliance only becomes `Running` once the sensor has stayed `active` for a configurable number of **sustained minutes**. If the vibration stops before that window elapses, the pending start is cancelled. Set it to `0` to treat any `active` reading as an immediate start.

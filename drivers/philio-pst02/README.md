@@ -13,6 +13,8 @@ This fork keeps proven device behavior but adds a guided preference model that c
 2. **Variant-aware handling:** Auto-detects PST02-B vs PST02-A/C and applies only relevant bit options.
 3. **Advanced raw mode:** Still available for power users who want explicit numeric values.
 4. **HA/Z-Wave JS aligned labels:** Guided options use the same parameter naming model used by modern Z-Wave JS device configs.
+5. **Wakeup-safe dispatch:** Scheduled synchronization explicitly submits queued commands, including the sleep command. Pending flags remain set if command submission throws.
+6. **Reporting controls:** Zero-valued intervals/differentials remain zero; bundled Multi Command reports are unpacked and binary tamper recovery emits the standard `clear` value.
 
 ## Install
 
@@ -34,9 +36,14 @@ Then assign the device driver type:
 
 | Version | Date       | Notes |
 |---------|------------|-------|
+| 1.4.2   | 2026-10-25 | Explicitly dispatch scheduled wakeup commands; preserve zero-valued settings; unpack bundled reports with command-class versions; correct automatic tamper-clear events. |
 | 1.4.1   | 2026-05-19 | Fix temperature unit mismatch on some PST02 devices by deriving incoming report unit from SensorMultilevel scale (0=C, 1=F) instead of p5TempScale preference. |
 | 1.4.0   | 2026-05-19 | Add missing `commandClassVersions` map (was null — Z-Wave frames were parsed without version hints); add P21 prefix to temperatureDifferential label; auto-set pendingResync in updated() so preference changes sync on next wakeup without a manual Configure press. |
 | 1.3.0   | 2026-05-19 | Fix temperature conversion bug: P5 bit 3 temperature scale logic was inverted (device ran in Fahrenheit mode even when Celsius was selected), causing readings like 149°F instead of 63°F. Unit detection no longer relies on cmd.scale since PST02 always sends 0 regardless. |
 | 1.2.0   | 2026-05-19 | Performance: eliminate implicit globals, typed returns, cache isPst02BVariant(), remove redundant configurationGet(12), reduce map allocations. |
 | 1.1.0   | 2026-05-19 | Fix implicit global variable in SecurityMessageEncapsulation; remove duplicate case 12 and dangling break in ConfigurationReport; fix log.warn misuse in configure/refresh/updated; guard WakeUpNotification debug log with logEnable; re-enable auto-disable of debug logging after 30 min; remove German upstream comments. |
 | 1.0.0   | 2026-05-19 | Initial Mads fork with guided parameter 5/6/7 UX, variant-aware bitmask calculation, and optional advanced raw override. |
+
+## Reliability validation
+
+Local Groovy regression tests load this production source with Hubitat doubles and exercise scheduled dispatch, submission failures, zero settings, and security-wrapped bundled reports. The Multi Command API follows the same `encapsulatedCommands(versionMap)` pattern used by this repository's Honeywell driver. Actual encapsulation support, firmware reporting choices, and radio delivery have not been hardware-tested. Test entry point: `tests\device-drivers\local-reliability\ReliabilityTest.groovy` (run from the repository root).
